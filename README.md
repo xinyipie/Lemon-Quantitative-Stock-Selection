@@ -20,6 +20,7 @@ stock/
 ├── config.py                  # 实盘默认配置与 API 配置入口
 ├── batch_backtest.py          # 批量回测入口
 ├── analyze_trades.py          # 交易结果分析
+├── trade_diagnostics.py       # 选股因子质量诊断报告
 ├── exit_attribution.py        # 卖点归因分析
 ├── ic_analysis.py             # IC 分析工具
 ├── data_downloader.py         # 离线数据下载
@@ -86,6 +87,12 @@ python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline --
 
 ```bash
 python exit_attribution.py --trades backtest_results/trades_xxx.csv
+```
+
+对已有交易结果做选股因子质量诊断：
+
+```bash
+python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 ```
 
 ## 常用实验命令
