@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from trade_diagnostics import (
     build_markdown_report,
     compare_winners_losers,
+    explain_in_plain_chinese,
     group_summary,
     load_trades_frame,
     summarize_overall,
@@ -115,10 +116,18 @@ class TradeDiagnosticsTest(unittest.TestCase):
         report = build_markdown_report(self.make_frame(), source="sample.csv", top_n=2)
 
         self.assertIn("# Trade Diagnostics", report)
+        self.assertIn("## 先看结论", report)
         self.assertIn("## Overall", report)
         self.assertIn("## Winners vs Losers", report)
         self.assertIn("## High Score Losers", report)
         self.assertIn("sample.csv", report)
+
+    def test_plain_chinese_summary_explains_report_for_beginners(self):
+        summary = explain_in_plain_chinese(self.make_frame())
+
+        self.assertIn("这份报告想回答", summary)
+        self.assertIn("胜率", summary)
+        self.assertIn("下一步", summary)
 
 
 if __name__ == "__main__":

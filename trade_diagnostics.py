@@ -233,6 +233,47 @@ def format_overall(summary: dict[str, float | int]) -> str:
     return "\n".join(lines)
 
 
+def explain_in_plain_chinese(df: pd.DataFrame) -> str:
+    trades = load_trades_frame(df)
+    summary = summarize_overall(trades)
+    factor_gap = compare_winners_losers(trades)
+    score_group = group_summary(trades, "score_bucket")
+    market_group = group_summary(trades, "market_style")
+
+    lines = [
+        "这份报告想回答一个问题：现在的选股规则，到底是在选更容易赚钱的股票，还是只是把股票排了个名？",
+        f"本次一共看了 {summary['trade_count']} 笔交易，胜率 {summary['win_rate_pct']}%，平均每笔 {summary['avg_return_pct']}%，盈亏比 {summary['payoff_ratio']}。",
+    ]
+
+    if not score_group.empty:
+        best_score = score_group.sort_values("avg_return_pct", ascending=False).iloc[0]
+        lines.append(
+            f"按评分分组看，表现最好的是 {best_score['group']}，平均每笔 {best_score['avg_return_pct']}%。"
+            "如果最高分组不是最好，说明总分排序还不够准，下一步不要盲目加大总分权重。"
+        )
+
+    if not factor_gap.empty:
+        useful = factor_gap[~factor_gap["field"].isin(["mfe_pct", "mae_pct", "best_close_pct", "worst_close_pct", "window_end_pct"])]
+        if not useful.empty:
+            top = useful.iloc[0]
+            direction = "赢家更高" if top["diff"] > 0 else "输家更高"
+            lines.append(
+                f"赢家和输家差异最大的可调字段是 {top['field']}，差值 {top['diff']}，表现为{direction}。"
+                "这类字段优先进入下一轮因子实验。"
+            )
+
+    if not market_group.empty and len(market_group) > 1:
+        best_market = market_group.sort_values("avg_return_pct", ascending=False).iloc[0]
+        worst_market = market_group.sort_values("avg_return_pct", ascending=True).iloc[0]
+        lines.append(
+            f"按市场状态看，{best_market['group']} 更顺手，平均每笔 {best_market['avg_return_pct']}%；"
+            f"{worst_market['group']} 更拖累，平均每笔 {worst_market['avg_return_pct']}%。"
+        )
+
+    lines.append("下一步建议：先调选股因子和市场状态过滤，不急着改卖点；重点减少“高分但亏钱”的票。")
+    return "\n".join(f"- {line}" for line in lines)
+
+
 def build_markdown_report(df: pd.DataFrame, source: str = "", top_n: int = 10) -> str:
     trades = load_trades_frame(df)
     sections = [
@@ -240,6 +281,9 @@ def build_markdown_report(df: pd.DataFrame, source: str = "", top_n: int = 10) -
         "",
         f"- Source: {source or 'in-memory dataframe'}",
         f"- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "## 先看结论",
+        explain_in_plain_chinese(trades),
         "",
         "## Overall",
         format_overall(summarize_overall(trades)),
