@@ -1,0 +1,42 @@
+{
+  "version": "2.9.1",
+  "release_date": "2026-04-05",
+  "status": "stable",
+  "python_required": ">=3.8",
+  "dependencies": {
+    "tushare": ">=1.4.0",
+    "pandas": ">=2.0.0",
+    "requests": ">=2.28.0"
+  },
+  "features": {
+    "short_term_strategy": "1-3天超短线吸筹策略",
+    "long_term_strategy": "1-8周波段缩量回踩策略",
+    "ai_analysis": "通义千问AI深度分析（支持多模型切换）",
+    "market_timing": "三维择时：技术面+情绪面（涨跌停比）+新闻面",
+    "sector_resonance": "申万一级行业板块共振过滤（MA10站上）",
+    "sector_rotation": "板块轮动热度追踪（0-100分）",
+    "batch_analysis": "批量个股深度分析（支持watchlist.txt）",
+    "backtest": "完整回测框架v2（无未来函数，含交易成本）"
+  },
+  "fixes_v2_9_1": [
+    "修复评分公式BUG：板块热度/技术形态/逆势抗跌权重单位换算错误，导致板块热度实际100分、技术形态实际0分",
+    "删除未被调用的 get_batch_volume_ratio() 废弃函数",
+    "消除全市场日线数据重复拉取3次：check_market_risk/get_market_sentiment 复用 get_all_stocks 已拉取的数据",
+    "修复营收增长率：从环比改为真正的同期同比（按 end_date 年份-1 匹配上年同期）",
+    "修复止损价：从固定5% 改为基于技术支撑位（MA5/MA10/MA20/MA60）动态计算，结合波动率留缓冲",
+    "统一成交额过滤阈值：config.py 新增 MIN_STOCK_AMOUNT_SHORT，select_stock_pool 改用配置参数",
+    "优化 analyze_batch_stocks：改为批量请求代替逐股循环，大幅减少耗时",
+    "修复波段选股排序：移除永远为True的 vol_shrinking 无效排序字段",
+    "修复回测净值曲线时序：改为按平仓日更新净值，夏普/最大回撤计算更准确",
+    "修复 ai_prompts.py 二次 format 隐患：改用 str.replace 注入 _PRICE_RULES，避免 KeyError"
+  ],
+  "known_issues": [
+    "AI未稳定输出 dynamic_stop_loss_pct 和 dynamic_take_profit_pct 字段（Prompt复杂度限制）",
+    "部分股票营收增长数据缺失（财报未更新或Tushare未收录）"
+  ],
+  "roadmap": [
+    "支持更多技术指标（MACD、KDJ等）",
+    "增加实时行情支持",
+    "Web界面"
+  ]
+}

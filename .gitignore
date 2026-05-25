@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Secrets and local settings
+.env
+.claude/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local data and generated reports
+data/
+logs/
+reports/
+backtest_results/
+
+# Experiment outputs
+*.log
+event_study_result.json
+test_result*.json
+
+# Temporary and backup files
+*.tmp
+*.bak
+*.orig
+
+# Local debug / one-off scripts
+debug_*.py
+inspect_*.py
+test_timing.py
+cleanup.py
+cleanup.bat
+意见.txt
+
+# Local assistant files
+.claudeignore
+CLAUDE.md
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
