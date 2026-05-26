@@ -1095,3 +1095,58 @@ python test.py --scenario profile_v4_adaptive_quality,profile_v6_adaptive_qualit
 
 - `profile_v6` 不进入可运行场景，也不跑 2025 全年。
 - 这个方向说明：不要直接重写总分权重；下一步更适合做“高分风险票过滤/降级”，只处理极端坏样本，避免破坏整体排序。
+
+## 2026-05-26 选股门控实验：adaptive_quality_v2
+
+### 假设
+
+`profile_v6` 失败说明不能直接重写总分权重。改用更保守的方式：保留 `profile_v4` 的排序，只在 `adaptive_quality` 门控后，额外剔除“实验分很高但风险特征明显”的候选。
+
+风险特征：
+
+- 形态质量（`factor_pattern`）偏弱；
+- 距高点回撤（`drawdown_from_high`）偏深；
+- 同时回撤位置得分（`factor_drawdown`）、板块位置/热度（`factor_sector`）或量比（`volume_ratio`）显示风险。
+
+### 调试发现
+
+第一版 `adaptive_quality_v2` 在 Q1 和 2025 全年结果完全不变。排查后发现不是场景没跑，而是门控判断“高分风险票”时使用了原始 `score`，而回测排序使用的是 `experiment_score`。
+
+典型漏过滤样本：
+
+| 股票 | 日期 | 原始总分 | profile_v4实验分 | 形态质量 | 回撤位置得分 | 距高点回撤 | 收益 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 国轩高科（002074.SZ） | 20250718 | 55.19 | 79.84 | 43.33 | 100.00 | 9.50 | -4.88% |
+
+修复：`adaptive_quality_v2` 优先使用 `experiment_score` 判断高分风险票，没有该字段时再退回 `score` / `score_base`。
+
+### 验证
+
+命令：
+
+```text
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v2 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_gate_v2_fixed
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v2 --exit-profile baseline --start 20250101 --end 20251231 --label 2025_gate_v2_fixed
+```
+
+结果：
+
+| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | 最大回撤 | Sharpe | 高MFE转亏 | 大回吐 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | 3.84% | +0.458 | 3 | 6 |
+| profile_v4_adaptive_quality_v2 | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | 3.84% | +0.458 | 3 | 6 |
+| profile_v4_adaptive_quality | 2025全年 | 155 | 43.87% | +48.87% | +27.68% | 20.72% | +1.459 | 26 | 36 |
+| profile_v4_adaptive_quality_v2 | 2025全年 | 154 | 44.16% | +51.40% | +30.21% | 20.72% | +1.526 | 26 | 36 |
+
+观察：
+
+- Q1 完全不变，说明新门控没有伤害压力样本。
+- 2025 全年少交易 1 笔，收益从 +48.87% 提升到 +51.40%，Sharpe 从 +1.459 提升到 +1.526。
+- 新门控剔除的实际交易是国轩高科（002074.SZ），该笔 `profit_after_fee=-4.88%`。
+- 最大回撤、高 MFE 转亏、大回吐没有改善，说明本轮只是小幅剔除单笔坏样本，不是系统性风险改进。
+
+结论：
+
+- `adaptive_quality_v2` 是正向小补丁，但样本命中很少。
+- 暂不替换实盘默认配置，先保留为候选实验场景。
+- 下一步继续扩展规则命中诊断，优先找“命中 Top3 且亏损集中、误杀盈利少”的过滤条件。

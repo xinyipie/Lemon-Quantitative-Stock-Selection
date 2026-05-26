@@ -43,6 +43,7 @@ VALID_STYLE_GATES = (
     "weak_only",
     "weak_or_cautious_sideways",
     "adaptive_quality",
+    "adaptive_quality_v2",
 )
 
 
@@ -77,11 +78,13 @@ def apply_style_gate(df: pd.DataFrame, style_gate: str) -> pd.DataFrame:
         mask = style == "weak_momentum"
     elif style_gate == "weak_or_cautious_sideways":
         mask = (style == "weak_momentum") | ((style == "sideways") & (macro == "cautious"))
-    elif style_gate == "adaptive_quality":
+    elif style_gate in ("adaptive_quality", "adaptive_quality_v2"):
         pattern = _num_series(df, "factor_pattern", 50.0)
         sector = _num_series(df, "factor_sector", 50.0)
+        drawdown_score = _num_series(df, "factor_drawdown", 50.0)
         raw_drawdown = _num_series(df, "drawdown_from_high", 0.0)
         raw_volume_ratio = _num_series(df, "volume_ratio", 1.0)
+        score = _num_series(df, "experiment_score", _num_series(df, "score", _num_series(df, "score_base", 0.0)))
 
         low_quality_sideways = (
             (pattern < 45.0)
@@ -92,6 +95,25 @@ def apply_style_gate(df: pd.DataFrame, style_gate: str) -> pd.DataFrame:
         )
         quality_sideways = (style == "sideways") & (macro == "active") & ~low_quality_sideways
         mask = (style == "weak_momentum") | quality_sideways
+
+        if style_gate == "adaptive_quality_v2":
+            high_score_risk = (
+                (score >= 70.0)
+                & (pattern < 55.0)
+                & (raw_drawdown >= 8.0)
+                & (
+                    (drawdown_score >= 88.0)
+                    | (sector >= 55.0)
+                    | (raw_volume_ratio >= 3.2)
+                )
+            )
+            weak_momentum_risk = (
+                (style == "weak_momentum")
+                & (pattern < 52.0)
+                & (sector >= 55.0)
+                & (raw_drawdown >= 9.0)
+            )
+            mask = mask & ~(high_score_risk | weak_momentum_risk)
     else:
         mask = pd.Series(True, index=df.index)
 
