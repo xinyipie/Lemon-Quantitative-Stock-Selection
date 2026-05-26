@@ -10,6 +10,7 @@ from trade_diagnostics import (
     build_markdown_report,
     compare_winners_losers,
     explain_in_plain_chinese,
+    factor_label,
     group_summary,
     load_trades_frame,
     summarize_overall,
@@ -87,9 +88,14 @@ class TradeDiagnosticsTest(unittest.TestCase):
         result = compare_winners_losers(self.make_frame(), ["factor_pattern", "factor_inflow"])
 
         pattern = result[result["field"] == "factor_pattern"].iloc[0]
+        self.assertEqual(pattern["meaning"], "形态质量")
         self.assertAlmostEqual(pattern["winner_avg"], 67.5)
         self.assertAlmostEqual(pattern["loser_avg"], 42.5)
         self.assertAlmostEqual(pattern["diff"], 25.0)
+
+    def test_factor_label_returns_plain_chinese_name(self):
+        self.assertEqual(factor_label("factor_counter_trend"), "反趋势确认")
+        self.assertEqual(factor_label("unknown_field"), "unknown_field")
 
     def test_group_summary_counts_and_win_rate(self):
         result = group_summary(self.make_frame(), "market_style")

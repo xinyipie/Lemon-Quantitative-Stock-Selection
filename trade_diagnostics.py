@@ -18,6 +18,30 @@ import pandas as pd
 
 RETURN_CANDIDATES = ["profit_after_fee", "profit_pct", "return_pct", "pnl_pct", "profit"]
 SCORE_CANDIDATES = ["original_score", "score_base", "short_score", "longterm_score"]
+FACTOR_LABELS = {
+    "original_score": "原始总分",
+    "score_base": "基础总分",
+    "short_score": "短线分数",
+    "longterm_score": "波段分数",
+    "factor_volume_ratio": "量能质量",
+    "factor_drawdown": "回撤位置得分",
+    "factor_inflow": "资金流强度",
+    "factor_turnover": "换手活跃度",
+    "factor_sector": "板块位置/热度",
+    "factor_pattern": "形态质量",
+    "factor_counter_trend": "反趋势确认",
+    "factor_wyckoff": "Wyckoff结构",
+    "factor_accel": "加速度信号",
+    "change": "当日涨跌幅",
+    "volume_ratio": "量比",
+    "drawdown_from_high": "距高点回撤",
+    "turnover": "换手率",
+    "mfe_pct": "持仓期最大浮盈",
+    "mae_pct": "持仓期最大浮亏",
+    "best_close_pct": "窗口最好收盘收益",
+    "worst_close_pct": "窗口最差收盘收益",
+    "window_end_pct": "窗口结束收益",
+}
 FACTOR_COLUMNS = [
     "original_score",
     "score_base",
@@ -84,6 +108,10 @@ def pick_return_col(df: pd.DataFrame) -> str:
 
 def pick_score_col(df: pd.DataFrame) -> str | None:
     return next((col for col in SCORE_CANDIDATES if col in df.columns), None)
+
+
+def factor_label(field: str) -> str:
+    return FACTOR_LABELS.get(field, field)
 
 
 def load_trades_csv(path: str | Path) -> pd.DataFrame:
@@ -167,6 +195,7 @@ def compare_winners_losers(df: pd.DataFrame, fields: Iterable[str] | None = None
         rows.append(
             {
                 "field": field,
+                "meaning": factor_label(field),
                 "winner_avg": round(float(winner_avg), 2),
                 "loser_avg": round(float(loser_avg), 2),
                 "diff": round(float(winner_avg - loser_avg), 2),
@@ -174,7 +203,7 @@ def compare_winners_losers(df: pd.DataFrame, fields: Iterable[str] | None = None
         )
 
     if not rows:
-        return pd.DataFrame(columns=["field", "winner_avg", "loser_avg", "diff"])
+        return pd.DataFrame(columns=["field", "meaning", "winner_avg", "loser_avg", "diff"])
     return pd.DataFrame(rows).sort_values("diff", key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
 
 

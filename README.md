@@ -49,6 +49,7 @@ stock/
 - [实验索引](docs/EXPERIMENT_INDEX.md)
 - [实验日志](docs/EXPERIMENT_LOG.md)
 - [下一阶段研究计划](docs/STRATEGY_RESEARCH_PLAN.md)
+- [因子中英对照表](docs/FACTOR_GLOSSARY.md)
 
 ## 快速开始
 

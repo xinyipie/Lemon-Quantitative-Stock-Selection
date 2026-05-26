@@ -1057,3 +1057,41 @@ python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline,ex
 - 不升级 `exit_v2_conditional_lock` 为默认出场。
 - 当前短线基准正式定为 `profile_v4_adaptive_quality + baseline exit`。
 - 后续固定 baseline exit，开始优化选股质量。
+
+## 2026-05-26 选股因子实验：profile_v6 质量重排（未保留）
+
+### 假设
+
+交易诊断报告显示：
+
+- `Q4_high` 最高分组并不是收益最好的分组，说明总分排序存在失真。
+- 亏损票的 `factor_drawdown` 明显更高，说明高回撤风险票可能被排得过前。
+- 赢家相对更强的字段包括 `factor_counter_trend`、`factor_sector`、`factor_pattern`。
+
+因此尝试基于 `profile_v4` 做一版 `profile_v6`：轻微提高结构质量字段权重，并惩罚高 `drawdown_from_high`、高 `factor_drawdown` 且形态偏弱的候选。
+
+### Q1 验证
+
+命令：
+
+```text
+python test.py --scenario profile_v4_adaptive_quality,profile_v6_adaptive_quality --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_v6_factor_tuned
+```
+
+结果：
+
+| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | 最大回撤 | Sharpe | 5日IC | 10日IC | 20日IC |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | 3.84% | +0.458 | +0.2661 | +0.3300 | +0.4117 |
+| profile_v6_adaptive_quality | 2026Q1 | 16 | 43.80% | -1.12% | -1.96% | 4.50% | -0.670 | +0.0408 | +0.0001 | -0.0326 |
+
+观察：
+
+- `profile_v6` 虽然试图压低高回撤风险票，但把原本在 Q1 有效的排序信号打散。
+- Q1 总收益从 `+1.93%` 变成 `-1.12%`，Sharpe 从 `+0.458` 变成 `-0.670`。
+- 5/10/20日 IC 基本失效，说明这不是单纯出场问题，而是选股排序本身被削弱。
+
+结论：
+
+- `profile_v6` 不进入可运行场景，也不跑 2025 全年。
+- 这个方向说明：不要直接重写总分权重；下一步更适合做“高分风险票过滤/降级”，只处理极端坏样本，避免破坏整体排序。
