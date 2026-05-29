@@ -1150,3 +1150,40 @@ python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_qualit
 - `adaptive_quality_v2` 是正向小补丁，但样本命中很少。
 - 暂不替换实盘默认配置，先保留为候选实验场景。
 - 下一步继续扩展规则命中诊断，优先找“命中 Top3 且亏损集中、误杀盈利少”的过滤条件。
+
+## 2026-05-26 规则命中诊断：rerank_low_base_weak_pattern（不做硬过滤）
+
+### 诊断发现
+
+扩展 `rule_hit_diagnostics.py`，一次性比较多条候选规则。2025 全年候选池中，`rerank_low_base_weak_pattern` 命中情况最值得注意：
+
+| 规则 | 中文含义 | 候选命中 | Top3命中 | 实际买入命中 | 命中交易胜率 | 命中交易合计收益 |
+|---|---|---:|---:|---:|---:|---:|
+| `rerank_low_base_weak_pattern` | 重排高分 + 基础分偏低 + 形态弱 | 62 | 36 | 19 | 31.58% | -9.37% |
+| `high_score_drawdown_risk` | 高分 + 形态弱 + 回撤深 + 板块/量能偏风险 | 4 | 1 | 1 | 0.00% | -4.88% |
+
+含义：
+
+- `rerank_low_base_weak_pattern` 能抓到更多实际亏损交易，比单一高回撤风险规则样本更厚。
+- 但它覆盖 19 笔实际买入，规则更宽，误杀风险也更高。
+
+### Q1 硬过滤验证
+
+尝试把该规则作为 `adaptive_quality_v3` 硬过滤：
+
+```text
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v3 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_gate_v3
+```
+
+结果：
+
+| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | 高MFE转亏 | 平均回吐 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | 3 | 10.30% |
+| profile_v4_adaptive_quality_v3 | 2026Q1 | 16 | 43.75% | +0.54% | -0.31% | +0.062 | 4 | 11.68% |
+
+结论：
+
+- `adaptive_quality_v3` Q1 不通过，不保留为可运行门控。
+- `rerank_low_base_weak_pattern` 保留在规则命中诊断工具中，用于观察和后续轻量降级研究。
+- 下一步不应把它一刀切过滤，而应考虑更窄条件，或只作为候选风险提示。

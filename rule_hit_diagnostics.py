@@ -15,11 +15,15 @@ import pandas as pd
 
 RULE_DESCRIPTIONS = {
     "high_score_drawdown_risk": "高分 + 形态弱 + 回撤深 + 板块/量能偏风险",
+    "rerank_low_base_weak_pattern": "重排高分 + 基础分偏低 + 形态弱",
+    "hot_sector_weak_pattern": "板块偏热 + 形态弱 + 回撤偏深",
+    "high_volume_weak_pattern": "量能偏冲 + 形态弱 + 回撤偏深",
 }
 NUMERIC_COLUMNS = [
     "select_date",
     "score",
     "original_score",
+    "score_base",
     "profit_after_fee",
     "ret_5d",
     "factor_pattern",
@@ -34,7 +38,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analyze rule hits on candidate and trade CSV files.")
     parser.add_argument("--candidates", required=True, help="Path to ic_short_*.csv candidate file.")
     parser.add_argument("--trades", required=True, help="Path to trades_*.csv file from the same run.")
-    parser.add_argument("--rule", default="high_score_drawdown_risk", choices=sorted(RULE_DESCRIPTIONS))
+    parser.add_argument(
+        "--rule",
+        default="high_score_drawdown_risk",
+        help="Rule name, or 'all' to compare every built-in rule.",
+    )
     parser.add_argument("--output", default=None, help="Markdown report path.")
     parser.add_argument("--top", type=int, default=20, help="Rows to show in example tables.")
     return parser.parse_args()
@@ -68,22 +76,34 @@ def add_candidate_rank(candidates: pd.DataFrame, score_col: str = "score") -> pd
 
 def evaluate_rule(candidates: pd.DataFrame, rule_name: str) -> pd.DataFrame:
     df = normalize_frame(candidates)
-    if rule_name != "high_score_drawdown_risk":
+    if rule_name not in RULE_DESCRIPTIONS:
         raise ValueError(f"Unknown rule: {rule_name}")
 
     score = _num(df, "score")
+    original_score = _num(df, "original_score", _num(df, "score_base", 0.0))
     pattern = _num(df, "factor_pattern")
     drawdown_score = _num(df, "factor_drawdown")
     sector = _num(df, "factor_sector")
     drawdown_from_high = _num(df, "drawdown_from_high")
     volume_ratio = _num(df, "volume_ratio")
 
-    df["_rule_hit"] = (
-        (score >= 70.0)
-        & (pattern < 55.0)
-        & (drawdown_from_high >= 8.0)
-        & ((drawdown_score >= 88.0) | (sector >= 55.0) | (volume_ratio >= 3.2))
-    )
+    if rule_name == "high_score_drawdown_risk":
+        hit = (
+            (score >= 70.0)
+            & (pattern < 55.0)
+            & (drawdown_from_high >= 8.0)
+            & ((drawdown_score >= 88.0) | (sector >= 55.0) | (volume_ratio >= 3.2))
+        )
+    elif rule_name == "rerank_low_base_weak_pattern":
+        hit = (score >= 70.0) & (original_score <= 60.0) & (pattern < 55.0)
+    elif rule_name == "hot_sector_weak_pattern":
+        hit = (score >= 65.0) & (sector >= 55.0) & (pattern < 55.0) & (drawdown_from_high >= 6.0)
+    elif rule_name == "high_volume_weak_pattern":
+        hit = (score >= 65.0) & (volume_ratio >= 3.0) & (pattern < 55.0) & (drawdown_from_high >= 6.0)
+    else:
+        raise ValueError(f"Unknown rule: {rule_name}")
+
+    df["_rule_hit"] = hit
     return df
 
 
@@ -125,6 +145,22 @@ def summarize_rule_hits(candidates: pd.DataFrame, trades: pd.DataFrame) -> dict[
         "selected_hit_avg_return_pct": _avg_return(hit_trades),
         "selected_non_hit_avg_return_pct": _avg_return(non_hit_trades),
     }
+
+
+def summarize_many_rules(candidates: pd.DataFrame, trades: pd.DataFrame, rule_names: list[str] | None = None) -> pd.DataFrame:
+    rule_names = rule_names or sorted(RULE_DESCRIPTIONS)
+    rows = []
+    for rule_name in rule_names:
+        ruled = evaluate_rule(candidates, rule_name)
+        summary = summarize_rule_hits(ruled, trades)
+        rows.append({"rule": rule_name, "meaning": RULE_DESCRIPTIONS[rule_name], **summary})
+    if not rows:
+        return pd.DataFrame()
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["selected_hit_total_return_pct", "selected_hit_count"], ascending=[True, False])
+        .reset_index(drop=True)
+    )
 
 
 def _sum_return(df: pd.DataFrame) -> float:
@@ -202,9 +238,28 @@ def default_output_path(candidates_path: Path, rule_name: str) -> Path:
 def main() -> None:
     args = parse_args()
     candidates_path = Path(args.candidates)
-    candidates = evaluate_rule(add_candidate_rank(load_csv(candidates_path)), args.rule)
+    candidates = add_candidate_rank(load_csv(candidates_path))
     trades = load_csv(args.trades)
-    report = build_markdown_report(candidates, trades, rule_name=args.rule, top=args.top)
+    if args.rule == "all":
+        summary = summarize_many_rules(candidates, trades)
+        report = "\n".join(
+            [
+                "# Rule Hit Diagnostics",
+                "",
+                f"- Rule: `all`",
+                f"- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                "## 先看结论",
+                "- 下表按“命中实际买入后的合计收益”从差到好排序，越靠前越值得进一步研究。",
+                "",
+                "## Rule Comparison",
+                summary.to_markdown(index=False),
+                "",
+            ]
+        )
+    else:
+        candidates = evaluate_rule(candidates, args.rule)
+        report = build_markdown_report(candidates, trades, rule_name=args.rule, top=args.top)
 
     output_path = Path(args.output) if args.output else default_output_path(candidates_path, args.rule)
     output_path.parent.mkdir(parents=True, exist_ok=True)
