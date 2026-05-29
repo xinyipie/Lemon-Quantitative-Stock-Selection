@@ -19,6 +19,8 @@ import pandas as pd
 RETURN_CANDIDATES = ["profit_after_fee", "profit_pct", "return_pct", "pnl_pct", "profit"]
 SCORE_CANDIDATES = ["original_score", "score_base", "short_score", "longterm_score"]
 FACTOR_LABELS = {
+    "score": "重排短线分",
+    "experiment_score": "实验重排分",
     "original_score": "原始总分",
     "score_base": "基础总分",
     "short_score": "短线分数",

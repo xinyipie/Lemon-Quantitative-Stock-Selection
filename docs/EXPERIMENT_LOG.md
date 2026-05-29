@@ -1187,3 +1187,40 @@ python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_qualit
 - `adaptive_quality_v3` Q1 不通过，不保留为可运行门控。
 - `rerank_low_base_weak_pattern` 保留在规则命中诊断工具中，用于观察和后续轻量降级研究。
 - 下一步不应把它一刀切过滤，而应考虑更窄条件，或只作为候选风险提示。
+
+## 2026-05-29 因子体检：先找稳定因子，再改 main
+
+### 工具
+
+新增 `factor_audit.py`，直接读取回测生成的 `ic_short_*.csv` 候选池，输出单因子体检和跨区间稳定性对比。
+
+常用命令：
+
+```text
+python factor_audit.py --candidates backtest_results\ic_short_20260526_151120.csv --output reports\factor_audit_2025_gate_v2_fixed.md
+python factor_audit.py --candidates backtest_results\ic_short_20260526_142319.csv --output reports\factor_audit_2026Q1_gate_v2_fixed.md
+python factor_audit.py --candidates backtest_results\ic_short_20260526_151120.csv --compare backtest_results\ic_short_20260526_142319.csv --left-label 2025 --right-label 2026Q1 --output reports\factor_stability_2025_vs_2026Q1.md
+```
+
+### 体检结论
+
+| 因子 | 中文名 | 2025 | 2026Q1 | 当前判断 |
+|---|---|---|---|---|
+| `score` | 重排短线分 | 越高越好 | 越高越好 | 可以作为主排序参考 |
+| `factor_sector` | 板块位置/热度 | 越低越好 | 越低越好 | 板块过热可能是风险信号，适合继续做窄规则 |
+| `original_score` | 原始总分 | 越低越好 | 越低越好 | 不应简单追原始高分，可作为反向诊断 |
+| `score_base` | 基础总分 | 越低越好 | 越低越好 | 与原始总分类似，暂不做正向加权 |
+| `factor_volume_ratio` | 量能质量 | 方向冲突 | 方向冲突 | 不做全局加权 |
+| `volume_ratio` | 量比 | 方向冲突 | 方向冲突 | 不做全局加权 |
+
+补充观察：
+
+- 2025 中最值得研究的是原始总分、基础总分、重排短线分。
+- 2026Q1 中最值得研究的是重排短线分、形态质量、距高点回撤。
+- `factor_pattern` 在 Q1 看起来偏反向，但在 2025 不稳定，不能直接一刀切降低形态弱票。
+
+### 下一步
+
+- 暂时不动实盘默认 `main.py` 因子权重。
+- 下一轮优先围绕“重排短线分高，但板块过热/原始分偏高/基础分偏高”的组合做规则命中诊断。
+- 量能类因子先只做分市场状态观察，不做全局加权。
