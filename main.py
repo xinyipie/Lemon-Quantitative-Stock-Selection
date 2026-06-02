@@ -50,7 +50,11 @@ def init_tushare():
         logger.error(f"❌ Tushare初始化失败：{e}", exc_info=True)
         raise
 
-pro = init_tushare()
+if os.environ.get("LEMON_SKIP_TUSHARE_INIT") == "1":
+    pro = None
+    logger.info("跳过 Tushare 初始化：等待离线回测注入 LocalDataProxy")
+else:
+    pro = init_tushare()
 
 # ── 保存原始 pro 实例，用于 restore_pro() ──
 _original_pro = pro

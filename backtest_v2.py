@@ -45,6 +45,11 @@ from strategy_profiles import (
 # ==================== 路径修复（确保能 import main.py）====================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Offline backtests inject LocalDataProxy after parsing args, so importing main
+# should not require a Tushare token just to reach that point.
+if "--offline" in sys.argv:
+    os.environ.setdefault("LEMON_SKIP_TUSHARE_INIT", "1")
+
 # 延迟 import main，避免 main 模块级代码（init_tushare）在 import 时副作用干扰日志
 import main as stock_main
 

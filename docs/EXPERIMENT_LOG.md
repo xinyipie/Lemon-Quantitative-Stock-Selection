@@ -1224,3 +1224,46 @@ python factor_audit.py --candidates backtest_results\ic_short_20260526_151120.cs
 - 暂时不动实盘默认 `main.py` 因子权重。
 - 下一轮优先围绕“重排短线分高，但板块过热/原始分偏高/基础分偏高”的组合做规则命中诊断。
 - 量能类因子先只做分市场状态观察，不做全局加权。
+
+## 2026-06-02 选股降权实验：profile_v4_adaptive_quality_v4（不保留）
+
+### 假设
+
+尝试在 `profile_v4` 基础上做“风险降权”，不直接删除候选股，而是降低以下类型股票的排序：
+
+- 重排短线分高，但原始/基础分偏高且板块偏热；
+- 回撤偏深且形态不够强；
+- 量比偏冲且板块偏热。
+
+### 验证
+
+命令：
+
+```text
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v4 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_gate_v4
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v4 --exit-profile baseline --start 20250101 --end 20251231 --label 2025_gate_v4
+```
+
+结果：
+
+| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | 5日IC | 高低差 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +0.2661 | +4.28% |
+| profile_v4_adaptive_quality_v4 | 2026Q1 | 16 | 50.00% | +2.23% | +1.39% | +0.532 | +0.2671 | +4.24% |
+| profile_v4_adaptive_quality | 2025全年 | 155 | 43.87% | +48.87% | +27.68% | +1.459 | +0.1630 | +2.30% |
+| profile_v4_adaptive_quality_v4 | 2025全年 | 157 | 43.31% | +43.55% | +22.36% | +1.335 | +0.1640 | +2.50% |
+
+### 交易差异
+
+2025 全年中，v4 相比 baseline：
+
+- 少买 3 笔，合计收益 `+9.47%`；
+- 多买 5 笔，合计收益 `-1.58%`；
+- 其中少买了两笔大赢家：润建股份 `+6.18%`、永鼎股份 `+8.17%`。
+
+### 结论
+
+- v4 在 Q1 小幅改善，但 2025 全年明显变差。
+- 问题在于“板块偏热/基础分偏高”不能直接当作风险降权条件，会误伤强势行情中的赢家。
+- 不保留 `profile_v4_adaptive_quality_v4` 作为可运行场景。
+- 当前最好的候选仍是 `profile_v4_adaptive_quality_v2`：Q1 不变，2025 从 `+48.87%` 提升到 `+51.40%`。
