@@ -28,6 +28,9 @@ class StyleGateTest(unittest.TestCase):
     def test_adaptive_quality_v2_is_available(self):
         self.assertIn("adaptive_quality_v2", list(available_style_gates()))
 
+    def test_adaptive_quality_v5_is_available(self):
+        self.assertIn("adaptive_quality_v5", list(available_style_gates()))
+
     def test_adaptive_quality_v2_filters_extreme_high_score_risk(self):
         df = pd.DataFrame(
             [
@@ -87,6 +90,18 @@ class StyleGateTest(unittest.TestCase):
         filtered = apply_style_gate(df, "adaptive_quality_v2")
 
         self.assertEqual(filtered["ts_code"].tolist(), ["sideways_quality"])
+
+    def test_adaptive_quality_v5_filters_high_score_volume_spike(self):
+        df = pd.DataFrame(
+            [
+                self.make_row(ts_code="quality", score=72, volume_ratio=2.8),
+                self.make_row(ts_code="volume_spike", score=72, volume_ratio=3.4),
+            ]
+        )
+
+        filtered = apply_style_gate(df, "adaptive_quality_v5")
+
+        self.assertEqual(filtered["ts_code"].tolist(), ["quality"])
 
 
 if __name__ == "__main__":

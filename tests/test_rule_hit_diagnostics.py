@@ -89,6 +89,11 @@ class RuleHitDiagnosticsTest(unittest.TestCase):
 
         self.assertEqual(result["_rule_hit"].tolist(), [False, False, True])
 
+    def test_evaluate_rule_marks_high_score_volume_spike(self):
+        result = evaluate_rule(self.make_candidates(), "high_score_volume_spike")
+
+        self.assertEqual(result["_rule_hit"].tolist(), [True, False, False])
+
     def test_add_candidate_rank_ranks_by_select_date_score(self):
         result = add_candidate_rank(self.make_candidates())
 

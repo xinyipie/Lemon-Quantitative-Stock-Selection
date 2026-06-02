@@ -1292,3 +1292,80 @@ python trade_diff_diagnostics.py --base backtest_results\trades_20260602_193448.
 | 2025全年 | +9.47% | -1.58% | -11.05% | 明显负向 |
 
 后续所有选股规则实验都应先看交易替换诊断，避免只看总收益而不知道收益从哪里来。
+
+## 2026-06-02 选股门控实验：adaptive_quality_v5（当前最强候选）
+
+### 假设
+
+v4 的宽泛风险降权失败后，改为只验证更窄的“高分量比过冲”风险：
+
+```text
+score >= 70
+volume_ratio >= 3.2
+```
+
+含义：
+
+- 只处理已经排到较高位置的短线候选；
+- 只过滤量比明显过冲的票；
+- 不再把“板块热/基础分高”单独当作风险，避免误伤强势赢家。
+
+### 规则命中诊断
+
+命令：
+
+```text
+python rule_hit_diagnostics.py --candidates backtest_results\ic_short_20260602_193448.csv --trades backtest_results\trades_20260602_193448.csv --rule high_score_volume_spike --output reports\rule_hits_high_score_volume_spike_2025.md --top 20
+python rule_hit_diagnostics.py --candidates backtest_results\ic_short_20260602_191929.csv --trades backtest_results\trades_20260602_191929.csv --rule high_score_volume_spike --output reports\rule_hits_high_score_volume_spike_2026Q1.md --top 20
+```
+
+结果：
+
+| 区间 | 候选命中 | Top3命中 | 实际买入命中 | 命中交易收益 | 未命中交易收益 |
+|---|---:|---:|---:|---:|---:|
+| 2025全年 | 20 | 12 | 8 | -26.20% | +158.01% |
+| 2026Q1 | 3 | 1 | 0 | 0.00% | +6.24% |
+
+### 回测验证
+
+命令：
+
+```text
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v2,profile_v4_adaptive_quality_v5 --exit-profile baseline --start 20250101 --end 20251231 --label 2025_gate_v5
+python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_quality_v2,profile_v4_adaptive_quality_v5 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_gate_v5
+```
+
+结果：
+
+| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | 平均MFE | 窗口期末 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality | 2025全年 | 155 | 43.87% | +48.87% | +27.68% | +1.459 | +8.37% | +1.12% |
+| profile_v4_adaptive_quality_v2 | 2025全年 | 154 | 44.16% | +51.40% | +30.21% | +1.526 | +8.42% | +1.17% |
+| profile_v4_adaptive_quality_v5 | 2025全年 | 152 | 45.39% | +62.03% | +40.84% | +1.753 | +8.81% | +1.39% |
+| profile_v4_adaptive_quality | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | +2.93% |
+| profile_v4_adaptive_quality_v2 | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | +2.93% |
+| profile_v4_adaptive_quality_v5 | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | +2.93% |
+
+### 交易替换诊断
+
+命令：
+
+```text
+python trade_diff_diagnostics.py --base backtest_results\trades_20260602_205450.csv --experiment backtest_results\trades_20260602_210455.csv --output reports\trade_diff_2025_v2_vs_v5.md --top 20
+python trade_diff_diagnostics.py --base backtest_results\trades_20260602_230639.csv --experiment backtest_results\trades_20260602_231007.csv --output reports\trade_diff_2026Q1_v2_vs_v5.md --top 20
+```
+
+结果：
+
+| 对比 | 少买收益 | 多买收益 | 替换收益差 | 判断 |
+|---|---:|---:|---:|---|
+| 2025 v2 → v5 | -26.20% | -5.58% | +20.62% | 显著正向 |
+| 2026Q1 v2 → v5 | 0.00% | 0.00% | 0.00% | 完全不变 |
+
+### 结论
+
+- `adaptive_quality_v5` 是当前最强候选版本。
+- 它继承 v2 的极端风险过滤，并额外过滤“高分 + 量比过冲”。
+- 2025 全年收益从 baseline `+48.87%`、v2 `+51.40%` 提升到 v5 `+62.03%`。
+- Q1 与 baseline/v2 完全一致，没有伤害压力样本。
+- 暂不直接切实盘默认，下一步应做月度拆分和更多区间稳定性验证，再决定是否定板。

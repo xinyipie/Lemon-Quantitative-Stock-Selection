@@ -18,6 +18,7 @@ RULE_DESCRIPTIONS = {
     "rerank_low_base_weak_pattern": "重排高分 + 基础分偏低 + 形态弱",
     "hot_sector_weak_pattern": "板块偏热 + 形态弱 + 回撤偏深",
     "high_volume_weak_pattern": "量能偏冲 + 形态弱 + 回撤偏深",
+    "high_score_volume_spike": "高分 + 量比过冲",
 }
 NUMERIC_COLUMNS = [
     "select_date",
@@ -100,6 +101,8 @@ def evaluate_rule(candidates: pd.DataFrame, rule_name: str) -> pd.DataFrame:
         hit = (score >= 65.0) & (sector >= 55.0) & (pattern < 55.0) & (drawdown_from_high >= 6.0)
     elif rule_name == "high_volume_weak_pattern":
         hit = (score >= 65.0) & (volume_ratio >= 3.0) & (pattern < 55.0) & (drawdown_from_high >= 6.0)
+    elif rule_name == "high_score_volume_spike":
+        hit = (score >= 70.0) & (volume_ratio >= 3.2)
     else:
         raise ValueError(f"Unknown rule: {rule_name}")
 
