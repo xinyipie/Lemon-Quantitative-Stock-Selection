@@ -1267,3 +1267,28 @@ python test.py --scenario profile_v4_adaptive_quality,profile_v4_adaptive_qualit
 - 问题在于“板块偏热/基础分偏高”不能直接当作风险降权条件，会误伤强势行情中的赢家。
 - 不保留 `profile_v4_adaptive_quality_v4` 作为可运行场景。
 - 当前最好的候选仍是 `profile_v4_adaptive_quality_v2`：Q1 不变，2025 从 `+48.87%` 提升到 `+51.40%`。
+
+### 工具补充
+
+新增 `trade_diff_diagnostics.py`，用于自动比较两个回测交易文件：
+
+- 实验少买了哪些票；
+- 实验多买了哪些票；
+- 少买部分合计收益、多买部分合计收益；
+- 替换收益差是否为正。
+
+复盘 v4：
+
+```text
+python trade_diff_diagnostics.py --base backtest_results\trades_20260602_191929.csv --experiment backtest_results\trades_20260602_192259.csv --output reports\trade_diff_2026Q1_gate_v4.md --top 10
+python trade_diff_diagnostics.py --base backtest_results\trades_20260602_193448.csv --experiment backtest_results\trades_20260602_194442.csv --output reports\trade_diff_2025_gate_v4.md --top 10
+```
+
+结果：
+
+| 区间 | 少买收益 | 多买收益 | 替换收益差 | 判断 |
+|---|---:|---:|---:|---|
+| 2026Q1 | +2.00% | +2.96% | +0.96% | 小幅正向 |
+| 2025全年 | +9.47% | -1.58% | -11.05% | 明显负向 |
+
+后续所有选股规则实验都应先看交易替换诊断，避免只看总收益而不知道收益从哪里来。
