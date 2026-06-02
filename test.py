@@ -42,6 +42,7 @@ ALL_SCENARIOS = [
     {"label": "profile_v4_adaptive_quality", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality"},
     {"label": "profile_v4_adaptive_quality_v2", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v2"},
     {"label": "profile_v4_adaptive_quality_v5", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v5"},
+    {"label": "profile_v4_adaptive_quality_v6", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6"},
 ]
 CORE_SCENARIO_LABELS = ["score_desc", "profile_v4_adaptive_quality"]
 EXIT_PROFILES = [

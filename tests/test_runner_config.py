@@ -18,6 +18,15 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(scenarios[0]["factor_profile"], "profile_v4")
         self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v5")
 
+    def test_v6_scenario_is_registered(self):
+        args = SimpleNamespace(scenario="profile_v4_adaptive_quality_v6", matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["label"], "profile_v4_adaptive_quality_v6")
+        self.assertEqual(scenarios[0]["factor_profile"], "profile_v4")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+
     def test_monthly_periods_cover_calendar_year(self):
         args = SimpleNamespace(
             start=None,
