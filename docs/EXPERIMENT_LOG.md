@@ -1369,3 +1369,29 @@ python trade_diff_diagnostics.py --base backtest_results\trades_20260602_230639.
 - 2025 全年收益从 baseline `+48.87%`、v2 `+51.40%` 提升到 v5 `+62.03%`。
 - Q1 与 baseline/v2 完全一致，没有伤害压力样本。
 - 暂不直接切实盘默认，下一步应做月度拆分和更多区间稳定性验证，再决定是否定板。
+
+## 2026-06-02 月度稳定性验证计划：adaptive_quality_v5
+
+### 目的
+
+v5 的全年收益明显变好，但全年汇总不能说明它是否稳定。下一步需要把 2025 拆成 12 个月，确认提升不是靠少数月份偶然贡献。
+
+### 新增工具入口
+
+`test.py` 新增 `--monthly YEAR` 参数，用来自动生成 1-12 月自然月区间。
+
+示例：
+```text
+python test.py --monthly 2025 --scenario profile_v4_adaptive_quality_v2,profile_v4_adaptive_quality_v5 --exit-profile baseline
+```
+
+跑完后看 `test_result.json`，重点比较：
+- v5 月度收益是否多数月份不弱于 v2；
+- v5 是否只靠 1-2 个月拉高全年收益；
+- v5 是否降低大亏月份的亏损；
+- 交易笔数是否过少，避免样本太薄导致误判。
+
+### 判断标准
+
+- 如果 v5 在多数月份持平或更好，且没有新增明显大亏月份，可以进入“默认候选”阶段。
+- 如果 v5 只靠少数月份大幅领先，其余月份普遍变差，则只保留为研究版本，不直接定板。

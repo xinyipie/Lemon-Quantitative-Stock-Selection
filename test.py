@@ -15,6 +15,7 @@ import argparse
 import subprocess
 import sys
 import json
+import calendar
 from pathlib import Path
 from datetime import datetime
 
@@ -117,6 +118,10 @@ def parse_args():
     parser.add_argument("--start", help="Custom start date, YYYYMMDD.")
     parser.add_argument("--end", help="Custom end date, YYYYMMDD.")
     parser.add_argument("--label", default="custom", help="Label for custom --start/--end period.")
+    parser.add_argument(
+        "--monthly",
+        help="Run each calendar month in the given year, e.g. --monthly 2025.",
+    )
     parser.add_argument("--hold", default="8", help="Hold days passed to backtest_v2.py.")
     parser.add_argument("--topn", default="3", help="TopN passed to backtest_v2.py.")
     parser.add_argument(
@@ -127,6 +132,10 @@ def parse_args():
     return parser.parse_args()
 
 def select_periods(args):
+    if args.monthly:
+        if args.start or args.end:
+            raise SystemExit("--monthly cannot be used together with --start/--end.")
+        return build_monthly_periods(args.monthly)
     if args.start or args.end:
         if not args.start or not args.end:
             raise SystemExit("--start and --end must be provided together.")
@@ -134,6 +143,22 @@ def select_periods(args):
     if args.full or args.matrix:
         return FULL_PERIODS
     return QUICK_PERIODS
+
+def build_monthly_periods(year_text):
+    try:
+        year = int(year_text)
+    except ValueError as exc:
+        raise SystemExit("--monthly must be a four-digit year, e.g. 2025.") from exc
+    if year < 1900 or year > 2100:
+        raise SystemExit("--monthly must be a reasonable four-digit year, e.g. 2025.")
+    return [
+        {
+            "label": f"{year}M{month:02d}",
+            "start": f"{year}{month:02d}01",
+            "end": f"{year}{month:02d}{calendar.monthrange(year, month)[1]:02d}",
+        }
+        for month in range(1, 13)
+    ]
 
 def select_scenarios(args):
     scenario_map = {item["label"]: item for item in ALL_SCENARIOS}
