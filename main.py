@@ -2848,7 +2848,31 @@ def get_ma_data_batch(codes: List[str], trade_date: str, index_change: float = 0
     return result
 
 
-def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, financial_dict: Dict = None, sector_ma10: Dict = None, hot_sectors: Dict = None, sector_news_boosts: Dict = None, hot_concepts: List = None, market_style: str = 'sideways', is_caution: bool = False, sector_accel: Dict = None, macro_mode: str = 'cautious', score_threshold: int = 45, atr_multiplier: float = 1.5, is_backtest: bool = False, sector_avg_change: Dict = None) -> pd.DataFrame:
+def _short_sector_gate_action(
+    industry: str,
+    sector_ma10: Dict = None,
+    hot_sectors: Dict = None,
+    short_filter_profile: str = "baseline",
+) -> Tuple[bool, float]:
+    sector_weak = False
+
+    if sector_ma10 and not sector_ma10.get(industry, True):
+        sector_weak = True
+    elif hot_sectors:
+        sector_values = sorted(hot_sectors.values())
+        median_heat = sector_values[len(sector_values) // 2] if sector_values else 0
+        sector_weak = hot_sectors.get(industry, 0) < median_heat
+
+    if not sector_weak:
+        return False, 0.0
+    if short_filter_profile == "sector_penalty_light":
+        return False, 6.0
+    if short_filter_profile == "sector_penalty_strict":
+        return False, 12.0
+    return True, 0.0
+
+
+def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, financial_dict: Dict = None, sector_ma10: Dict = None, hot_sectors: Dict = None, sector_news_boosts: Dict = None, hot_concepts: List = None, market_style: str = 'sideways', is_caution: bool = False, sector_accel: Dict = None, macro_mode: str = 'cautious', score_threshold: int = 45, atr_multiplier: float = 1.5, is_backtest: bool = False, sector_avg_change: Dict = None, short_filter_profile: str = 'baseline') -> pd.DataFrame:
     """
     短线选股 reconstructed v8 baseline。
     主体恢复 2.0/4.1 的 momentum / weak_momentum / sideways 三风格候选池，
@@ -2932,7 +2956,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
     # 有效补涨板块集合：hot_sectors中分数>0的行业（今日有强势股且大部分未动）
     catchup_sectors = {ind for ind, score in hot_sectors.items() if score > 0}
 
-    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_kline = cnt_sector = cnt_score = cnt_financial = 0
+    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_kline = cnt_sector = cnt_sector_penalty = cnt_score = cnt_financial = 0
     score_rejects = []
     valid_stocks = []
     for _, row in st.iterrows():
@@ -2984,15 +3008,17 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         vol_continuous = ma_data.get("vol_3d_avg", 1.0) >= 1.5
         vol_ok = vol_continuous or vol_accel
 
-        if sector_ma10 and not sector_ma10.get(industry, True):
+        sector_blocked, sector_gate_penalty = _short_sector_gate_action(
+            industry,
+            sector_ma10,
+            hot_sectors,
+            short_filter_profile,
+        )
+        if sector_blocked:
             cnt_sector += 1
             continue
-        elif hot_sectors:
-            sector_values = sorted(hot_sectors.values())
-            median_heat = sector_values[len(sector_values) // 2] if sector_values else 0
-            if hot_sectors.get(industry, 0) < median_heat:
-                cnt_sector += 1
-                continue
+        if sector_gate_penalty > 0:
+            cnt_sector_penalty += 1
 
         if is_momentum:
             near_high20 = drawdown <= 5
@@ -3208,7 +3234,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         )
 
         # caution期降分
-        final_score = score + news_sector_boost + concept_boost + top_list_bonus
+        final_score = score + news_sector_boost + concept_boost + top_list_bonus - sector_gate_penalty
         if is_caution:
             final_score -= 10.0
         final_score = max(0.0, min(final_score, 110.0))
@@ -3233,6 +3259,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
                 "sector": round(sector_score, 2),
                 "pattern": round(pattern_score, 2),
                 "inflow": round(inflow_score, 2),
+                "sector_gate_penalty": round(sector_gate_penalty, 2),
             })
             continue
 
@@ -3274,6 +3301,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             "factor_inflow": round(inflow_score, 2),
             "factor_turnover": round(turnover_norm, 2),
             "factor_sector": round(sector_score, 2),
+            "sector_gate_penalty": round(sector_gate_penalty, 2),
             "factor_pattern": round(pattern_score, 2),
             "factor_counter_trend": round(counter_trend_score, 2),
             "factor_wyckoff": round(wyckoff_score, 2),
@@ -3315,7 +3343,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
 
     logger.info(
         f"📊 reconstructed v8短线过滤明细：基础候选{len(st)}只 | "
-        f"无MA数据{cnt_no_ma} | 板块不符{cnt_sector} | 回调位置不符{cnt_drawdown} | "
+        f"无MA数据{cnt_no_ma} | 板块不符{cnt_sector} | 板块扣分{cnt_sector_penalty} | 回调位置不符{cnt_drawdown} | "
         f"均线破位{cnt_ma} | 量能不符{cnt_vol_weak} | K线不符{cnt_kline} | "
         f"分数不足{cnt_score} | 财务不符{cnt_financial}"
     )
@@ -4140,7 +4168,12 @@ def analyze_watchlist_stock(code: str, name: str, target_price: float,
 # ==================== 交易决策函数已删除（v2.2纯选股工具） ====================
 
 # ==================== 核心选股流程（回测/实盘共用） ====================
-def run_daily_selection(trade_date: str, enable_news: bool = True, include_longterm: bool = True) -> Dict:
+def run_daily_selection(
+    trade_date: str,
+    enable_news: bool = True,
+    include_longterm: bool = True,
+    short_filter_profile: str = 'baseline',
+) -> Dict:
     """
     完整的单日选股流程，实盘和回测共用同一套逻辑。
     无论此函数怎么修改，调用方（main() 和 backtest_v2.py）都自动保持一致。
@@ -4427,7 +4460,8 @@ def run_daily_selection(trade_date: str, enable_news: bool = True, include_longt
         sector_accel=sector_accel, macro_mode=macro_mode,
         score_threshold=score_threshold, atr_multiplier=atr_multiplier,
         is_backtest=(type(pro).__name__ == 'LocalDataProxy'),
-        sector_avg_change=_sector_avg_change
+        sector_avg_change=_sector_avg_change,
+        short_filter_profile=short_filter_profile,
     )
     live_factor_profile = getattr(config, 'SHORT_LIVE_FACTOR_PROFILE', 'original')
     live_style_gate = getattr(config, 'SHORT_LIVE_STYLE_GATE', 'none')

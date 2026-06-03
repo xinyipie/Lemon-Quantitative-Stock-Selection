@@ -43,6 +43,8 @@ ALL_SCENARIOS = [
     {"label": "profile_v4_adaptive_quality_v2", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v2"},
     {"label": "profile_v4_adaptive_quality_v5", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v5"},
     {"label": "profile_v4_adaptive_quality_v6", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6"},
+    {"label": "profile_v4_adaptive_quality_v7_sector_light", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6", "short_filter_profile": "sector_penalty_light"},
+    {"label": "profile_v4_adaptive_quality_v7_sector_strict", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6", "short_filter_profile": "sector_penalty_strict"},
 ]
 CORE_SCENARIO_LABELS = ["score_desc", "profile_v4_adaptive_quality_v6"]
 EXIT_PROFILES = [
@@ -426,6 +428,7 @@ def main():
         score_order = scenario["score_order"]
         factor_profile = scenario["factor_profile"]
         style_gate = scenario.get("style_gate", "none")
+        short_filter_profile = scenario.get("short_filter_profile", "baseline")
         for exit_profile in exit_profiles:
             for topn in topn_values:
                 for p in periods:
@@ -435,6 +438,7 @@ def main():
                         score_order,
                         factor_profile,
                         style_gate,
+                        short_filter_profile,
                         exit_profile,
                         topn,
                         p,
@@ -444,7 +448,7 @@ def main():
     write_result(args, run_mode, scenarios, exit_profiles, topn_values, periods, results)
     print_summary(results)
 
-def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, style_gate, exit_profile, topn, p, results):
+def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, style_gate, short_filter_profile, exit_profile, topn, p, results):
     label, start, end = p["label"], p["start"], p["end"]
     exit_label = exit_profile["label"]
     print(f"\n{'='*60}")
@@ -460,6 +464,7 @@ def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, styl
         "--score-order", score_order,
         "--factor-profile", factor_profile,
         "--style-gate", style_gate,
+        "--short-filter-profile", short_filter_profile,
         "--start", start,
         "--end", end,
     ] + build_exit_args(exit_profile)
@@ -474,6 +479,7 @@ def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, styl
         "score_order": score_order,
         "factor_profile": factor_profile,
         "style_gate": style_gate,
+        "short_filter_profile": short_filter_profile,
         "exit_profile": exit_label,
         "exit_params": exit_profile.get("args") or {},
         "topn": topn,

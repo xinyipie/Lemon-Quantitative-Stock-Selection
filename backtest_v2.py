@@ -178,6 +178,7 @@ class BacktestV2:
         score_order: str = 'desc',
         factor_profile: str = 'original',
         style_gate: str = 'none',
+        short_filter_profile: str = 'baseline',
         conditional_lock_enabled: bool = False,
         conditional_lock_activation_pct: float = 6.0,
         conditional_lock_trailing_pct: float = 4.8,
@@ -223,6 +224,7 @@ class BacktestV2:
         self.score_order = score_order if score_order in ('desc', 'asc') else 'desc'
         self.factor_profile = normalize_factor_profile(factor_profile)
         self.style_gate = normalize_style_gate(style_gate)
+        self.short_filter_profile = short_filter_profile
         self.conditional_lock_enabled = conditional_lock_enabled
         self.conditional_lock_activation_pct = conditional_lock_activation_pct
         self.conditional_lock_trailing_pct = conditional_lock_trailing_pct
@@ -301,6 +303,7 @@ class BacktestV2:
             try:
                 sel = stock_main.run_daily_selection(
                     trade_date=trade_date,
+                    short_filter_profile=self.short_filter_profile,
                     enable_news=False,      # 回测不拉新闻
                     include_longterm=False  # 短线回测不执行波段模块
                 )
@@ -1308,6 +1311,7 @@ class BacktestV2:
             'score_order':          self.score_order,
             'factor_profile':        self.factor_profile,
             'style_gate':            self.style_gate,
+            'short_filter_profile':  self.short_filter_profile,
             'fallback_stop_pct':    self.fallback_stop_pct,
             'fallback_profit_pct':  self.fallback_profit_pct,
             'trailing_stop_pct':    self.trailing_stop_pct,
@@ -1637,6 +1641,9 @@ def main():
     parser.add_argument('--fallback-profit', type=float, default=None,       help='兜底止盈%%（短线默认15，波段默认30）')
     parser.add_argument('--trailing-stop',   type=float, default=None,       help='移动止损回撤幅度%%（短线默认7，波段默认10）')
     parser.add_argument('--trailing-activate', type=float, default=None,     help='移动止损激活门槛%%（短线默认3，波段默认25）')
+    parser.add_argument('--short-filter-profile', type=str, default='baseline',
+                        choices=['baseline', 'sector_penalty_light', 'sector_penalty_strict'],
+                        help='短线候选池硬过滤实验：baseline=原硬过滤，sector_penalty_*=板块不符改扣分')
     parser.add_argument('--conditional-lock', action='store_true',           help='启用短线弱质票条件化移动止损收紧实验')
     parser.add_argument('--conditional-lock-activation', type=float, default=6.0, help='条件化收紧激活阈值%%（默认6）')
     parser.add_argument('--conditional-lock-trailing', type=float, default=4.8,    help='条件化收紧后的移动止损回撤幅度%%（默认4.8）')
@@ -1733,6 +1740,7 @@ def main():
                 score_order=args.score_order,
                 factor_profile=args.factor_profile,
                 style_gate=args.style_gate,
+                short_filter_profile=args.short_filter_profile,
                 conditional_lock_enabled=args.conditional_lock,
                 conditional_lock_activation_pct=args.conditional_lock_activation,
                 conditional_lock_trailing_pct=args.conditional_lock_trailing,

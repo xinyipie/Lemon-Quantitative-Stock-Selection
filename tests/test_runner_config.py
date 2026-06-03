@@ -28,6 +28,19 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(scenarios[0]["factor_profile"], "profile_v4")
         self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
 
+    def test_v7_sector_penalty_scenarios_are_registered(self):
+        args = SimpleNamespace(
+            scenario="profile_v4_adaptive_quality_v7_sector_light,profile_v4_adaptive_quality_v7_sector_strict",
+            matrix=False,
+        )
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["short_filter_profile"], "sector_penalty_light")
+        self.assertEqual(scenarios[1]["short_filter_profile"], "sector_penalty_strict")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+        self.assertEqual(scenarios[1]["style_gate"], "adaptive_quality_v6")
+
     def test_default_core_scenario_uses_v6_candidate(self):
         args = SimpleNamespace(scenario=None, matrix=False)
 
