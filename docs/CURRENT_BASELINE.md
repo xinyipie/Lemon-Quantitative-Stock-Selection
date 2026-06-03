@@ -11,6 +11,8 @@
 风格门控：adaptive_quality_v6
 出场规则：baseline exit
 排序方向：desc
+推荐容量：固定 Top3
+实盘入口：默认只跑短线，波段暂时关闭
 ```
 
 对应代码配置：
@@ -19,6 +21,7 @@
 SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
+ENABLE_LONGTERM_LIVE = False
 ```
 
 回测入口：
@@ -26,6 +29,14 @@ SHORT_LIVE_SCORE_ORDER = "desc"
 ```text
 python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline
 ```
+
+实盘入口：
+
+```text
+python main.py
+```
+
+当前 `main.py` 默认只输出短线建议。波段/长线模块暂时不作为主线，等短线因子继续稳定后再单独整理。
 
 ## 为什么定板
 
@@ -44,6 +55,25 @@ python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline
 - `weak_only` 是 Q1 防守有效线索，但全年常开会过度降频，2025 全年只有 +6.50%。
 - `active + sideways` 是 2025 全年主要收益来源，但在 Q1 的低质量样本会亏损严重。
 - `adaptive_quality_v6` 将两者结合：压力环境下接近 `weak_only`，正常环境保留高质量 `active + sideways`，并额外过滤“高分 + 放量过冲 + 板块偏弱”的追高风险。
+
+## 推荐容量结论
+
+短线默认保持固定 `Top3`，不升级为固定 `Top5` 或 `Top8`。
+
+TopN 容量实验：
+
+| 区间 | Top3 | Top5 | Top8 | 结论 |
+|---|---:|---:|---:|---|
+| 2024H2 | +8.56% | +4.20% | +2.85% | Top3 最稳 |
+| 2025全年 | +61.01% | +44.68% | +23.39% | Top3 明显最好 |
+| 2026Q1 | +1.93% | +5.21% | +3.10% | Top5 局部更好 |
+
+解释：
+
+- `Top8` 三段均不占优，后排候选质量下降明显。
+- `Top5` 在 2026Q1 有价值，但在 2024H2 和 2025 全年拖累收益。
+- 当前不做动态扩容，避免增加复杂度和过拟合风险。
+- 默认固定 `Top3`，后续因子实验仍以 Top3 作为统一裁判。
 
 ## 出场规则结论
 
@@ -81,15 +111,11 @@ trailing_activate = 3.0%
 
 从“调卖点”切换到“提高选股质量”。
 
-下一步实验先做归因，不马上改因子：
-
-```text
-factor_quality_attribution_v1
-```
+下一步实验进入短线因子优化，不再继续调推荐数量。
 
 目标：
 
 - 比较 2025 全年赚钱票 vs 亏钱票。
 - 比较 2026Q1 赚钱票 vs 亏钱票。
 - 分别观察 `active + sideways` 和 `weak_momentum`。
-- 找出第一批最值得调整的选股因子。
+- 优先研究板块硬过滤、回调位置、K线质量和分数门槛。

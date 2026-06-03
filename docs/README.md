@@ -1,6 +1,6 @@
 # 文档入口
 
-更新时间：2026-05-25
+更新时间：2026-06-03
 
 这个目录用于保存策略研究、版本治理和实验结论。新一轮工作先读下面三个文件即可，不需要从完整流水账里重新找线索。
 
@@ -8,16 +8,16 @@
 
 1. [CURRENT_BASELINE.md](CURRENT_BASELINE.md)
    - 当前短线定板版本。
-   - 为什么选择 `profile_v4_adaptive_quality + baseline exit`。
+   - 为什么选择 `profile_v4_adaptive_quality_v6 + baseline exit + fixed Top3`。
    - 买卖点后续如何用于选股工具。
 
 2. [STRATEGY_RESEARCH_PLAN.md](STRATEGY_RESEARCH_PLAN.md)
    - 下一阶段研究路线。
-   - 当前不再主攻卖点，转向选股质量归因。
+   - 当前不再主攻卖点和推荐数量，转向短线因子优化。
 
 3. [EXPERIMENT_INDEX.md](EXPERIMENT_INDEX.md)
    - 历史实验导航。
-   - 快速查 `profile_v3/v4/v5`、`weak_only/adaptive_quality`、出场实验 v1/v2 的结论。
+   - 快速查 `profile_v3/v4/v5/v6`、`weak_only/adaptive_quality`、TopN、出场实验 v1/v2 的结论。
 
 ## 证据流水
 

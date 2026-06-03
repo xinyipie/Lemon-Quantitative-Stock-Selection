@@ -2,7 +2,7 @@
 
 基于 Tushare、A 股离线行情数据和本地回测引擎的量化选股研究工具。项目当前重点是短线选股质量优化，支持日常选股、离线回测、交易归因、IC 分析和多版本实验记录。
 
-> 当前默认候选：`profile_v4_adaptive_quality_v6 + baseline exit`。卖点规则先冻结，下一阶段集中优化选股因子。
+> 当前定板短线版本：`profile_v4_adaptive_quality_v6 + baseline exit + fixed Top3`。卖点和推荐数量先冻结，下一阶段集中优化选股因子。
 
 ## 项目定位
 
@@ -36,12 +36,14 @@ stock/
 ```text
 选股：profile_v4_adaptive_quality_v6
 卖点：baseline exit
+推荐：固定 Top3
 实盘配置：SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
          SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
          SHORT_LIVE_SCORE_ORDER = "desc"
+         ENABLE_LONGTERM_LIVE = False
 ```
 
-这个组合的含义是：行情压力较大时偏防守，行情可做时保留高质量主动进攻机会。最近几轮实验已经确认，额外的 `exit_v2_conditional_lock` 没有优于 baseline，因此卖点暂时不再继续调，后续优先做选股因子质量。
+这个组合的含义是：行情压力较大时偏防守，行情可做时保留高质量主动进攻机会。TopN 容量实验确认固定 Top3 跨区间更稳；额外的 `exit_v2_conditional_lock` 没有优于 baseline。因此卖点和推荐数量暂时不再继续调，后续优先做选股因子质量。
 
 详细结论见：
 
@@ -78,10 +80,12 @@ python data_downloader.py --start 20250101 --end 20251231
 python main.py
 ```
 
+当前 `main.py` 默认只输出短线建议；波段策略暂时关闭，后续单独整理。
+
 运行当前短线基线回测：
 
 ```bash
-python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20250102 --end 20251231
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --topn 3 --start 20250102 --end 20251231
 ```
 
 对已有交易结果做卖点归因：
@@ -121,8 +125,9 @@ python test.py --list-scenarios
 1. 先在 `docs/CURRENT_BASELINE.md` 确认当前定板版本。
 2. 新实验只改一个核心变量，例如因子权重、过滤条件或市场风格门控。
 3. 同时跑 2025 全年和 2026Q1，避免只对单一行情过拟合。
-4. 把结论记录到 `docs/EXPERIMENT_LOG.md`，重要版本再更新 `docs/EXPERIMENT_INDEX.md`。
-5. 只有跨区间稳定优于基线的版本，才进入实盘候选。
+4. 当前主基准固定 Top3；TopN 不是下一阶段主战场。
+5. 把结论记录到 `docs/EXPERIMENT_LOG.md`，重要版本再更新 `docs/EXPERIMENT_INDEX.md`。
+6. 只有跨区间稳定优于基线的版本，才进入实盘候选。
 
 ## Git 管理原则
 

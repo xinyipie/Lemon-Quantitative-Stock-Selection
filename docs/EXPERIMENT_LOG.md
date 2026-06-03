@@ -919,7 +919,7 @@ python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline,ex
 ### 结论
 
 - 不升级 `exit_v1_mid_lock` 或 `exit_v1_profit_guard` 为默认出场基准。
-- 当前短线主基准仍是：`profile_v4_adaptive_quality + baseline exit`。
+- 当时短线主基准仍是：`profile_v4_adaptive_quality + baseline exit`。
 - Q1 出场优化收益属于小样本局部改善，不能直接推广到全年。
 
 ### 下一步
@@ -1055,7 +1055,7 @@ python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline,ex
 结论：
 
 - 不升级 `exit_v2_conditional_lock` 为默认出场。
-- 当前短线基准正式定为 `profile_v4_adaptive_quality + baseline exit`。
+- 当时短线基准正式定为 `profile_v4_adaptive_quality + baseline exit`，后续已由 `adaptive_quality_v6 + fixed Top3` 替代。
 - 后续固定 baseline exit，开始优化选股质量。
 
 ## 2026-05-26 选股因子实验：profile_v6 质量重排（未保留）
@@ -1535,3 +1535,63 @@ python test.py --scenario profile_v4_adaptive_quality_v2,profile_v4_adaptive_qua
 - 2026Q1 三版完全一致，v6 没有伤害压力样本。
 - 综合 2024H2、2025、2026Q1，v6 是当前最均衡版本。
 - v6 可以升级为默认候选；v5 保留为激进收益研究版；v2 保留为稳定基准。
+
+## 2026-06-03 短线容量实验：固定 Top3 定板
+
+### 背景
+
+用户提出：固定只推荐 Top3 可能限制收益，需要验证 Top3/Top5/Top8 哪个更适合作为短线默认容量。
+
+本轮只测试容量，不改选股因子、不改出场规则：
+
+```text
+scenario = profile_v4_adaptive_quality_v6
+exit_profile = baseline
+hold = 8
+score_order = desc
+```
+
+### 命令
+
+```text
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_topn_grid --topn-grid 3,5,8
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20250101 --end 20251231 --label 2025_topn_grid --topn-grid 3,5,8
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20240701 --end 20241231 --label 2024H2_topn_grid --topn-grid 3,5,8
+```
+
+### 结果
+
+| 区间 | TopN | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | MFE均值 | MAE均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2026Q1 | Top3 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | -4.64% |
+| 2026Q1 | Top5 | 23 | 52.17% | +5.21% | +4.36% | +1.438 | +11.96% | -4.18% |
+| 2026Q1 | Top8 | 35 | 45.71% | +3.10% | +2.25% | +0.891 | +9.75% | -4.32% |
+| 2025全年 | Top3 | 154 | 45.45% | +61.01% | +39.82% | +1.740 | +8.76% | -4.96% |
+| 2025全年 | Top5 | 213 | 43.66% | +44.68% | +23.49% | +1.673 | +8.77% | -5.05% |
+| 2025全年 | Top8 | 271 | 41.70% | +23.39% | +2.20% | +1.216 | +8.13% | -5.18% |
+| 2024H2 | Top3 | 20 | 40.00% | +8.56% | -4.58% | +0.835 | +8.29% | -6.07% |
+| 2024H2 | Top5 | 29 | 37.93% | +4.20% | -8.93% | +0.570 | +8.99% | -5.94% |
+| 2024H2 | Top8 | 34 | 38.24% | +2.85% | -10.28% | +0.470 | +8.86% | -5.89% |
+
+### 结论
+
+- Top3 在 2024H2 和 2025 全年均明显最好。
+- Top5 只在 2026Q1 局部更好，但跨区间不稳定。
+- Top8 三段均不适合作为默认，后排候选质量下降明显。
+- 当前不引入动态扩容，避免把策略复杂度继续抬高。
+
+### 定板
+
+短线默认容量正式定为固定 `Top3`。
+
+最终当前短线主基准：
+
+```text
+profile_v4_adaptive_quality_v6
+baseline exit
+score_order = desc
+Top3
+main.py 默认只跑短线
+```
+
+后续工作进入短线因子优化，不再继续围绕卖点或推荐数量打转。

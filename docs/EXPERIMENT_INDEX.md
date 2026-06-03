@@ -10,6 +10,8 @@
 |---|---|
 | 主基准 | `profile_v4_adaptive_quality_v6 + baseline exit` |
 | 实盘配置 | `SHORT_LIVE_FACTOR_PROFILE=profile_v4`，`SHORT_LIVE_STYLE_GATE=adaptive_quality_v6` |
+| 推荐容量 | 固定 `Top3`，不升级固定 Top5/Top8 |
+| 实盘入口 | `main.py` 默认只跑短线，波段暂时关闭 |
 | 出场规则 | 保留 baseline，不升级 v1/v2 出场实验 |
 | 下一阶段 | 固定卖点，优化选股质量 |
 
@@ -96,19 +98,37 @@
 
 结论：继续调卖点容易过拟合。后续固定 baseline exit。
 
+### 6. TopN 容量实验
+
+做过：
+
+- Top3
+- Top5
+- Top8
+
+关键结果：
+
+| 区间 | Top3 | Top5 | Top8 | 结论 |
+|---|---:|---:|---:|---|
+| 2024H2 | +8.56% | +4.20% | +2.85% | Top3 最稳 |
+| 2025全年 | +61.01% | +44.68% | +23.39% | Top3 明显最好 |
+| 2026Q1 | +1.93% | +5.21% | +3.10% | Top5 局部更好 |
+
+结论：固定 Top3 作为默认容量。Top5 不作为默认，Top8 淘汰。
+
 ## 下一轮实验
 
 实验名：
 
 ```text
-factor_quality_attribution_v1
+short_factor_quality_v1
 ```
 
 目标：
 
 - 不先改策略。
 - 先分析当前主基准中赚钱票和亏钱票的因子差异。
-- 分区间看 2025 全年和 2026Q1。
+- 分区间看 2024H2、2025 全年和 2026Q1。
 - 分风格看 `active + sideways` 和 `weak_momentum`。
 
 优先观察字段：
