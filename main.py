@@ -2932,7 +2932,8 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
     # 有效补涨板块集合：hot_sectors中分数>0的行业（今日有强势股且大部分未动）
     catchup_sectors = {ind for ind, score in hot_sectors.items() if score > 0}
 
-    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_financial = 0
+    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_kline = cnt_sector = cnt_score = cnt_financial = 0
+    score_rejects = []
     valid_stocks = []
     for _, row in st.iterrows():
         ts_code = format_code(row["code"])
@@ -2984,11 +2985,13 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         vol_ok = vol_continuous or vol_accel
 
         if sector_ma10 and not sector_ma10.get(industry, True):
+            cnt_sector += 1
             continue
         elif hot_sectors:
             sector_values = sorted(hot_sectors.values())
             median_heat = sector_values[len(sector_values) // 2] if sector_values else 0
             if hot_sectors.get(industry, 0) < median_heat:
+                cnt_sector += 1
                 continue
 
         if is_momentum:
@@ -3013,8 +3016,10 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             cnt_drawdown += 1
         elif not ma_ok:
             cnt_ma += 1
-        elif not vol_ok and not is_momentum:
+        elif not volume_signal:
             cnt_vol_weak += 1
+        elif not kline_ok:
+            cnt_kline += 1
 
         if not is_potential:
             continue
@@ -3216,6 +3221,19 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
 
         # ── 状态机评分门槛过滤 ──
         if final_score < score_threshold:
+            cnt_score += 1
+            score_rejects.append({
+                "code": code,
+                "name": row.get("name", ""),
+                "industry": industry,
+                "score": round(final_score, 2),
+                "score_base": round(score, 2),
+                "volume_ratio": round(vr, 2),
+                "drawdown": round(drawdown, 2),
+                "sector": round(sector_score, 2),
+                "pattern": round(pattern_score, 2),
+                "inflow": round(inflow_score, 2),
+            })
             continue
 
         # ── 状态机ATR止损修正 ──
@@ -3297,8 +3315,13 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
 
     logger.info(
         f"📊 reconstructed v8短线过滤明细：基础候选{len(st)}只 | "
-        f"无MA数据{cnt_no_ma} | 均线破位{cnt_ma} | 财务不符{cnt_financial}"
+        f"无MA数据{cnt_no_ma} | 板块不符{cnt_sector} | 回调位置不符{cnt_drawdown} | "
+        f"均线破位{cnt_ma} | 量能不符{cnt_vol_weak} | K线不符{cnt_kline} | "
+        f"分数不足{cnt_score} | 财务不符{cnt_financial}"
     )
+    if score_rejects:
+        top_rejects = sorted(score_rejects, key=lambda x: x["score"], reverse=True)[:5]
+        logger.info(f"📊 短线分数不足Top5（门槛≥{score_threshold}）：{top_rejects}")
     logger.info(f"✅ 次日潜力筛选完成：{len(df_pool)}只（数据日期：{trade_date}）")
     return df_pool
 
