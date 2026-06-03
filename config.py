@@ -129,18 +129,20 @@ SHORT_LIVE_SCORE_ORDER = "desc"
 # 2. 如果环境变量未设置，使用下方配置的默认值
 # 3. 修改密钥：直接修改下方的字符串即可
 
-# 通义千问 API Key
-# 获取地址：https://dashscope.console.aliyun.com/
+# AI API Keys
+# Keep real keys in environment variables; never commit them to Git.
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 # ==================== AI模型配置（可切换） ====================
 # 支持的模型配置（取消注释即可切换）
 
-# 方案1：通义千问 Turbo（当前使用，便宜但能力一般）
+# 方案1：DeepSeek Chat（当前使用，OpenAI-compatible）
 AI_CONFIG = {
-    "api_key": DASHSCOPE_API_KEY,
-    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    "model": "qwen-turbo",
+    "provider": "deepseek",
+    "api_key": DEEPSEEK_API_KEY,
+    "base_url": "https://api.deepseek.com/v1/chat/completions",
+    "model": "deepseek-chat",
     "timeout": 60,
     "temperature": 0.1,
     "max_tokens": 6000

@@ -3734,9 +3734,11 @@ def call_ai_api(prompt: str, system: str = "") -> Optional[str]:
 
     api_key = config.AI_CONFIG["api_key"]
     if not api_key:
+        provider = config.AI_CONFIG.get("provider", "AI")
+        env_name = "DEEPSEEK_API_KEY" if provider == "deepseek" else "DASHSCOPE_API_KEY"
         logger.warning(
-            "⚠️ 通义千问 API Key 未配置，跳过AI分析\n"
-            "请在 config.py 中设置 DASHSCOPE_API_KEY，或设置环境变量 DASHSCOPE_API_KEY"
+            f"{provider} API key is not configured; skipping AI analysis.\n"
+            f"Please set environment variable {env_name}."
         )
         return None
 

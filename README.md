@@ -63,7 +63,7 @@ pip install -r requirements.txt
 
 ```powershell
 $env:TUSHARE_TOKEN="你的 tushare token"
-$env:DASHSCOPE_API_KEY="你的通义千问 key"
+$env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 ```
 
 下载离线数据：
