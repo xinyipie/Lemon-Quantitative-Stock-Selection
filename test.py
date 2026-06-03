@@ -126,11 +126,35 @@ def parse_args():
     parser.add_argument("--hold", default="8", help="Hold days passed to backtest_v2.py.")
     parser.add_argument("--topn", default="3", help="TopN passed to backtest_v2.py.")
     parser.add_argument(
+        "--topn-grid",
+        default=None,
+        help="Comma-separated TopN values for capacity tests, e.g. 3,5,8. Overrides --topn.",
+    )
+    parser.add_argument(
         "--exit-profile",
         default="baseline",
         help="Comma-separated exit profile labels, e.g. baseline,exit_v1_tight_lock. Use 'all' for all exit profiles.",
     )
     return parser.parse_args()
+
+def select_topn_values(args):
+    text = args.topn_grid if getattr(args, "topn_grid", None) else args.topn
+    values = []
+    for part in str(text).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError as exc:
+            raise SystemExit("--topn/--topn-grid must contain positive integers.") from exc
+        if value <= 0:
+            raise SystemExit("--topn/--topn-grid must contain positive integers.")
+        if value not in values:
+            values.append(value)
+    if not values:
+        raise SystemExit("--topn/--topn-grid must contain at least one positive integer.")
+    return values
 
 def select_periods(args):
     if args.monthly:
@@ -379,19 +403,20 @@ def main():
     periods = select_periods(args)
     scenarios = select_scenarios(args)
     exit_profiles = select_exit_profiles(args)
+    topn_values = select_topn_values(args)
     base_cmd = [
         sys.executable, "backtest_v2.py",
         "--mode", "short",
         "--offline",
         "--no-timing",
         "--hold", str(args.hold),
-        "--topn", str(args.topn),
     ]
     run_mode = "matrix" if args.matrix else ("full" if args.full else "quick")
 
     print("\n" + "="*60)
     print(f"  test.py mode={run_mode}  scenarios={[s['label'] for s in scenarios]}  "
-          f"exit_profiles={[e['label'] for e in exit_profiles]}  periods={[p['label'] for p in periods]}")
+          f"exit_profiles={[e['label'] for e in exit_profiles]}  "
+          f"topn={topn_values}  periods={[p['label'] for p in periods]}")
     print("="*60)
 
     results = []
@@ -402,22 +427,24 @@ def main():
         factor_profile = scenario["factor_profile"]
         style_gate = scenario.get("style_gate", "none")
         for exit_profile in exit_profiles:
-            for p in periods:
-                run_one_backtest(
-                    base_cmd,
-                    scenario_label,
-                    score_order,
-                    factor_profile,
-                    style_gate,
-                    exit_profile,
-                    p,
-                    results,
-                )
+            for topn in topn_values:
+                for p in periods:
+                    run_one_backtest(
+                        base_cmd,
+                        scenario_label,
+                        score_order,
+                        factor_profile,
+                        style_gate,
+                        exit_profile,
+                        topn,
+                        p,
+                        results,
+                    )
 
-    write_result(args, run_mode, scenarios, exit_profiles, periods, results)
+    write_result(args, run_mode, scenarios, exit_profiles, topn_values, periods, results)
     print_summary(results)
 
-def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, style_gate, exit_profile, p, results):
+def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, style_gate, exit_profile, topn, p, results):
     label, start, end = p["label"], p["start"], p["end"]
     exit_label = exit_profile["label"]
     print(f"\n{'='*60}")
@@ -429,6 +456,7 @@ def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, styl
     before_trades = set(RESULTS_DIR.glob("trades_*.csv"))
 
     cmd = base_cmd + [
+        "--topn", str(topn),
         "--score-order", score_order,
         "--factor-profile", factor_profile,
         "--style-gate", style_gate,
@@ -448,6 +476,7 @@ def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, styl
         "style_gate": style_gate,
         "exit_profile": exit_label,
         "exit_params": exit_profile.get("args") or {},
+        "topn": topn,
         "label": label,
         "period": f"{start}->{end}",
     }
@@ -506,15 +535,16 @@ def run_one_backtest(base_cmd, scenario_label, score_order, factor_profile, styl
 
     results.append(entry)
 
-def write_result(args, run_mode, scenarios, exit_profiles, periods, results):
+def write_result(args, run_mode, scenarios, exit_profiles, topn_values, periods, results):
     out_path = Path("test_result.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump({
             "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "mode": run_mode,
-            "params": f"--no-timing --hold {args.hold} --topn {args.topn} --exit-profile {args.exit_profile}",
+            "params": f"--no-timing --hold {args.hold} --topn {topn_values} --exit-profile {args.exit_profile}",
             "scenarios": scenarios,
             "exit_profiles": exit_profiles,
+            "topn_values": topn_values,
             "periods": periods,
             "results": results,
         }, f, ensure_ascii=False, indent=2)
@@ -527,7 +557,7 @@ def print_summary(results):
         m = r.get("metrics") or {}
         ic5 = (r.get("ic") or {}).get("5d") or {}
         diag = r.get("trade_diagnostics") or {}
-        print(f"\n  [{r['scenario']} | {r.get('exit_profile', 'baseline')} | {r['label']}]")
+        print(f"\n  [{r['scenario']} | {r.get('exit_profile', 'baseline')} | Top{r.get('topn', 3)} | {r['label']}]")
         if diag:
             print(f"    ExitDiag: highMFE={diag.get('high_mfe_trades')}  "
                   f"highMFE_losers={diag.get('high_mfe_losers')}  "

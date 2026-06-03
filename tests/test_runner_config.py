@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from test import select_periods, select_scenarios
+from test import select_periods, select_scenarios, select_topn_values
 import config
 
 
@@ -72,6 +72,16 @@ class TestRunnerConfig(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             select_periods(args)
+
+    def test_topn_grid_defaults_to_single_topn(self):
+        args = SimpleNamespace(topn="3", topn_grid=None)
+
+        self.assertEqual(select_topn_values(args), [3])
+
+    def test_topn_grid_parses_multiple_values(self):
+        args = SimpleNamespace(topn="3", topn_grid="3,5,8")
+
+        self.assertEqual(select_topn_values(args), [3, 5, 8])
 
 
 if __name__ == "__main__":
