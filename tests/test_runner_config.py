@@ -6,6 +6,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from test import select_periods, select_scenarios
+import config
 
 
 class TestRunnerConfig(unittest.TestCase):
@@ -26,6 +27,18 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(scenarios[0]["label"], "profile_v4_adaptive_quality_v6")
         self.assertEqual(scenarios[0]["factor_profile"], "profile_v4")
         self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+
+    def test_default_core_scenario_uses_v6_candidate(self):
+        args = SimpleNamespace(scenario=None, matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[1]["label"], "profile_v4_adaptive_quality_v6")
+
+    def test_live_short_config_uses_v6_candidate(self):
+        self.assertEqual(config.SHORT_LIVE_FACTOR_PROFILE, "profile_v4")
+        self.assertEqual(config.SHORT_LIVE_STYLE_GATE, "adaptive_quality_v6")
+        self.assertEqual(config.SHORT_LIVE_SCORE_ORDER, "desc")
 
     def test_monthly_periods_cover_calendar_year(self):
         args = SimpleNamespace(

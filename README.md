@@ -2,7 +2,7 @@
 
 基于 Tushare、A 股离线行情数据和本地回测引擎的量化选股研究工具。项目当前重点是短线选股质量优化，支持日常选股、离线回测、交易归因、IC 分析和多版本实验记录。
 
-> 当前定板基线：`profile_v4_adaptive_quality + baseline exit`。卖点规则先冻结，下一阶段集中优化选股因子。
+> 当前默认候选：`profile_v4_adaptive_quality_v6 + baseline exit`。卖点规则先冻结，下一阶段集中优化选股因子。
 
 ## 项目定位
 
@@ -34,10 +34,10 @@ stock/
 短线当前采用：
 
 ```text
-选股：profile_v4_adaptive_quality
+选股：profile_v4_adaptive_quality_v6
 卖点：baseline exit
 实盘配置：SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
-         SHORT_LIVE_STYLE_GATE = "adaptive_quality"
+         SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
          SHORT_LIVE_SCORE_ORDER = "desc"
 ```
 
@@ -81,7 +81,7 @@ python main.py
 运行当前短线基线回测：
 
 ```bash
-python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline --start 20250102 --end 20251231
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20250102 --end 20251231
 ```
 
 对已有交易结果做卖点归因：
@@ -101,13 +101,13 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 对比 baseline 与实验卖点：
 
 ```bash
-python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline,exit_v2_conditional_lock --start 20250102 --end 20251231
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline,exit_v2_conditional_lock --start 20250102 --end 20251231
 ```
 
 只跑 2026Q1 压力测试：
 
 ```bash
-python test.py --scenario profile_v4_adaptive_quality --exit-profile baseline --start 20260101 --end 20260331
+python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20260101 --end 20260331
 ```
 
 查看策略档案：

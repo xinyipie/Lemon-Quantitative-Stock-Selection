@@ -1,6 +1,6 @@
 # 实验索引
 
-更新时间：2026-05-25
+更新时间：2026-06-03
 
 完整实验证据在 [EXPERIMENT_LOG.md](EXPERIMENT_LOG.md)。本文件只保留导航和当前结论。
 
@@ -8,8 +8,8 @@
 
 | 项目 | 结论 |
 |---|---|
-| 主基准 | `profile_v4_adaptive_quality + baseline exit` |
-| 实盘配置 | `SHORT_LIVE_FACTOR_PROFILE=profile_v4`，`SHORT_LIVE_STYLE_GATE=adaptive_quality` |
+| 主基准 | `profile_v4_adaptive_quality_v6 + baseline exit` |
+| 实盘配置 | `SHORT_LIVE_FACTOR_PROFILE=profile_v4`，`SHORT_LIVE_STYLE_GATE=adaptive_quality_v6` |
 | 出场规则 | 保留 baseline，不升级 v1/v2 出场实验 |
 | 下一阶段 | 固定卖点，优化选股质量 |
 
@@ -67,7 +67,8 @@
 |---|---:|---:|---|
 | profile_v4 | -20.70% | +16.75% | 全年改善，Q1 不够防守 |
 | profile_v4_weak_only | +1.93% | +6.50% | Q1 防守好，全年太保守 |
-| profile_v4_adaptive_quality | +1.93% | +48.87% | 当前主基准 |
+| profile_v4_adaptive_quality | +1.93% | +48.87% | 历史主基准 |
+| profile_v4_adaptive_quality_v6 | +1.93% | +61.01% | 当前默认候选，2024H2 也优于 v2/v5 |
 
 核心解释：
 

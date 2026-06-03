@@ -120,7 +120,7 @@ ENABLE_FINANCIAL_FILTER_SHORT = False  # 短线策略是否启用财务过滤（
 
 # 短线实盘报告使用的已验证基准：与 backtest_v2.py 的当前主基准保持一致。
 SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
-SHORT_LIVE_STYLE_GATE = "adaptive_quality"
+SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
 
 # ==================== AI配置（通义千问） ====================

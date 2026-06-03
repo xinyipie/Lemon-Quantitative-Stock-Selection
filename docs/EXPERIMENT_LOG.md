@@ -1515,3 +1515,23 @@ python test.py --scenario profile_v4_adaptive_quality_v2,profile_v4_adaptive_qua
 - 2025 全年看，v5 仍是收益最高版本。
 - 跨区间看，v6 更均衡：2024H2 优于 v2/v5，2025 只小幅弱于 v5，且大幅强于 v2。
 - 还需要 2026Q1 最后一关。如果 Q1 不伤，v6 更适合作为默认候选；v5 保留为激进研究版本。
+
+### 2026Q1 验证
+
+命令：
+```text
+python test.py --scenario profile_v4_adaptive_quality_v2,profile_v4_adaptive_quality_v5,profile_v4_adaptive_quality_v6 --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_gate_v6
+```
+
+结果：
+
+| 场景 | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | MFE均值 | MAE均值 | 窗口期末 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| profile_v4_adaptive_quality_v2 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | -4.64% | +2.93% |
+| profile_v4_adaptive_quality_v5 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | -4.64% | +2.93% |
+| profile_v4_adaptive_quality_v6 | 16 | 50.00% | +1.93% | +1.09% | +0.458 | +11.05% | -4.64% | +2.93% |
+
+结论：
+- 2026Q1 三版完全一致，v6 没有伤害压力样本。
+- 综合 2024H2、2025、2026Q1，v6 是当前最均衡版本。
+- v6 可以升级为默认候选；v5 保留为激进收益研究版；v2 保留为稳定基准。
