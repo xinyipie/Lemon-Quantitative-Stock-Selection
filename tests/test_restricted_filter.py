@@ -51,5 +51,23 @@ class RestrictedFilterTest(unittest.TestCase):
         self.assertEqual(len(fake_pro.holdertrade_calls), 3)
 
 
+class LongtermPoolResilienceTest(unittest.TestCase):
+    def test_longterm_pool_skips_none_ma_entries(self):
+        stocks = pd.DataFrame(
+            [
+                {"code": "000001", "name": "平安银行", "industry": "银行"},
+            ]
+        )
+
+        result = main.select_longterm_pool(
+            stocks,
+            {"000001.SZ": None},
+            "20260603",
+            regime="BULL_TREND",
+        )
+
+        self.assertTrue(result.empty)
+
+
 if __name__ == "__main__":
     unittest.main()

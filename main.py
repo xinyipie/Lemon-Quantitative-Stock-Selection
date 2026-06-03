@@ -3372,6 +3372,8 @@ def select_longterm_pool(
     # 因此 P40 过滤门槛不使用绝对值，而是相对全池排名，且使用 P20 宽松门槛
     momentum_scores_raw = {}
     for ts_code, mdata in ma_dict.items():
+        if not mdata:
+            continue
         # 动量代理：MA20斜率（反映近期趋势方向）
         # 在波段候选池中，即使是负斜率（回调中）也可入选，只过滤最弱的20%
         ma60_slope = mdata.get('ma20_slope', 0.0)
