@@ -4499,7 +4499,9 @@ def run_daily_selection(trade_date: str, enable_news: bool = True, include_longt
 
 # ==================== 主程序 ====================
 def main():
-    logger.info("===== 🚀 A股AI选股助手启动（短线 + 波段）=====")
+    include_longterm = bool(getattr(config, 'ENABLE_LONGTERM_LIVE', False))
+    mode_label = "短线 + 波段" if include_longterm else "短线"
+    logger.info(f"===== 🚀 A股AI选股助手启动（{mode_label}）=====")
     start_time = datetime.now()
 
     logger.info("\n【📈 选股与AI分析】")
@@ -4507,7 +4509,11 @@ def main():
     ai_longterm = []
 
     # ── 调用统一选股流程（回测/实盘共用同一套逻辑）──
-    sel = run_daily_selection(trade_date=None, enable_news=True)
+    sel = run_daily_selection(
+        trade_date=None,
+        enable_news=True,
+        include_longterm=include_longterm,
+    )
     trade_date     = sel['trade_date']
     sentiment_data = sel['sentiment_data']
     stock_pool     = sel['stock_pool']

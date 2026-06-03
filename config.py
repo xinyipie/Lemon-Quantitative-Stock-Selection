@@ -122,6 +122,7 @@ ENABLE_FINANCIAL_FILTER_SHORT = False  # 短线策略是否启用财务过滤（
 SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
+ENABLE_LONGTERM_LIVE = False  # 当前主线先专注短线；波段策略整理完成后再打开
 
 # ==================== AI配置（通义千问） ====================
 # 配置说明：

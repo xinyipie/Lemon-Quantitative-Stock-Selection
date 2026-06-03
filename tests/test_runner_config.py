@@ -40,6 +40,9 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(config.SHORT_LIVE_STYLE_GATE, "adaptive_quality_v6")
         self.assertEqual(config.SHORT_LIVE_SCORE_ORDER, "desc")
 
+    def test_live_report_defaults_to_short_only(self):
+        self.assertFalse(config.ENABLE_LONGTERM_LIVE)
+
     def test_monthly_periods_cover_calendar_year(self):
         args = SimpleNamespace(
             start=None,
