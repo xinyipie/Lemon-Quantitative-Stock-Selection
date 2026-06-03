@@ -1622,6 +1622,23 @@ def get_limit_up_stocks(trade_date: str) -> List[str]:
         return []
 
 
+def _filter_holdertrade_date(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    date_col = None
+    if 'ann_date' in df.columns:
+        date_col = 'ann_date'
+    elif 'trade_date' in df.columns:
+        date_col = 'trade_date'
+
+    if not date_col:
+        return df
+
+    dates = df[date_col].astype(str).str.replace('-', '', regex=False).str[:8]
+    return df[(dates >= start_date) & (dates <= end_date)].copy()
+
+
 def filter_restricted_stocks(codes: List[str], trade_date: str) -> List[str]:
     """过滤近期解禁/减持股票"""
     start_date = (datetime.strptime(trade_date, '%Y%m%d') - timedelta(15)).strftime('%Y%m%d')
@@ -1639,13 +1656,14 @@ def filter_restricted_stocks(codes: List[str], trade_date: str) -> List[str]:
     for holder_type in ['G', 'P', 'C']:
         try:
             df = pro.stk_holdertrade(
-                start_date=start_date,
-                end_date=trade_date,
                 holder_type=holder_type,
-                fields='ts_code,in_de'
+                fields='ts_code,ann_date,in_de'
             )
+            df = _filter_holdertrade_date(df, start_date, trade_date)
             if not df.empty:
-                sell_df = df[df['in_de'] == 'DE']
+                if 'ts_code' not in df.columns or 'in_de' not in df.columns:
+                    continue
+                sell_df = df[df['in_de'].astype(str).str.upper() == 'DE']
                 restricted.update(sell_df['ts_code'].apply(revert_code).tolist())
         except Exception as e:
             logger.warning(f"stk_holdertrade({holder_type})失败：{e}")
