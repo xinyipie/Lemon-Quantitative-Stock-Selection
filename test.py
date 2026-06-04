@@ -45,8 +45,12 @@ ALL_SCENARIOS = [
     {"label": "profile_v4_adaptive_quality_v6", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6"},
     {"label": "profile_v4_adaptive_quality_v7_sector_light", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6", "short_filter_profile": "sector_penalty_light"},
     {"label": "profile_v4_adaptive_quality_v7_sector_strict", "score_order": "desc", "factor_profile": "profile_v4", "style_gate": "adaptive_quality_v6", "short_filter_profile": "sector_penalty_strict"},
+    {"label": "profile_v4_adaptive_quality_v8_sector_rank", "score_order": "desc", "factor_profile": "profile_v8_sector_rank", "style_gate": "adaptive_quality_v6"},
+    {"label": "profile_v4_adaptive_quality_v9_sector_quality_guard", "score_order": "desc", "factor_profile": "profile_v9_sector_quality_guard", "style_gate": "adaptive_quality_v6"},
+    {"label": "profile_v4_adaptive_quality_v10_mid_deep_drawdown_guard", "score_order": "desc", "factor_profile": "profile_v10_mid_deep_drawdown_guard", "style_gate": "adaptive_quality_v6"},
+    {"label": "profile_v4_adaptive_quality_v11_mid_deep_drawdown_strict_guard", "score_order": "desc", "factor_profile": "profile_v11_mid_deep_drawdown_strict_guard", "style_gate": "adaptive_quality_v6"},
 ]
-CORE_SCENARIO_LABELS = ["score_desc", "profile_v4_adaptive_quality_v6"]
+CORE_SCENARIO_LABELS = ["score_desc", "profile_v4_adaptive_quality_v9_sector_quality_guard"]
 EXIT_PROFILES = [
     {"label": "baseline", "args": {}},
     {

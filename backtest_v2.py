@@ -42,6 +42,28 @@ from strategy_profiles import (
     normalize_style_gate,
 )
 
+LONGTERM_FACTOR_COLUMNS = [
+    'longterm_score',
+    'score_momentum',
+    'score_flow',
+    'score_rs',
+    'score_fin',
+    'score_entry',
+    'score_risk_penalty',
+    'score_quality_guard',
+    'quality_guard_reasons',
+    'drawdown_from_high',
+    'industry_rs',
+    'price_vs_ma60',
+    'main_net_inflow',
+    'volume_ratio',
+    'turnover',
+    'ma20_slope',
+    'roe',
+    'debt_ratio',
+    'netprofit_yoy',
+]
+
 # ==================== 路径修复（确保能 import main.py）====================
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -232,6 +254,9 @@ class BacktestV2:
         # 短线激进时间止损（day2亏1%/day3任何亏损即出）：已被动态出场取代，关闭
         # 现由 time_stop_dynamic（到期亏损出）+ weak_close_exit（弱收盘锁利）替代
         self.short_time_stop = False
+        self.ic_report_title = "短线评分预测能力"
+        self.ic_csv_prefix = "ic_short"
+        self.candidate_factor_columns = SHORT_FACTOR_COLUMNS
 
         # 离线模式（LocalDataProxy）不需要限速睡眠
         self._is_offline = type(pro).__name__ == 'LocalDataProxy'
@@ -252,6 +277,19 @@ class BacktestV2:
     def _factor_profile_score(self, row: pd.Series, base_score_col: str) -> float:
         """Experimental short-score profiles built from exported sub-factors."""
         return factor_profile_score(row, self.factor_profile, base_score_col)
+
+    def _position_weight(self) -> float:
+        """单笔交易在组合净值中的固定槽位权重；短线沿用 TopN 等权口径。"""
+        return 1.0 / max(self.top_n, 1)
+
+    def _filter_selected_items_for_portfolio(
+        self,
+        selected_items: List[Dict],
+        all_trades: List[Dict],
+        buy_date: str,
+    ) -> List[Dict]:
+        """短线不做跨日持仓槽位限制；波段子类会覆写。"""
+        return selected_items
 
     def _conditional_trailing_pct(
         self,
@@ -393,7 +431,6 @@ class BacktestV2:
                         if col in row:
                             item[col] = row.get(col)
                     result.append(item)
-
                 top_codes = [item['ts_code'] for item in result]
 
                 # 构建IC分析池（全部候选股）
@@ -956,6 +993,11 @@ class BacktestV2:
                     time.sleep(0.5)
                 continue
 
+            selected_items = self._filter_selected_items_for_portfolio(
+                selected_items,
+                all_trades,
+                buy_date,
+            )
             selected_codes = [item['ts_code'] for item in selected_items]
             window_codes = sorted(set(selected_codes + ic_codes))
 
@@ -1001,7 +1043,7 @@ class BacktestV2:
                     'signal_target_price': ic_item.get('target_price', 0),
                     'signal_stop_price': ic_item.get('stop_loss_price', 0),
                 }
-                for col in SHORT_FACTOR_COLUMNS:
+                for col in self.candidate_factor_columns:
                     if col in ic_item:
                         rec[col] = ic_item.get(col)
                 if buy_open > 0:
@@ -1053,7 +1095,7 @@ class BacktestV2:
                     trade['select_close']   = item.get('select_close',   0)
                     trade['signal_target_price'] = item.get('target_price', 0)
                     trade['signal_stop_price']   = item.get('stop_loss_price', 0)
-                    for col in SHORT_FACTOR_COLUMNS:
+                    for col in self.candidate_factor_columns:
                         if col in item:
                             trade[col] = item.get(col)
                     trade.update(self._compute_signal_window_stats(
@@ -1092,7 +1134,7 @@ class BacktestV2:
         # Reconstructed baseline equity model:
         # each valid trade uses the planned fixed slot weight 1/top_n.
         daily_weighted_returns: Dict[str, List[tuple]] = {}
-        weight_per_stock = 1.0 / max(self.top_n, 1)
+        weight_per_stock = self._position_weight()
 
         for trade in all_trades:
             sell_date = trade['sell_date']
@@ -1137,7 +1179,7 @@ class BacktestV2:
             try:
                 from scipy.stats import spearmanr
                 print("\n" + "=" * 60)
-                print("  IC分析（短线评分预测能力）")
+                print(f"  IC分析（{self.ic_report_title}）")
                 print("=" * 60)
                 for n in [5, 10, 20]:
                     col = f'ret_{n}d'
@@ -1165,7 +1207,7 @@ class BacktestV2:
             os.makedirs('backtest_results', exist_ok=True)
             ic_csv = os.path.join(
                 'backtest_results',
-                f'ic_short_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+                f'{self.ic_csv_prefix}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
             )
             ic_df.to_csv(ic_csv, index=False, encoding='utf-8-sig')
             print(f"  IC明细已保存：{ic_csv}\n")
@@ -1358,6 +1400,8 @@ class BacktestLongterm(BacktestV2):
         use_market_timing: bool = True,
         min_open_ratio: float = 0.995,
         initial_capital: float = 100_000.0,
+        longterm_profile: str = 'zscore_v4_1',
+        max_positions: int = 15,
     ):
         super().__init__(
             pro=pro,
@@ -1378,6 +1422,97 @@ class BacktestLongterm(BacktestV2):
         # 时间动量止损（防止慢放血）
         self.time_stop_days = time_stop_days
         self.time_stop_threshold = time_stop_threshold
+        self.longterm_profile = longterm_profile
+        self.max_positions = max(1, int(max_positions))
+        self.ic_report_title = "波段候选评分预测能力"
+        self.ic_csv_prefix = "ic_longterm"
+        self.candidate_factor_columns = LONGTERM_FACTOR_COLUMNS
+
+    def _position_weight(self) -> float:
+        """波段按最大同时持仓数分配槽位，避免每天 TopN 叠成隐含杠杆。"""
+        return 1.0 / max(self.max_positions, 1)
+
+    def _filter_selected_items_for_portfolio(
+        self,
+        selected_items: List[Dict],
+        all_trades: List[Dict],
+        buy_date: str,
+    ) -> List[Dict]:
+        """波段只在有空槽位时开新仓，并避免同一股票持有期重复入选。"""
+        open_trades = [
+            trade for trade in all_trades
+            if str(trade.get('buy_date', '')) <= buy_date < str(trade.get('sell_date', ''))
+        ]
+        held_codes = {str(trade.get('ts_code', '')) for trade in open_trades}
+        available_slots = max(self.max_positions - len(open_trades), 0)
+        if available_slots <= 0:
+            logger.info(
+                f"  波段组合：{buy_date} 已满仓 {len(open_trades)}/{self.max_positions}，跳过新开仓"
+            )
+            return []
+
+        allowed = []
+        skipped_duplicate = 0
+        for item in selected_items:
+            ts_code = str(item.get('ts_code', ''))
+            if ts_code in held_codes:
+                skipped_duplicate += 1
+                continue
+            allowed.append(item)
+            held_codes.add(ts_code)
+            available_slots -= 1
+            if available_slots <= 0:
+                break
+
+        if skipped_duplicate or len(allowed) < len(selected_items):
+            logger.info(
+                f"  波段组合：{buy_date} 可开{len(allowed)}只，"
+                f"重复持仓跳过{skipped_duplicate}只，当前持仓{len(open_trades)}/{self.max_positions}"
+            )
+        return allowed
+
+    def _longterm_row_to_item(self, row: pd.Series) -> Dict:
+        """把 longterm_pool 的一行转换成回测和候选质量日志共用的结构。"""
+        code = str(row.get('code', ''))
+        ts_code = stock_main.format_code(code)
+        score = float(row.get('longterm_score', 0) or 0)
+        item = {
+            'ts_code':           ts_code,
+            'score':             score,
+            'original_score':    score,
+            'factor_profile':    self.longterm_profile,
+            'style_gate':        'longterm',
+            'stop_loss_price':   float(row.get('stop_loss_price',  0) or 0),
+            'target_price':      float(row.get('target_price',     0) or 0),
+            'volatility':        float(row.get('volatility',       3.0) or 3.0),
+            'ma5':               0.0,
+            'ma10':              0.0,
+            'high20':            float(row.get('high20',           0) or 0),
+            'low20':             float(row.get('low20',            0) or 0),
+            'select_close':      float(row.get('close',            0) or 0),
+            'regime_max_hold':   self.max_hold_days,
+            'longterm_score':    score,
+        }
+        for col in (
+            'score_momentum',
+            'score_flow',
+            'score_rs',
+            'score_fin',
+            'score_entry',
+            'drawdown_from_high',
+            'industry_rs',
+            'price_vs_ma60',
+            'main_net_inflow',
+            'volume_ratio',
+            'turnover',
+            'ma20_slope',
+            'roe',
+            'debt_ratio',
+            'netprofit_yoy',
+        ):
+            if col in row:
+                item[col] = row.get(col)
+        return item
 
     def _select_stocks_for_date(self, trade_date: str, retries: int = 2) -> List[Dict]:
         """
@@ -1389,14 +1524,15 @@ class BacktestLongterm(BacktestV2):
             try:
                 sel = stock_main.run_daily_selection(
                     trade_date=trade_date,
-                    enable_news=False   # 回测不拉新闻
+                    enable_news=False,   # 回测不拉新闻
+                    longterm_profile=self.longterm_profile,
                 )
                 actual_date = sel['trade_date']
                 regime      = sel.get('regime', 'BULL_TREND')
 
-                # BEAR_TREND（含Override未触发）：强制空仓
-                if regime == 'BEAR_TREND':
-                    logger.info(f"  [{actual_date}] 波段：BEAR_TREND 空仓跳过")
+                # 波段只在持续牛市/牛市回调开仓；熊市反弹不适合持有1-8周。
+                if regime not in ('BULL_TREND', 'BULL_PULLBACK'):
+                    logger.info(f"  [{actual_date}] 波段：{regime} 不开仓跳过（仅BULL_TREND/BULL_PULLBACK执行）")
                     return [], []   # 与父类签名一致：(selected_items, ic_pool)
 
                 longterm_pool = sel.get('longterm_pool', pd.DataFrame())
@@ -1414,32 +1550,21 @@ class BacktestLongterm(BacktestV2):
                     )
                 top_rows = longterm_pool.head(self.top_n)
 
-                result = []
-                for _, row in top_rows.iterrows():
-                    code    = str(row.get('code', ''))
-                    ts_code = stock_main.format_code(code)
-                    item = {
-                        'ts_code':           ts_code,
-                        'stop_loss_price':   float(row.get('stop_loss_price',  0) or 0),
-                        'target_price':      float(row.get('target_price',     0) or 0),
-                        'volatility':        float(row.get('volatility',       3.0) or 3.0),
-                        'ma5':               0.0,
-                        'ma10':              0.0,
-                        'high20':            float(row.get('high20',           0) or 0),
-                        'low20':             float(row.get('low20',            0) or 0),
-                        'select_close':      float(row.get('close',            0) or 0),
-                        'regime_max_hold':   self.max_hold_days,  # 无固定持仓期
-                        'longterm_score':    float(row.get('longterm_score',   0) or 0),
-                    }
-                    result.append(item)
-
+                candidate_pool = [
+                    self._longterm_row_to_item(row)
+                    for _, row in longterm_pool.iterrows()
+                ]
+                result = [
+                    self._longterm_row_to_item(row)
+                    for _, row in top_rows.iterrows()
+                ]
                 codes  = [item['ts_code']       for item in result]
                 scores = [item['longterm_score'] for item in result]
                 logger.info(
                     f"  [{actual_date}] 波段候选：{regime}  {len(codes)}只 {codes}"
                     f"  评分{[f'{s:.1f}' for s in scores]}"
                 )
-                return result, []   # ic_pool波段不计算，返回空列表与父类签名一致
+                return result, candidate_pool
 
             except Exception as e:
                 if attempt < retries:
@@ -1628,6 +1753,8 @@ def main():
     parser.add_argument('--end',        type=str,   default=None,       help='结束日期 YYYYMMDD')
     parser.add_argument('--hold',            type=int,   default=None,       help='最大持有天数（短线默认8，波段默认60）')
     parser.add_argument('--topn',            type=int,   default=3,          help='每日Top N（默认3）')
+    parser.add_argument('--max-positions',   type=int,   default=15,
+                        help='波段最大同时持仓数（仅 longterm 生效，默认15）')
     parser.add_argument('--score-order',     type=str,   default='desc',
                         choices=['desc', 'asc'],
                         help='短线评分排序方向：desc=高分优先（默认），asc=低分优先，用于验证评分是否反向')
@@ -1641,9 +1768,16 @@ def main():
     parser.add_argument('--fallback-profit', type=float, default=None,       help='兜底止盈%%（短线默认15，波段默认30）')
     parser.add_argument('--trailing-stop',   type=float, default=None,       help='移动止损回撤幅度%%（短线默认7，波段默认10）')
     parser.add_argument('--trailing-activate', type=float, default=None,     help='移动止损激活门槛%%（短线默认3，波段默认25）')
+    parser.add_argument('--time-stop-days', type=int, default=None,
+                        help='波段时间止损天数（仅 longterm 生效，默认20；设0关闭）')
+    parser.add_argument('--time-stop-threshold', type=float, default=None,
+                        help='波段时间止损亏损阈值%%（仅 longterm 生效，默认-3）')
     parser.add_argument('--short-filter-profile', type=str, default='baseline',
                         choices=['baseline', 'sector_penalty_light', 'sector_penalty_strict'],
                         help='短线候选池硬过滤实验：baseline=原硬过滤，sector_penalty_*=板块不符改扣分')
+    parser.add_argument('--longterm-profile', type=str, default='zscore_v4_1',
+                        choices=['zscore_v4_1', 'zscore_v5_quality_guard', 'zscore_v7_quality_guard', 'legacy_raw_score_v1'],
+                        help='波段评分实验：zscore_v4_1=当前Z-Score评分；legacy_raw_score_v1=复刻2.0备份版原始五维评分')
     parser.add_argument('--conditional-lock', action='store_true',           help='启用短线弱质票条件化移动止损收紧实验')
     parser.add_argument('--conditional-lock-activation', type=float, default=6.0, help='条件化收紧激活阈值%%（默认6）')
     parser.add_argument('--conditional-lock-trailing', type=float, default=4.8,    help='条件化收紧后的移动止损回撤幅度%%（默认4.8）')
@@ -1668,6 +1802,8 @@ def main():
         fallback_profit  = args.fallback_profit if args.fallback_profit else  50.0  # 波段兜底止盈50%，主要靠移动止损退出
         trailing_stop    = args.trailing_stop   if args.trailing_stop   else  10.0
         trailing_act     = args.trailing_activate if args.trailing_activate else 25.0
+        time_stop_days   = args.time_stop_days if args.time_stop_days is not None else 20
+        time_stop_threshold = args.time_stop_threshold if args.time_stop_threshold is not None else -3.0
         mode_tag_str     = "【波段模式】"
     else:
         hold_days        = args.hold if args.hold is not None else 8   # 短线默认8天
@@ -1675,6 +1811,8 @@ def main():
         fallback_profit  = args.fallback_profit if args.fallback_profit else  15.0
         trailing_stop    = args.trailing_stop   if args.trailing_stop   else   7.0
         trailing_act     = args.trailing_activate if args.trailing_activate else  3.0
+        time_stop_days   = 0
+        time_stop_threshold = -3.0
         mode_tag_str     = "【短线模式】"
 
     offline_tag = "【离线模式】" if args.offline else "【在线模式】"
@@ -1685,6 +1823,11 @@ def main():
         f"  大盘择时={'开启' if use_timing else '关闭'}  评分排序={args.score_order}"
         f"  因子profile={args.factor_profile}  style_gate={args.style_gate}"
     )
+    if is_longterm:
+        logger.info(f"   波段评分profile={args.longterm_profile}")
+    if is_longterm:
+        logger.info(f"   波段最大同时持仓={args.max_positions}")
+        logger.info(f"   波段时间止损={time_stop_days}天 / {time_stop_threshold}%")
     if args.conditional_lock and not is_longterm:
         logger.info(
             f"   条件化出场=开启  激活≥{args.conditional_lock_activation}%"
@@ -1722,8 +1865,12 @@ def main():
                 fallback_stop_pct=fallback_stop,
                 fallback_profit_pct=fallback_profit,
                 max_hold_days=hold_days,
+                time_stop_days=time_stop_days,
+                time_stop_threshold=time_stop_threshold,
                 use_market_timing=use_timing,
                 min_open_ratio=args.min_open_ratio,
+                longterm_profile=args.longterm_profile,
+                max_positions=args.max_positions,
             )
         else:
             bt = BacktestV2(

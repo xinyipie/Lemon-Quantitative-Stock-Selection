@@ -1977,6 +1977,110 @@ def get_industry_rs_scores(trade_date: str, sw_map: Dict = None) -> Dict[str, fl
     return result
 
 
+def get_stock_industry_rs_scores(
+    stocks: pd.DataFrame,
+    trade_date: str,
+    lookback_days: int = 20,
+    min_members: int = 5,
+) -> Dict[str, float]:
+    """
+    用候选股票自身的行业分组计算20日相对强度，行业名称直接匹配 stock_basic.industry。
+
+    旧的 get_industry_rs_scores 使用申万一级指数名称；而候选股的 industry 多数来自
+    Tushare 个股行业字段，两者名称经常不一致，导致波段 score_rs 实际打成0分。
+    这里按个股行业分组，用行业内个股收益中位数 - 沪深300收益作为兜底RS。
+    """
+    result: Dict[str, float] = {}
+    if stocks is None or stocks.empty or 'industry' not in stocks.columns or 'code' not in stocks.columns:
+        return result
+
+    try:
+        stock_map = stocks[['code', 'industry']].dropna().copy()
+        stock_map['industry'] = stock_map['industry'].astype(str).str.strip()
+        stock_map = stock_map[stock_map['industry'] != '']
+        if stock_map.empty:
+            return result
+
+        stock_map['ts_code'] = stock_map['code'].apply(format_code)
+        ts_codes = stock_map['ts_code'].dropna().unique().tolist()
+        if not ts_codes:
+            return result
+
+        start_dt = (
+            datetime.strptime(trade_date, '%Y%m%d') - timedelta(days=max(lookback_days * 2, 35))
+        ).strftime('%Y%m%d')
+
+        all_daily = []
+        batch_size = 800
+        for i in range(0, len(ts_codes), batch_size):
+            batch = ts_codes[i:i + batch_size]
+            df_batch = pro.daily(
+                ts_code=",".join(batch),
+                start_date=start_dt,
+                end_date=trade_date,
+                fields='ts_code,trade_date,close'
+            )
+            if df_batch is not None and not df_batch.empty:
+                all_daily.append(df_batch)
+
+        df_price = pd.concat(all_daily, ignore_index=True) if all_daily else pd.DataFrame()
+        df_csi = pro.index_daily(
+            ts_code='000300.SH',
+            start_date=start_dt,
+            end_date=trade_date,
+            fields='ts_code,trade_date,close'
+        )
+        if df_price.empty or df_csi is None or df_csi.empty:
+            return result
+
+        df_csi = df_csi.sort_values('trade_date').tail(lookback_days + 1)
+        if len(df_csi) < 2:
+            return result
+        csi_start = float(df_csi.iloc[0]['close'])
+        csi_end = float(df_csi.iloc[-1]['close'])
+        csi_return = (csi_end - csi_start) / csi_start * 100 if csi_start > 0 else 0.0
+
+        stock_returns = []
+        for ts_code, grp in df_price.groupby('ts_code'):
+            grp = grp.sort_values('trade_date').tail(lookback_days + 1)
+            if len(grp) < 2:
+                continue
+            start_close = float(grp.iloc[0]['close'])
+            end_close = float(grp.iloc[-1]['close'])
+            if start_close <= 0:
+                continue
+            stock_returns.append({
+                'ts_code': ts_code,
+                'stock_return': (end_close - start_close) / start_close * 100,
+            })
+
+        if not stock_returns:
+            return result
+
+        ret_df = pd.DataFrame(stock_returns)
+        merged = ret_df.merge(stock_map[['ts_code', 'industry']], on='ts_code', how='inner')
+        if merged.empty:
+            return result
+
+        for industry, grp in merged.groupby('industry'):
+            if len(grp) < min_members:
+                continue
+            industry_return = float(grp['stock_return'].median())
+            result[industry] = round(industry_return - csi_return, 2)
+
+        if result:
+            top3 = sorted(result.items(), key=lambda x: -x[1])[:3]
+            logger.info(
+                "📊 股票行业组RS（Top3强势）：" +
+                " | ".join(f"{n}({v:+.1f}%)" for n, v in top3)
+            )
+
+    except Exception as e:
+        logger.warning(f"股票行业组RS计算失败：{e}")
+
+    return result
+
+
 def get_net_profit_growth_batch(codes: List[str], trade_date: str = '') -> Dict[str, Dict]:
     """
     批量获取净利润同比增长率（用于波段策略财务质量评分）。
@@ -2898,7 +3002,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
     is_momentum      = (market_style == 'momentum')
     is_weak_momentum = (market_style == 'weak_momentum')
     if is_momentum:
-        logger.info(f"v8 baseline short mode: momentum ({market_style})")
+        logger.info(f"short baseline candidate mode: momentum ({market_style})")
         st = stocks[
             (stocks['change'] > -9) &
             (stocks['change'] >= 1.0) &
@@ -2907,7 +3011,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             (stocks['amount'] >= config.MIN_STOCK_AMOUNT_SHORT)
         ].copy()
     elif is_weak_momentum:
-        logger.info(f"v8 baseline short mode: weak_momentum ({market_style})")
+        logger.info(f"short baseline candidate mode: weak_momentum ({market_style})")
         st = stocks[
             (stocks['change'] > -9) &
             (stocks['change'] >= 0.0) &
@@ -2916,7 +3020,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             (stocks['amount'] >= config.MIN_STOCK_AMOUNT_SHORT)
         ].copy()
     else:
-        logger.info(f"v8 baseline short mode: sideways/catchup ({market_style})")
+        logger.info(f"short baseline candidate mode: sideways/catchup ({market_style})")
         st = stocks[
             (stocks['change'] > -9) &
             (stocks['change'] >= 0.0) &
@@ -3342,7 +3446,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         ).head(20).reset_index(drop=True)
 
     logger.info(
-        f"📊 reconstructed v8短线过滤明细：基础候选{len(st)}只 | "
+        f"📊 短线基准候选池过滤明细：基础候选{len(st)}只 | "
         f"无MA数据{cnt_no_ma} | 板块不符{cnt_sector} | 板块扣分{cnt_sector_penalty} | 回调位置不符{cnt_drawdown} | "
         f"均线破位{cnt_ma} | 量能不符{cnt_vol_weak} | K线不符{cnt_kline} | "
         f"分数不足{cnt_score} | 财务不符{cnt_financial}"
@@ -3365,6 +3469,7 @@ def select_longterm_pool(
     profit_growth_dict: Dict = None,
     regime: str = 'BULL_TREND',
     score_threshold: float = 70,   # Z-Score分布下的最低准入分（20~95范围，均值60，70≈前25%）
+    longterm_profile: str = 'zscore_v4_1',
 ) -> pd.DataFrame:
     """
     波段选股 v4.1（中长线，持仓无固定时限，以技术信号为准）。
@@ -3416,6 +3521,9 @@ def select_longterm_pool(
         industry_rs = {}
     if profit_growth_dict is None:
         profit_growth_dict = {}
+    use_legacy_raw_score = (longterm_profile == 'legacy_raw_score_v1')
+    use_v5_quality_guard = (longterm_profile in ('zscore_v5_quality_guard', 'zscore_v7_quality_guard'))
+    use_v7_quality_guard = (longterm_profile == 'zscore_v7_quality_guard')
 
     # ── 预计算全池动量代理，用于排名过滤 ──
     # 波段动量代理：用 ma20_slope（近5日均线斜率）+ 回调幅度反向（回调少=动量强）
@@ -3494,8 +3602,8 @@ def select_longterm_pool(
         # 波段策略核心：买"在上升趋势中充分回调"的股，而非追"刚创新高"的股
         # 参考：Minervini VCP原则 + CLAUDE.md原始设计（回调5%~35%）
         drawdown = ma_data.get("drawdown_from_high", 0.0)
-        if drawdown < 3.0:
-            # 回调不足3%（含创新高）：洗盘不充分，不是波段最佳入场点
+        if not use_legacy_raw_score and drawdown < 3.0:
+            # 当前v4.1要求至少轻微回调；legacy实验复刻旧版，允许突破/浅回调票参与排序。
             cnt_drawdown += 1
             continue
         if drawdown > 35.0:
@@ -3531,15 +3639,137 @@ def select_longterm_pool(
             cnt_fin += 1
             continue
 
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        # ── 第一轮：收集各维度原始值（raw），暂不计算最终评分 ──
-        # 评分将在第二轮用截面Z-Score统一标准化后合成
-        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
         main_net_inflow = float(row.get("main_net_inflow", 0))
         vol_accel  = ma_data.get("vol_accelerating", False)
         eod_strong = ma_data.get("eod_strong", False)
         vol_shrinking = not ma_data.get("vol_trend_up", False)
+
+        if use_legacy_raw_score:
+            rs_raw = industry_rs.get(industry, 0.0) if industry_rs else 0.0
+
+            slope_score = max(0.0, min(ma20_slope / 0.5, 1.0)) * 60
+            rs_bonus = min(max(rs_raw / 10.0, -1.0), 1.0) * 40 if industry_rs else 0.0
+            momentum_score = max(0.0, min(slope_score + rs_bonus, 100.0))
+            dim_momentum = momentum_score * 0.30
+
+            if main_net_inflow > 0:
+                flow_score = min(100.0, max(0.0, (main_net_inflow / 1000) ** 0.5 * 10))
+            elif main_net_inflow < 0:
+                flow_score = max(0.0, 50 + main_net_inflow / 500)
+            else:
+                flow_score = 50.0
+            if eod_strong:
+                flow_score = min(flow_score + 15, 100)
+            elif vol_accel:
+                flow_score = min(flow_score + 8, 100)
+            dim_flow = flow_score * 0.25
+
+            rs_score = min(100.0, max(0.0, (rs_raw + 15) / 30 * 100))
+            dim_rs = rs_score * 0.20
+
+            fin_score = 50.0
+            roe_val = fin_data.get('roe')
+            if roe_val is not None:
+                if roe_val >= 15:
+                    fin_score = 100.0
+                elif roe_val >= 5:
+                    fin_score = 50 + (roe_val - 5) / 10 * 50
+                elif roe_val >= 0:
+                    fin_score = roe_val / 5 * 50
+                else:
+                    fin_score = 0.0
+            profit_data = profit_growth_dict.get(code, {})
+            yoy = profit_data.get('netprofit_yoy')
+            if yoy is not None:
+                if yoy >= 30:
+                    fin_score = min(fin_score + 20, 100)
+                elif yoy >= 15:
+                    fin_score = min(fin_score + 12, 100)
+                elif yoy >= 0:
+                    fin_score = min(fin_score + 5, 100)
+                else:
+                    fin_score = max(fin_score - 10, 0)
+            if profit_data.get('profit_growth_accel', False):
+                fin_score = min(fin_score + 10, 100)
+            dim_fin = fin_score * 0.15
+
+            drawdown_abs = abs(drawdown)
+            if 5 <= drawdown_abs <= 15:
+                pullback_score = 100.0
+            elif drawdown_abs < 5:
+                pullback_score = drawdown_abs / 5 * 60
+            elif drawdown_abs <= 25:
+                pullback_score = max(0, 100 - (drawdown_abs - 15) * 5)
+            else:
+                pullback_score = max(0, 100 - (drawdown_abs - 15) * 8)
+            entry_score = pullback_score
+            if vol_shrinking:
+                entry_score = min(entry_score + 15, 100)
+            if eod_strong:
+                entry_score = min(entry_score + 10, 100)
+            if ma_data.get("is_positive_candle", False):
+                entry_score = min(entry_score + 8, 100)
+            if ma_data.get("wyckoff_score", 0) >= 60:
+                entry_score = min(entry_score + 7, 100)
+            dim_entry = entry_score * 0.10
+
+            high20          = ma_data.get("high20", close * 1.15)
+            atr_14          = ma_data.get("atr_14", close * 0.02)
+            target_price    = round(max(high20 * 1.5, close * 1.50), 2)
+            stop_loss_price = round(ma60 * 0.98, 2)
+            buy_low         = round(close - atr_14 * 0.5, 2)
+            buy_high        = round(close + atr_14 * 0.3, 2)
+            sector_aligned = sector_ma10.get(industry, True) if sector_ma10 else True
+
+            valid_stocks.append({
+                "code": code,
+                "name": row["name"],
+                "industry": industry,
+                "close": close,
+                "change": round(float(row.get("change", 0)), 2),
+                "turnover": round(float(row.get("turnover", 0)), 2),
+                "volume_ratio": round(float(row.get("volume_ratio", 1)), 2),
+                "main_net_inflow": round(main_net_inflow, 2),
+                "ma20": round(ma20, 2),
+                "ma60": round(ma60, 2),
+                "ma20_slope": round(ma20_slope, 3),
+                "price_vs_ma60": round(price_vs_ma60, 1),
+                "drawdown_from_high": drawdown,
+                "industry_rs": round(rs_raw, 2),
+                "roe": round(roe_val, 2) if roe_val is not None else None,
+                "debt_ratio": round(fin_data.get('debt_ratio', 0), 2) if fin_data.get('debt_ratio') else None,
+                "netprofit_yoy": round(yoy, 2) if yoy is not None else None,
+                "profit_growth_accel": profit_data.get('profit_growth_accel', False),
+                "eod_strong": eod_strong,
+                "vol_shrinking": vol_shrinking,
+                "wyckoff_score": ma_data.get("wyckoff_score", 0.0),
+                "atr_14": round(atr_14, 4),
+                "high20": high20,
+                "low20": ma_data.get("low20", close * 0.85),
+                "volatility": ma_data.get("volatility", 0.0),
+                "sector_aligned": sector_aligned,
+                "buy_price_low": buy_low,
+                "buy_price_high": buy_high,
+                "target_price": target_price,
+                "stop_loss_price": stop_loss_price,
+                "trailing_stop_pct": 10.0,
+                "longterm_score": round(dim_momentum + dim_flow + dim_rs + dim_fin + dim_entry, 1),
+                "score_momentum": round(dim_momentum, 1),
+                "score_flow": round(dim_flow, 1),
+                "score_rs": round(dim_rs, 1),
+                "score_fin": round(dim_fin, 1),
+                "score_entry": round(dim_entry, 1),
+                "longterm_profile": longterm_profile,
+                "trend_strength": round(min(ma20_slope / 0.5 * 100, 100), 2),
+                "hold_weeks_est": 0,
+                "data_date": trade_date,
+            })
+            continue
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # ── 第一轮：收集各维度原始值（raw），暂不计算最终评分 ──
+        # 评分将在第二轮用截面Z-Score统一标准化后合成
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         # ① 动量原始值：基础趋势强度（MA60斜率 + MA20站上MA60距离）
         # 理论：波段"在上升趋势中的健康回调买入"，趋势强度 = 底层月线斜率
@@ -3579,7 +3809,8 @@ def select_longterm_pool(
         if roe_val is not None:
             raw_fin += float(roe_val)           # 盈利能力主项（ROE，%）
         if yoy is not None:
-            raw_fin += float(yoy) * 0.3        # 成长性（净利润增速折算，×0.3压缩量纲）
+            yoy_for_score = max(min(float(yoy), 80.0), -50.0) if use_v5_quality_guard else float(yoy)
+            raw_fin += yoy_for_score * 0.3        # 成长性（净利润增速折算，×0.3压缩量纲）
         # 现金流质量：ocf_to_netprofit（经营现金流/净利润，fina_indicator字段）
         # > 1.0 说明利润含金量高；< 0.5 说明应收账款多，利润质量差
         ocf_ratio = fin_data.get('ocf_to_netprofit')
@@ -3663,6 +3894,48 @@ def select_longterm_pool(
         # 板块共振附加验证（不强制，仅记录）
         sector_aligned = sector_ma10.get(industry, True) if sector_ma10 else True
 
+        risk_penalty = 0.0
+        quality_guard_reasons = []
+        if use_v5_quality_guard:
+            if price_vs_ma60 > 25.0:
+                risk_penalty += 0.90
+            elif price_vs_ma60 > 20.0:
+                risk_penalty += 0.60
+            turnover_val = float(row.get("turnover", 0))
+            if turnover_val > 20.0:
+                risk_penalty += 0.90
+            elif turnover_val > 13.0:
+                risk_penalty += 0.60
+        if use_v7_quality_guard:
+            turnover_val = float(row.get("turnover", 0))
+            if rs_raw > 18.0:
+                risk_penalty += 0.80
+                quality_guard_reasons.append("行业极热")
+            elif rs_raw > 12.0:
+                risk_penalty += 0.45
+                quality_guard_reasons.append("行业过热")
+            elif rs_raw <= 0.0:
+                risk_penalty += 0.25
+                quality_guard_reasons.append("行业偏弱")
+            if turnover_val > 13.0:
+                risk_penalty += 0.90
+                quality_guard_reasons.append("换手过热")
+            elif turnover_val > 10.0:
+                risk_penalty += 0.65
+                quality_guard_reasons.append("换手偏热")
+            elif turnover_val > 8.0:
+                risk_penalty += 0.35
+                quality_guard_reasons.append("换手升温")
+            if ma20_slope < 0.1:
+                risk_penalty += 0.45
+                quality_guard_reasons.append("趋势斜率不足")
+            if price_vs_ma60 > 22.0:
+                risk_penalty += 0.65
+                quality_guard_reasons.append("位置偏远")
+            elif price_vs_ma60 > 18.0:
+                risk_penalty += 0.35
+                quality_guard_reasons.append("位置偏高")
+
         raw_records.append({
             # ── 基础字段 ──
             "code":             code,
@@ -3711,6 +3984,8 @@ def select_longterm_pool(
             "_raw_rs":          raw_rs,
             "_raw_fin":         raw_fin,
             "_raw_entry":       raw_entry,
+            "_risk_penalty":    risk_penalty,
+            "_quality_guard_reasons": "、".join(quality_guard_reasons) if quality_guard_reasons else "无",
         })
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3728,6 +4003,12 @@ def select_longterm_pool(
         arr_rs       = np.array([r["_raw_rs"]       for r in raw_records], dtype=float)
         arr_fin      = np.array([r["_raw_fin"]      for r in raw_records], dtype=float)
         arr_entry    = np.array([r["_raw_entry"]    for r in raw_records], dtype=float)
+        arr_penalty  = np.array([r.get("_risk_penalty", 0.0) for r in raw_records], dtype=float)
+
+        if use_v5_quality_guard:
+            # v5：行业RS作为确认/保护项，不让极强行业线性放大；财务极值只做质量确认。
+            arr_rs = np.where(arr_rs < -5.0, -8.0, np.where(arr_rs > 10.0, 10.0, arr_rs))
+            arr_fin = np.clip(arr_fin, -20.0, 45.0)
 
         def _zscore(arr: np.ndarray) -> np.ndarray:
             """截面Z-Score，若标准差≈0（全相同值）则返回全零，防止除零"""
@@ -3758,32 +4039,48 @@ def select_longterm_pool(
             0.20 * z_fin      +   # 基本面：提高，波段需要基本面支撑
             0.20 * z_entry        # 入场质量：大幅提高，VCP+回调是核心选点信号
         )
+        if use_v5_quality_guard:
+            composite_z = (
+                0.20 * z_momentum +
+                0.25 * z_flow +
+                0.10 * z_rs +
+                0.10 * z_fin +
+                0.35 * z_entry -
+                arr_penalty
+            )
         longterm_scores = np.clip(composite_z * 10 + 60, 20, 95)
 
         for i, rec in enumerate(raw_records):
             z_i = composite_z[i]
             score = float(longterm_scores[i])
             rec["longterm_score"]  = round(score, 1)
+            rec["longterm_profile"] = longterm_profile
             # 各维度贡献分（可视化用，保持与原明细字段名兼容）
             rec["score_momentum"]  = round(float(z_momentum[i]) * 3.0, 2)  # ×3便于观察量级
             rec["score_flow"]      = round(float(z_flow[i])     * 2.5, 2)
-            rec["score_rs"]        = round(float(z_rs[i])       * 2.0, 2)
-            rec["score_fin"]       = round(float(z_fin[i])      * 1.5, 2)
-            rec["score_entry"]     = round(float(z_entry[i])    * 1.0, 2)
+            rec["score_rs"]        = round(float(z_rs[i])       * (1.0 if use_v5_quality_guard else 2.0), 2)
+            rec["score_fin"]       = round(float(z_fin[i])      * (0.8 if use_v5_quality_guard else 1.5), 2)
+            rec["score_entry"]     = round(float(z_entry[i])    * (1.8 if use_v5_quality_guard else 1.0), 2)
+            if use_v5_quality_guard:
+                rec["score_risk_penalty"] = round(float(arr_penalty[i]) * -10.0, 2)
+            if use_v7_quality_guard:
+                rec["score_quality_guard"] = round(float(arr_penalty[i]) * -10.0, 2)
+                rec["quality_guard_reasons"] = rec.get("_quality_guard_reasons", "无")
             # 清理内部原始值字段（不写入最终输出）
-            for k in ("_raw_momentum", "_raw_flow", "_raw_rs", "_raw_fin", "_raw_entry"):
+            for k in ("_raw_momentum", "_raw_flow", "_raw_rs", "_raw_fin", "_raw_entry", "_risk_penalty", "_quality_guard_reasons"):
                 rec.pop(k, None)
             valid_stocks.append(rec)
 
     # ── 按综合评分排序，应用最低分门槛后输出Top20 ──
     df_pool = pd.DataFrame(valid_stocks)
     if not df_pool.empty:
-        # 应用最低分门槛（过滤低质量股，解决大量93笔中低分股拉低胜率的问题）
-        before_threshold = len(df_pool)
-        df_pool = df_pool[df_pool["longterm_score"] >= score_threshold]
-        filtered_by_threshold = before_threshold - len(df_pool)
-        if filtered_by_threshold > 0:
-            logger.debug(f"   波段门槛过滤：{filtered_by_threshold}只低于{score_threshold}分被排除")
+        if not use_legacy_raw_score:
+            # 应用最低分门槛（过滤低质量股，解决大量93笔中低分股拉低胜率的问题）
+            before_threshold = len(df_pool)
+            df_pool = df_pool[df_pool["longterm_score"] >= score_threshold]
+            filtered_by_threshold = before_threshold - len(df_pool)
+            if filtered_by_threshold > 0:
+                logger.debug(f"   波段门槛过滤：{filtered_by_threshold}只低于{score_threshold}分被排除")
         df_pool = df_pool.sort_values(
             by=["longterm_score", "main_net_inflow"],
             ascending=[False, False]
@@ -4173,6 +4470,7 @@ def run_daily_selection(
     enable_news: bool = True,
     include_longterm: bool = True,
     short_filter_profile: str = 'baseline',
+    longterm_profile: str = 'zscore_v4_1',
 ) -> Dict:
     """
     完整的单日选股流程，实盘和回测共用同一套逻辑。
@@ -4182,6 +4480,7 @@ def run_daily_selection(
         trade_date:   指定交易日期 YYYYMMDD（回测传历史日期，实盘传 None 或最新日期）
         enable_news:  是否拉取实时新闻（回测时传 False，节省时间且无意义）
         include_longterm: 是否执行波段选股（短线回测传 False，避免混入口径和拖慢速度）
+        longterm_profile: 波段评分实验版本，默认当前v4.1；legacy_raw_score_v1用于复刻2.0备份版
 
     Returns:
         {
@@ -4343,7 +4642,7 @@ def run_daily_selection(
     # ✅ 结果由 get_financial_data_batch 内部打印
 
     # ── 6. 板块补涨评分（reconstructed v8 baseline, no timing multiplier）──
-    logger.info("📊 计算板块补涨机会（reconstructed v8 baseline）...")
+    logger.info("📊 计算板块补涨机会（短线基准候选池）...")
     # ⚠️ 行业映射用 _get_industry_map()（全量，含涨停股），不用 all_stocks（已截断 max_change=7）
     _catchup_input = all_stocks.copy()
     if market_pct_df is not None and not market_pct_df.empty and 'pct_chg' in market_pct_df.columns:
@@ -4528,6 +4827,11 @@ def run_daily_selection(
 
         # ① 行业RS（20日超额收益）
         industry_rs = get_industry_rs_scores(actual_date)
+        stock_industry_rs = get_stock_industry_rs_scores(lt_stocks, actual_date)
+        if stock_industry_rs:
+            industry_rs = {**industry_rs, **stock_industry_rs}
+        elif not industry_rs:
+            logger.warning("波段行业RS为空：score_rs 将退化为0，请检查行业指数或个股行情缓存")
 
         # ② 净利润增速（fina_indicator.netprofit_yoy，离线模式读全量parquet，范围扩大几乎无额外成本）
         logger.info("📊 获取净利润增速（波段财务质量评分）...")
@@ -4544,6 +4848,7 @@ def run_daily_selection(
             profit_growth_dict=profit_growth_dict,
             regime=regime,
             score_threshold=getattr(config, 'LONGTERM_SCORE_THRESHOLD', {}).get(regime, 70),
+            longterm_profile=longterm_profile,
         )
         result['longterm_pool'] = longterm_pool
     elif include_longterm:
@@ -4600,6 +4905,15 @@ def main():
             item['concept_boost']     = qdata.get('concept_boost', 0)
             item['hot_concept_match'] = qdata.get('hot_concept_match', False)
             item['score_base']        = qdata.get('score_base', 0)
+            item['original_score']    = qdata.get('original_score', qdata.get('score_base', 0))
+            item['experiment_score']  = qdata.get('experiment_score', item.get('score', 0))
+            item['factor_profile']    = qdata.get('factor_profile', '')
+            item['style_gate']        = qdata.get('style_gate', '')
+            item['factor_sector']     = qdata.get('factor_sector', '-')
+            item['factor_pattern']    = qdata.get('factor_pattern', '-')
+            item['factor_drawdown']   = qdata.get('factor_drawdown', '-')
+            item['factor_volume_ratio'] = qdata.get('factor_volume_ratio', '-')
+            item['factor_inflow']     = qdata.get('factor_inflow', '-')
             # 新增字段
             item['wyckoff_score']     = qdata.get('wyckoff_score', '-')
             item['accel_score']       = qdata.get('accel_score', '-')
@@ -4682,19 +4996,26 @@ def main():
             f"\n   ⚠️  属熊市临时反弹，严格控仓，止损不拖延"
         )
 
-    # 打印短线建议（取评分前3）
-    logger.info("\n【🚀 短线建议 Top3（1-3天）】")
     short_top3 = sorted(ai_analysis, key=lambda x: x.get("score", 0), reverse=True)[:3]
+    short_title = _short_recommendation_title(len(short_top3), compact=True)
+    # 打印短线建议（最多取评分前3）
+    logger.info(f"\n【🚀 {short_title}】")
     if short_top3:
         for rank, item in enumerate(short_top3, 1):
             buy_low  = round(item['close'] * 0.99, 2)
             buy_high = round(item['close'] * 1.01, 2)
             risk_icon = {'低': '🟢', '中等': '🟡', '高': '🔴'}.get(item.get('risk', ''), '⚪')
+            score_label = _short_score_label(item)
+            buy_condition = item.get("buy_condition", "")
+            avoid_condition = item.get("avoid_condition", item.get("give_up_condition", ""))
+            plan_line = ""
+            if buy_condition or avoid_condition:
+                plan_line = f"\n     执行计划：可买={buy_condition or '-'}；放弃={avoid_condition or '-'}"
             logger.info(
-                f"  #{rank} {item['code']} {item['name']}  评分{item.get('score', 0)}分  "
+                f"  #{rank} {item['code']} {item['name']}  {score_label}{item.get('score', 0):.0f}分  "
                 f"{risk_icon}风险:{item.get('risk','-')}  目标{item.get('target_price','-')}元  止损{item.get('stop_loss_price','-')}元\n"
                 f"     买入区间：{buy_low}~{buy_high}元\n"
-                f"     {item.get('reason','')}"
+                f"     {item.get('reason','')}{plan_line}"
             )
     else:
         logger.info("  暂无短线候选")
@@ -4785,6 +5106,156 @@ def _save_live_selections(trade_date: str, stock_pool: pd.DataFrame,
     write_header = not os.path.exists(out_path)
     new_df.to_csv(out_path, mode='a', header=write_header, index=False, encoding='utf-8-sig')
     logger.info(f"📝 实盘记录已追加：{len(rows)} 条 → {out_path}")
+
+
+def _short_recommendation_title(count: int, compact: bool = False) -> str:
+    if count <= 0:
+        return "短线建议 Top0（持有 1-3 天）"
+    hold_text = "1-3天" if compact else "持有 1-3 天"
+    if count < 3:
+        return f"短线建议 Top{count}（Top3候选不足，{hold_text}）"
+    return f"短线建议 Top3（{hold_text}）"
+
+
+def _short_score_label(item: Dict) -> str:
+    factor_profile = str(item.get("factor_profile", "") or "")
+    if factor_profile == "profile_v9_sector_quality_guard":
+        return "v9重排分："
+    if factor_profile and factor_profile != "original":
+        return "重排分："
+    return "综合评分："
+
+
+def _short_score_transition_label(item: Dict, original_score: float, score: float) -> str:
+    factor_profile = str(item.get("factor_profile", "") or "")
+    if factor_profile == "profile_v9_sector_quality_guard":
+        return f"原始短线分：{original_score:.0f}分 → v9重排分：{score:.0f}分"
+    if factor_profile and factor_profile != "original":
+        return f"原始短线分：{original_score:.0f}分 → 重排分：{score:.0f}分"
+    return f"技术基础分：{original_score:.0f}分 → 综合评分：{score:.0f}分"
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value in ("", "-", None):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_short_decision_card(item: Dict, candidate_count: int) -> List[str]:
+    score = _safe_float(item.get("score"))
+    original_score = _safe_float(item.get("original_score", item.get("score_base", score)))
+    volume_ratio = _safe_float(item.get("volume_ratio"))
+    drawdown = _safe_float(item.get("drawdown_from_high"))
+    net_inflow = _safe_float(item.get("main_net_inflow"))
+    sector = _safe_float(item.get("factor_sector"), 50.0)
+    pattern = _safe_float(item.get("factor_pattern"), 50.0)
+
+    if score >= 55:
+        verdict = "结论：强信号，可重点跟踪"
+    elif score >= 35:
+        verdict = "结论：可关注，但不是强进攻票"
+    else:
+        verdict = "结论：弱信号，仅作轻仓观察"
+
+    inflow_text = "资金流为净流入" if net_inflow > 0 else ("资金流为净流出" if net_inflow < 0 else "资金流数据不突出")
+    volume_text = f"量比{volume_ratio:.2f}合格" if volume_ratio >= 1.5 else f"量比{volume_ratio:.2f}偏弱"
+    entry_reasons = [f"原始短线分{original_score:.0f}分", inflow_text, volume_text]
+    if pattern >= 60:
+        entry_reasons.append(f"形态{pattern:.0f}分尚可")
+    if sector >= 45:
+        entry_reasons.append(f"板块{sector:.0f}分不弱")
+
+    downgrade_reasons = []
+    if drawdown >= 12:
+        downgrade_reasons.append(f"回撤{drawdown:.1f}%偏深")
+    elif drawdown >= 8:
+        downgrade_reasons.append(f"回撤{drawdown:.1f}%进入风险区")
+    if sector < 30:
+        downgrade_reasons.append(f"板块{sector:.0f}分偏弱")
+    if pattern < 45:
+        downgrade_reasons.append(f"形态{pattern:.0f}分偏弱")
+    if volume_ratio >= 3.0:
+        downgrade_reasons.append(f"量比{volume_ratio:.2f}偏热")
+    if not downgrade_reasons and score < original_score:
+        downgrade_reasons.append("v9稳健排序压低了进攻分")
+
+    risk_bits = []
+    if candidate_count < 3:
+        risk_bits.append(f"Top3候选不足，仅剩Top{candidate_count}")
+    if score < 40:
+        risk_bits.append("v9重排分低于40")
+    if drawdown >= 12:
+        risk_bits.append("位置不算舒服")
+    if not risk_bits:
+        risk_bits.append("按计划止损，不追高")
+
+    action = "轻仓观察，次日不能站稳关键位就放弃" if score < 45 or candidate_count < 3 else "按计划分批，不追涨"
+
+    return [
+        f"      {verdict}\n",
+        f"      入选原因：{'，'.join(entry_reasons)}\n",
+        f"      v9降权原因：{'，'.join(downgrade_reasons) if downgrade_reasons else '无明显降权项'}\n",
+        f"      当前风险：{'；'.join(risk_bits)}\n",
+        f"      操作理解：{action}\n",
+    ]
+
+
+def _format_short_execution_plan(item: Dict, candidate_count: int) -> List[str]:
+    score = _safe_float(item.get("score"))
+    close = _safe_float(item.get("close"))
+    stop_loss = item.get("stop_loss_price", "-")
+    target = item.get("target_price", "-")
+    buy_low = round(close * 0.99, 2) if close > 0 else "-"
+    buy_high = round(close * 1.01, 2) if close > 0 else "-"
+
+    default_buy = (
+        f"次日平开或小幅高开后，能站稳{buy_low}~{buy_high}元区间再考虑；"
+        "明显高开不追。"
+        if close > 0
+        else "次日开盘后能站稳关键均线且量能不衰减再考虑；明显高开不追。"
+    )
+    default_avoid = (
+        f"高开过多、开盘快速跌破{buy_low}元、冲高回落且资金转弱时放弃。"
+        if close > 0
+        else "高开过多、开盘快速跌破关键支撑、冲高回落且资金转弱时放弃。"
+    )
+    default_stop = f"跌破{stop_loss}元且盘中不能收回，按纪律退出，不把短线做成长线。"
+    default_take_profit = f"接近{target}元先锁定部分利润；盈利超过3%后用约7%峰值回撤做移动止损。"
+    default_position = "轻仓试错或仅观察。" if score < 45 or candidate_count < 3 else "正常小仓位，分批参与。"
+
+    buy_condition = item.get("buy_condition") or default_buy
+    avoid_condition = item.get("avoid_condition") or item.get("give_up_condition") or default_avoid
+    stop_plan = item.get("stop_plan") or default_stop
+    take_profit_plan = item.get("take_profit_plan") or default_take_profit
+    position_advice = item.get("position_advice") or default_position
+
+    return [
+        "      【明日执行计划】\n",
+        f"      可买条件：{buy_condition}\n",
+        f"      放弃条件：{avoid_condition}\n",
+        f"      止损纪律：{stop_plan}\n",
+        f"      止盈/移动止损：{take_profit_plan}\n",
+        f"      仓位倾向：{position_advice}\n",
+        "      注：这是条件式决策辅助，不是自动下单指令；条件不满足时放弃优先。\n",
+    ]
+
+
+def _format_main_inflow(value) -> str:
+    net_inflow = _safe_float(value)
+    if net_inflow == 0:
+        return "数据缺失"
+    direction = "主力净流入" if net_inflow > 0 else "主力净流出"
+    abs_value = abs(net_inflow)
+    # Tushare moneyflow.net_mf_amount 是“万元”口径。
+    if abs_value >= 10000:
+        amount = f"{abs_value / 10000:.2f}亿元"
+    else:
+        amount = f"{abs_value:.0f}万元"
+    sign = "+" if net_inflow > 0 else "-"
+    return f"{sign}{amount}（{direction}）"
 
 
 def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: List[Dict], sentiment_data: Dict = None, macro_mode: str = 'cautious', macro_data: Dict = None, regime: str = 'BULL_TREND', regime_data: Dict = None, position_multiplier: float = 1.0, market_style: str = ''):
@@ -4908,7 +5379,8 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
     lines.append('\n')
 
     # ── 二、短线建议 ─────────────────────────────────────
-    lines.append("【二、短线建议 Top3（持有 1-3 天）】\n")
+    short_top3 = sorted(ai_analysis, key=lambda x: x.get("score", 0), reverse=True)[:3]
+    lines.append(f"【二、{_short_recommendation_title(len(short_top3))}】\n")
     # 策略逻辑随市场风格动态变化
     short_logic_map = {
         'momentum':      '强动量市：追涨突破，选站上MA20且今日量价齐升的强势股',
@@ -4919,7 +5391,6 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
     short_logic  = short_logic_map.get(market_style, '量能异动但价格未大涨 → 主力悄悄建仓 → 次日启动')
     lines.append(f"  当前策略：{short_logic}\n\n")
 
-    short_top3 = sorted(ai_analysis, key=lambda x: x.get("score", 0), reverse=True)[:3]
     if short_top3:
         for rank, item in enumerate(short_top3, 1):
             close      = item.get('close', 0)
@@ -4947,7 +5418,7 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
 
             lines.append(sep('─'))
             lines.append(f"  #{rank}  {item['code']} {item['name']}  ({item.get('industry','')})\n")
-            lines.append(f"      综合评分：{score:.0f}分  {risk_icon}风险:{risk}  情绪:{sent_icon}{sentiment}{tag_str}\n")
+            lines.append(f"      {_short_score_label(item)}{score:.0f}分  {risk_icon}风险:{risk}  情绪:{sent_icon}{sentiment}{tag_str}\n")
             lines.append(f"      当前价格：{close}元\n")
             lines.append(f"      买入区间：{buy_low} ~ {buy_high} 元（当前价±1%，分批建仓）\n")
             lines.append(f"      目标价格：{item.get('target_price', '-')} 元  "
@@ -4956,25 +5427,26 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
                          f"（跌破止损立即离场，不拖延）\n")
             lines.append('\n')
 
-            # 选股量化依据（直接展示系统打分的关键指标）
+            lines.append("      【短线诊断卡片】\n")
+            lines.extend(_format_short_decision_card(item, len(short_top3)))
+            lines.append(f"      {_short_score_transition_label(item, item.get('original_score', item.get('score_base', 0)), score)}\n")
+            lines.append('\n')
+            lines.extend(_format_short_execution_plan(item, len(short_top3)))
+            lines.append('\n')
+
+            # 关键量化字段（保留少量原始数值，避免报告变成黑箱）
             vol_ratio   = item.get('volume_ratio', '-')
             drawdown    = item.get('drawdown_from_high', '-')
             net_inflow  = item.get('main_net_inflow', 0)
-            trend_label = item.get('trend', '')
-            score_base  = item.get('score_base', 0)
             n_boost     = item.get('news_boost', 0)
             c_boost     = item.get('concept_boost', 0)
 
-            inflow_str = (f"+{net_inflow/10000:.1f}亿（主力净流入）" if net_inflow > 0
-                          else f"{net_inflow/10000:.1f}亿（主力净流出）" if net_inflow < 0
-                          else "数据缺失")
+            inflow_str = _format_main_inflow(net_inflow)
 
-            lines.append("      【选股量化依据】\n")
-            lines.append(f"      走势形态：{trend_label}\n")
-            lines.append(f"      量    比：{vol_ratio}（≥1.5 才入选，越大说明资金越主动）\n")
-            lines.append(f"      回撤幅度：{drawdown}%（距近20日高点，越大位置越低、空间越大）\n")
+            lines.append("      【关键量化字段】\n")
+            lines.append(f"      量比：{vol_ratio}  |  回撤：{drawdown}%  |  板块分：{item.get('factor_sector', '-')}\n")
             lines.append(f"      主力资金：{inflow_str}\n")
-            # 新增 Wyckoff 和板块加速分展示
+            # 补充 Wyckoff 和板块加速分展示
             wyckoff_s = item.get('wyckoff_score', '-')
             accel_s   = item.get('accel_score', '-')
             atr_val   = item.get('atr_14', '-')
@@ -4997,7 +5469,6 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
                 lines.append(f"      消息加分：{n_boost:+.0f}分（AI识别板块利好/利空）\n")
             if c_boost > 0:
                 lines.append(f"      概念热度：+{c_boost:.1f}分（命中今日热门概念板块）\n")
-            lines.append(f"      技术基础分：{score_base:.0f}分 → 最终综合评分：{score:.0f}分\n")
             lines.append('\n')
             lines.append("      【AI深度分析】\n")
             lines.append(f"      {reason}\n")

@@ -127,7 +127,7 @@ short_factor_quality_v1
 目标：
 
 - 不先改策略。
-- 先分析当前主基准中赚钱票和亏钱票的因子差异。
+- 已新增 `candidate_rank_diagnostics.py`，先分析 Top3 与第 4-10 名错过好票的因子差异。
 - 分区间看 2024H2、2025 全年和 2026Q1。
 - 分风格看 `active + sideways` 和 `weak_momentum`。
 
@@ -143,3 +143,9 @@ short_factor_quality_v1
 - `market_style`
 - `macro_mode`
 - `track_type`
+
+最新 smoke 观察：
+
+- 基于 `backtest_results/ic_short_20260603_183124.csv`，第 4-10 名中有 55 个候选的 MFE 或窗口期末收益优于当日 Top3 中位数。
+- 错过组 `factor_sector` 更高，但 `factor_volume_ratio`、`score`、`factor_counter_trend`、`factor_inflow` 更低。
+- 这条线索更适合继续做排序归因，不适合直接放宽板块硬过滤；`sector_penalty_v7` 已验证不升级。

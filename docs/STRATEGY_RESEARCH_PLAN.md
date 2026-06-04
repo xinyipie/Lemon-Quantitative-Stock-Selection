@@ -1,134 +1,105 @@
 # 策略研究路线
 
-更新时间：2026-06-03
+更新时间：2026-06-04
 
-目标：在当前短线主基准上继续提高选股质量，而不是继续调卖点。
+## 当前状态
 
-## 当前主基准
-
-短线主基准已经定板：
+短线主线已经定板，不再继续小幅调参：
 
 ```text
-profile_v4_adaptive_quality_v6 + baseline exit + fixed Top3
+scenario: profile_v4_adaptive_quality_v9_sector_quality_guard
+factor_profile: profile_v9_sector_quality_guard
+style_gate: adaptive_quality_v6
+exit_profile: baseline
+TopN: 固定 Top3
+score_order: desc
 ```
 
-代码含义：
+v6 保留为进攻型历史基准，默认实盘使用 v9。
 
-- `factor_profile = profile_v4`
-- `style_gate = adaptive_quality_v6`
-- `score_order = desc`
-- 出场规则使用 baseline
-- 推荐容量固定 Top3
-- `main.py` 默认只跑短线，波段暂时关闭
+## 为什么短线封版
 
-验证结果：
+跨区间结果显示，v9 在 2024 和 2026Q1 这类波动环境更稳，2025 主升市仅小幅落后 v6：
 
-| 场景 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | 最大回撤 | Sharpe |
-|---|---|---:|---:|---:|---:|---:|---:|
-| score_desc 老基准 | 2026Q1 | 48 | 20.83% | -20.44% | -21.28% | 23.09% | -2.524 |
-| profile_v4_adaptive_quality_v6 | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | 3.84% | +0.458 |
-| score_desc 老基准 | 2025全年 | 251 | 35.06% | -10.99% | -32.18% | 32.61% | -0.258 |
-| profile_v4_adaptive_quality_v6 | 2025全年 | 154 | 45.45% | +61.01% | +39.82% | 20.72% | +1.740 |
-| profile_v4_adaptive_quality_v6 | 2024H2 | 20 | 40.00% | +8.56% | -4.58% | - | +0.835 |
+| 区间 | v6 | v9 | 判断 |
+|---|---:|---:|---|
+| 2024H1 | -14.79% | -14.79% | 持平，v9 IC 更好 |
+| 2024H2 | +8.56% | +9.55% | v9 小胜 |
+| 2024全年 | -7.50% | -6.65% | v9 小胜 |
+| 2025全年 | +61.01% | +60.49% | v9 小输 |
+| 2026Q1 | +1.93% | +4.99% | v9 明显胜 |
 
-## 关键认知
+后续短线只做维护和输出体验优化，不再新增 v9.1 之类的小样本规则。
 
-### 1. `weak_only` 是防守线索，不是全年主线
+## 下一阶段：波段策略
 
-`weak_only` 在 2026Q1 表现最好，说明压力市里只做 `weak_momentum` 是有效防守。
+波段策略目前不是定板状态，且先发现了回测组合口径问题。核心问题是：
 
-但它在 2025 全年只有 +6.50%，说明全年常开会错过大量可赚钱机会。
+- 当前波段回测每天都可能新开 Top3，旧持仓不占用新开仓名额；
+- 净值按每笔 `1/top_n` 固定权重计算，持仓重叠后名义暴露可能远超100%；
+- `longterm_score` 是否真的能区分赢家和输家；
+- 评分分布是否仍然偏窄或门槛过硬；
+- 赢家/输家在行业 RS、资金流、财务、入场质量上的差异不清楚；
+- 当前回测交易 CSV 缺少波段候选池五维因子明细，无法分析“没买到的好票”。
 
-### 2. `active + sideways` 是全年收益主力，但需要质量过滤
+## 第一阶段目标（已开始落地）
 
-2025 全年中，`active + sideways` 是重要正向来源。
+先审计和修正回测组合口径，不直接拿旧备份收益当结论。
 
-2026Q1 中，亏损集中在低质量 `active + sideways`，共同特征包括：
+1. 已用现有 `trades_*.csv` 审计同时持仓、重复开仓和名义暴露。
+2. 已定义可实盘执行的波段组合口径：最大同时持仓、禁止同一股票持有期重复开仓、单笔按最大持仓数分配组合权重。
+3. 已在 `backtest_v2.py` 实现 `--max-positions`，默认 `15`。
+4. 已让波段回测输出 `ic_longterm_*.csv` 候选池质量文件，包含五维评分、回撤位置、行业 RS 等字段。
+5. 下一步用当前 v4.1 和 legacy_raw_score_v1 在新组合口径下重跑三段。
+6. 再判断是否需要做候选池因子归因或权重实验。
 
-- 形态分偏低。
-- 板块热度偏高。
-- 回撤更深。
-- 量能冲但结构不强。
-
-`adaptive_quality_v6` 的价值就是：压力环境中过滤掉这类票，正常环境保留高质量 `active + sideways`，并避免误杀“板块不弱的高分放量票”。
-
-### 3. 固定 Top3，不继续调推荐数量
-
-TopN 容量实验显示：
-
-| 区间 | Top3 | Top5 | Top8 | 结论 |
-|---|---:|---:|---:|---|
-| 2024H2 | +8.56% | +4.20% | +2.85% | Top3 最稳 |
-| 2025全年 | +61.01% | +44.68% | +23.39% | Top3 明显最好 |
-| 2026Q1 | +1.93% | +5.21% | +3.10% | Top5 局部更好 |
-
-结论：Top5 在单一区间有价值，但跨区间不稳；Top8 后排质量明显下降。默认继续固定 Top3，后续不把推荐数量作为主战场。
-
-### 4. 卖点先封版
-
-已验证多个出场实验：
-
-- `exit_v1_mid_lock`
-- `exit_v1_profit_guard`
-- `exit_v2_conditional_lock`
-
-这些实验在 Q1 有局部改善，但 2025 全年均不能超过 baseline。后续固定 `baseline exit`，避免把选股因子和卖点混在一起。
-
-## 下一阶段：短线因子优化
-
-下一轮进入短线因子实验，但先从归因和硬过滤拆解开始：
+新增工具：
 
 ```text
-short_factor_quality_v1
+python longterm_trade_diagnostics.py --trades backtest_results/trades_longterm_全段_20260421_184335.csv --output reports/longterm_trade_diagnostics_all.md --title 波段全段交易诊断
+python longterm_backtest_audit.py --trades backtest_results/trades_20260604_133234.csv --output reports/longterm_backtest_audit_2025_legacy_raw_v1.md --title "波段2025 legacy原始评分回测审计"
 ```
 
-目标：
+旧版评分复刻实验：
 
-1. 固定当前主基准。
-2. 固定 baseline exit。
-3. 固定 Top3。
-4. 分析赚钱票和亏钱票的因子差异。
-5. 找出下一刀最值得改的选股因子。
+```text
+python backtest_v2.py --mode longterm --offline --start 20240701 --end 20241231 --longterm-profile zscore_v4_1 --max-positions 15
+python backtest_v2.py --mode longterm --offline --start 20250101 --end 20251231 --longterm-profile zscore_v4_1 --max-positions 15
+python backtest_v2.py --mode longterm --offline --start 20260101 --end 20260420 --longterm-profile zscore_v4_1 --max-positions 15
+python backtest_v2.py --mode longterm --offline --start 20240701 --end 20241231 --longterm-profile legacy_raw_score_v1 --max-positions 15
+python backtest_v2.py --mode longterm --offline --start 20250101 --end 20251231 --longterm-profile legacy_raw_score_v1 --max-positions 15
+python backtest_v2.py --mode longterm --offline --start 20260101 --end 20260420 --longterm-profile legacy_raw_score_v1 --max-positions 15
+```
 
-## 分析对象
+当前审计结论详见：
 
-至少覆盖两个区间：
+```text
+docs/LONGTERM_BACKTEST_AUDIT.md
+```
 
-- 2025 全年：`20250101~20251231`
-- 2026Q1：`20260101~20260420`
-- 2024H2：`20240701~20241231`
+## 第二阶段目标
 
-至少拆分两类风格：
+补充波段候选池诊断 CSV，类似短线 `ic_short_*.csv`，至少包含：
 
-- `active + sideways`
-- `weak_momentum`
-
-## 优先观察字段
-
-| 字段 | 关注点 |
+| 字段 | 用途 |
 |---|---|
-| `factor_pattern` | 形态质量是否能区分好坏票 |
-| `factor_wyckoff` | Wyckoff 是否仍有正向价值，还是在部分风格中反向 |
-| `factor_volume_ratio` | 量能是温和确认还是冲高风险 |
-| `factor_inflow` | 资金流是否应从加分变为硬过滤或排名 |
-| `factor_sector` | 板块补涨是否过热 |
-| `factor_drawdown` | 回撤得分是否奖励了过深回调 |
-| `drawdown_from_high` | 距前高回撤是否需要分段处理 |
-| `market_style` | 哪些风格应保留或禁用 |
-| `macro_mode` | active/cautious 环境下因子方向是否不同 |
-| `track_type` | 补涨/回调路径是否有明显差异 |
+| `select_date` / `ts_code` | 按选股日复盘候选 |
+| `longterm_score` | 评分有效性 |
+| `score_momentum` | 动量贡献 |
+| `score_flow` | 资金流贡献 |
+| `score_rs` | 行业 RS 贡献 |
+| `score_fin` | 财务贡献 |
+| `score_entry` | 入场质量贡献 |
+| `drawdown_from_high` | 回调位置 |
+| `industry_rs` | 行业强度 |
+| `forward_20d/40d/60d` 或路径指标 | 后续表现 |
+
+只有拿到候选池明细后，才做波段 v5 权重实验。
 
 ## 实验原则
 
+- 不和短线混跑，波段单独评估。
+- 先固定当前波段 v4.1 作为基准。
+- 优先看胜率、总收益、最大回撤、平均持有天数、退出原因。
+- IC 作为辅助，不能只凭 IC 改权重。
 - 一次只改一个主要变量。
-- 每次同时看 2024H2、2025 全年和 2026Q1。
-- 固定出场规则，不在同一轮实验里改卖点。
-- 优先看总收益、最大回撤、胜率、MFE、MAE、窗口期末收益。
-- IC 作为辅助，不作为唯一标准。
-
-## 推荐下一步
-
-1. 第一轮优先研究板块硬过滤是否应改成扣分。
-2. 第二轮研究震荡市回调位置是否过严。
-3. 第三轮研究 K 线质量过滤是否过严。
-4. 每一轮都用固定 Top3 + baseline exit 做裁判。

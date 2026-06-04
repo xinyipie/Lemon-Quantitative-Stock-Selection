@@ -1595,3 +1595,77 @@ main.py 默认只跑短线
 ```
 
 后续工作进入短线因子优化，不再继续围绕卖点或推荐数量打转。
+
+## 2026-06-03 选股门控实验：sector_penalty_v7（不升级）
+
+### 背景
+
+`adaptive_quality_v6` 之所以优于 v5，是因为它把 `002249.SZ 大洋电机` 这类“板块不弱的放量高分票”买回来。于是尝试进一步放宽短线硬过滤：当个股行业不在 MA10 上方时，不直接剔除，而是改为扣分。
+
+本轮只改候选池硬过滤方式，不改评分因子、卖点和推荐数量：
+
+```text
+scenario = profile_v4_adaptive_quality_v6
+exit_profile = baseline
+Top3
+short_filter_profile = sector_penalty_light / sector_penalty_strict
+```
+
+### 命令
+
+```text
+python test.py --scenario profile_v4_adaptive_quality_v6,profile_v4_adaptive_quality_v7_sector_light,profile_v4_adaptive_quality_v7_sector_strict --exit-profile baseline --start 20250101 --end 20251231 --label 2025_sector_v7
+python test.py --scenario profile_v4_adaptive_quality_v6,profile_v4_adaptive_quality_v7_sector_light,profile_v4_adaptive_quality_v7_sector_strict --exit-profile baseline --start 20240701 --end 20241231 --label 2024H2_sector_v7
+python test.py --scenario profile_v4_adaptive_quality_v7_sector_strict --exit-profile baseline --start 20260101 --end 20260420 --label 2026Q1_sector_v7_strict
+```
+
+### 结果
+
+| 区间 | 场景 | 笔数 | 胜率 | 总收益 | Alpha | Sharpe | 结论 |
+|---|---|---:|---:|---:|---:|---:|---|
+| 2025全年 | v6 baseline | 154 | 45.45% | +61.01% | +39.82% | +1.740 | 当前基准 |
+| 2025全年 | v7 sector_light | 156 | 45.51% | +60.33% | +39.14% | +1.728 | 略差 |
+| 2025全年 | v7 sector_strict | 155 | 45.16% | +60.11% | +38.92% | +1.723 | 略差 |
+| 2024H2 | v6 baseline | 20 | 40.00% | +8.56% | -4.58% | +0.835 | 当前基准 |
+| 2024H2 | v7 sector_light | 22 | 40.91% | +6.83% | -6.30% | +0.655 | 明显退化 |
+| 2024H2 | v7 sector_strict | 20 | 40.00% | +8.56% | -4.58% | +0.835 | 与 v6 相同 |
+| 2026Q1 | v6 baseline | 16 | 50.00% | +1.93% | +1.09% | +0.458 | 当前基准 |
+| 2026Q1 | v7 sector_light | 16 | 50.00% | +1.93% | +1.09% | +0.458 | 与 v6 相同 |
+| 2026Q1 | v7 sector_strict | 16 | 50.00% | +1.93% | +1.09% | +0.458 | 与 v6 相同 |
+
+### 结论
+
+- `sector_penalty_light` 会放进更多板块不符候选，但跨区间没有收益增量，2024H2 明显退化。
+- `sector_penalty_strict` 多数时候等价于旧硬过滤，2025 全年略差，不值得升级。
+- 当前默认继续保持 `profile_v4_adaptive_quality_v6 + baseline exit + fixed Top3`。
+- 板块线索不应继续通过“放宽硬过滤”解决，下一步改做候选排名归因，分析 Top3 之外的错过好票到底强在哪里。
+
+## 2026-06-03 诊断工具：candidate_rank_diagnostics
+
+### 目的
+
+进入 `short_factor_quality_v1` 阶段后，先不直接改策略。新增离线诊断脚本，用 `ic_short_*.csv` 候选池分析：
+
+- 每个选股日按 `score` 排名。
+- 对比已选 Top3 与第 4-10 名候选。
+- 找出 MFE 或窗口期末收益优于当日 Top3 中位数的“错过好票”。
+- 汇总错过好票与 Top3 的因子均值差异，作为下一轮因子实验线索。
+
+### 用法
+
+```text
+python candidate_rank_diagnostics.py
+python candidate_rank_diagnostics.py --candidates backtest_results/ic_short_20260603_183124.csv --output reports/candidate_rank_diagnostics_smoke.md --top 8
+```
+
+### Smoke 结果
+
+基于 `backtest_results/ic_short_20260603_183124.csv`：
+
+- 共分析 36 个选股日，Top3 样本 85 个，第 4-10 名样本 100 个。
+- 发现 55 个第 4-10 名错过好票。
+- 最突出的因子差异：错过组 `factor_sector` 比 Top3 高 +10.97，但 `factor_volume_ratio`、`score`、`factor_counter_trend`、`factor_inflow` 更低。
+
+### 判断
+
+这说明“后排好票”不是简单的板块硬过滤问题：它们常有更好的板块位置，但总分、量能和资金质量未能进入 Top3。下一轮应围绕排序归因做单因子/小步实验，不建议一次性重写多项权重。

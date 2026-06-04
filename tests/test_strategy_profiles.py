@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from strategy_profiles import apply_style_gate, available_style_gates
+from strategy_profiles import apply_style_gate, available_profiles, available_style_gates, factor_profile_score
 
 
 class StyleGateTest(unittest.TestCase):
@@ -33,6 +33,18 @@ class StyleGateTest(unittest.TestCase):
 
     def test_adaptive_quality_v6_is_available(self):
         self.assertIn("adaptive_quality_v6", list(available_style_gates()))
+
+    def test_profile_v8_sector_rank_is_available(self):
+        self.assertIn("profile_v8_sector_rank", list(available_profiles()))
+
+    def test_profile_v9_sector_quality_guard_is_available(self):
+        self.assertIn("profile_v9_sector_quality_guard", list(available_profiles()))
+
+    def test_profile_v10_mid_deep_drawdown_guard_is_available(self):
+        self.assertIn("profile_v10_mid_deep_drawdown_guard", list(available_profiles()))
+
+    def test_profile_v11_mid_deep_drawdown_strict_guard_is_available(self):
+        self.assertIn("profile_v11_mid_deep_drawdown_strict_guard", list(available_profiles()))
 
     def test_adaptive_quality_v2_filters_extreme_high_score_risk(self):
         df = pd.DataFrame(
@@ -127,6 +139,72 @@ class StyleGateTest(unittest.TestCase):
         filtered = apply_style_gate(df, "adaptive_quality_v6")
 
         self.assertEqual(filtered["ts_code"].tolist(), ["strong_sector_spike"])
+
+    def test_profile_v8_sector_rank_adds_small_sector_bonus_on_profile_v4_base(self):
+        row = pd.Series(self.make_row(factor_sector=65))
+
+        base = factor_profile_score(row, "profile_v4")
+        boosted = factor_profile_score(row, "profile_v8_sector_rank")
+
+        self.assertEqual(boosted, round(min(base + 3.0, 100.0), 2))
+
+    def test_profile_v8_sector_rank_penalizes_weak_sector(self):
+        row = pd.Series(self.make_row(factor_sector=25))
+
+        base = factor_profile_score(row, "profile_v4")
+        penalized = factor_profile_score(row, "profile_v8_sector_rank")
+
+        self.assertEqual(penalized, round(max(base - 1.0, 0.0), 2))
+
+    def test_profile_v9_rewards_strong_sector_only_when_volume_is_not_spiking(self):
+        calm_row = pd.Series(self.make_row(factor_sector=65, volume_ratio=2.4))
+        spike_row = pd.Series(self.make_row(factor_sector=65, volume_ratio=3.2))
+
+        calm_base = factor_profile_score(calm_row, "profile_v4")
+        spike_base = factor_profile_score(spike_row, "profile_v4")
+
+        self.assertEqual(factor_profile_score(calm_row, "profile_v9_sector_quality_guard"), round(min(calm_base + 3.0, 100.0), 2))
+        self.assertEqual(factor_profile_score(spike_row, "profile_v9_sector_quality_guard"), spike_base)
+
+    def test_profile_v9_heavily_penalizes_weak_sector_volume_spike(self):
+        row = pd.Series(self.make_row(factor_sector=25, volume_ratio=3.2))
+
+        base = factor_profile_score(row, "profile_v4")
+        penalized = factor_profile_score(row, "profile_v9_sector_quality_guard")
+
+        self.assertEqual(penalized, round(max(base - 3.0, 0.0), 2))
+
+    def test_profile_v10_penalizes_only_mid_deep_drawdown_bucket(self):
+        mid_deep = pd.Series(self.make_row(drawdown_from_high=9.5))
+        extreme = pd.Series(self.make_row(drawdown_from_high=12.5))
+        normal = pd.Series(self.make_row(drawdown_from_high=6.5))
+
+        mid_deep_base = factor_profile_score(mid_deep, "profile_v4")
+        extreme_base = factor_profile_score(extreme, "profile_v4")
+        normal_base = factor_profile_score(normal, "profile_v4")
+
+        self.assertEqual(
+            factor_profile_score(mid_deep, "profile_v10_mid_deep_drawdown_guard"),
+            round(max(mid_deep_base - 3.0, 0.0), 2),
+        )
+        self.assertEqual(factor_profile_score(extreme, "profile_v10_mid_deep_drawdown_guard"), extreme_base)
+        self.assertEqual(factor_profile_score(normal, "profile_v10_mid_deep_drawdown_guard"), normal_base)
+
+    def test_profile_v11_strictly_penalizes_only_mid_deep_drawdown_bucket(self):
+        mid_deep = pd.Series(self.make_row(drawdown_from_high=9.5))
+        extreme = pd.Series(self.make_row(drawdown_from_high=12.5))
+        normal = pd.Series(self.make_row(drawdown_from_high=6.5))
+
+        mid_deep_base = factor_profile_score(mid_deep, "profile_v4")
+        extreme_base = factor_profile_score(extreme, "profile_v4")
+        normal_base = factor_profile_score(normal, "profile_v4")
+
+        self.assertEqual(
+            factor_profile_score(mid_deep, "profile_v11_mid_deep_drawdown_strict_guard"),
+            round(max(mid_deep_base - 6.0, 0.0), 2),
+        )
+        self.assertEqual(factor_profile_score(extreme, "profile_v11_mid_deep_drawdown_strict_guard"), extreme_base)
+        self.assertEqual(factor_profile_score(normal, "profile_v11_mid_deep_drawdown_strict_guard"), normal_base)
 
 
 if __name__ == "__main__":

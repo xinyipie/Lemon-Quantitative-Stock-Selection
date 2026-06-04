@@ -41,15 +41,51 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
         self.assertEqual(scenarios[1]["style_gate"], "adaptive_quality_v6")
 
-    def test_default_core_scenario_uses_v6_candidate(self):
+    def test_v8_sector_rank_scenario_is_registered(self):
+        args = SimpleNamespace(scenario="profile_v4_adaptive_quality_v8_sector_rank", matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["factor_profile"], "profile_v8_sector_rank")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+        self.assertEqual(scenarios[0].get("short_filter_profile", "baseline"), "baseline")
+
+    def test_v9_sector_quality_guard_scenario_is_registered(self):
+        args = SimpleNamespace(scenario="profile_v4_adaptive_quality_v9_sector_quality_guard", matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["factor_profile"], "profile_v9_sector_quality_guard")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+        self.assertEqual(scenarios[0].get("short_filter_profile", "baseline"), "baseline")
+
+    def test_v10_mid_deep_drawdown_guard_scenario_is_registered(self):
+        args = SimpleNamespace(scenario="profile_v4_adaptive_quality_v10_mid_deep_drawdown_guard", matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["factor_profile"], "profile_v10_mid_deep_drawdown_guard")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+        self.assertEqual(scenarios[0].get("short_filter_profile", "baseline"), "baseline")
+
+    def test_v11_mid_deep_drawdown_strict_guard_scenario_is_registered(self):
+        args = SimpleNamespace(scenario="profile_v4_adaptive_quality_v11_mid_deep_drawdown_strict_guard", matrix=False)
+
+        scenarios = select_scenarios(args)
+
+        self.assertEqual(scenarios[0]["factor_profile"], "profile_v11_mid_deep_drawdown_strict_guard")
+        self.assertEqual(scenarios[0]["style_gate"], "adaptive_quality_v6")
+        self.assertEqual(scenarios[0].get("short_filter_profile", "baseline"), "baseline")
+
+    def test_default_core_scenario_uses_v9_candidate(self):
         args = SimpleNamespace(scenario=None, matrix=False)
 
         scenarios = select_scenarios(args)
 
-        self.assertEqual(scenarios[1]["label"], "profile_v4_adaptive_quality_v6")
+        self.assertEqual(scenarios[1]["label"], "profile_v4_adaptive_quality_v9_sector_quality_guard")
 
-    def test_live_short_config_uses_v6_candidate(self):
-        self.assertEqual(config.SHORT_LIVE_FACTOR_PROFILE, "profile_v4")
+    def test_live_short_config_uses_v9_candidate(self):
+        self.assertEqual(config.SHORT_LIVE_FACTOR_PROFILE, "profile_v9_sector_quality_guard")
         self.assertEqual(config.SHORT_LIVE_STYLE_GATE, "adaptive_quality_v6")
         self.assertEqual(config.SHORT_LIVE_SCORE_ORDER, "desc")
 

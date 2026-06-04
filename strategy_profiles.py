@@ -34,6 +34,10 @@ VALID_FACTOR_PROFILES = (
     "profile_v3",
     "profile_v4",
     "profile_v5",
+    "profile_v8_sector_rank",
+    "profile_v9_sector_quality_guard",
+    "profile_v10_mid_deep_drawdown_guard",
+    "profile_v11_mid_deep_drawdown_strict_guard",
 )
 
 VALID_STYLE_GATES = (
@@ -227,6 +231,42 @@ def factor_profile_score(row: pd.Series, factor_profile: str, base_score_col: st
                 + not_overheated * 0.04
             )
         return round(clipped(score), 2)
+
+    if factor_profile == "profile_v8_sector_rank":
+        base = factor_profile_score(row, "profile_v4", base_score_col)
+        if sector >= 60.0:
+            bonus = 3.0
+        elif sector >= 45.0:
+            bonus = 1.5
+        elif sector < 30.0:
+            bonus = -1.0
+        else:
+            bonus = 0.0
+        return round(clipped(base + bonus), 2)
+
+    if factor_profile == "profile_v9_sector_quality_guard":
+        base = factor_profile_score(row, "profile_v4", base_score_col)
+        if sector >= 60.0 and raw_volume_ratio <= 2.6:
+            bonus = 3.0
+        elif sector >= 45.0 and raw_volume_ratio <= 2.6:
+            bonus = 1.5
+        elif sector < 30.0 and raw_volume_ratio >= 3.0:
+            bonus = -3.0
+        elif sector < 30.0:
+            bonus = -1.0
+        else:
+            bonus = 0.0
+        return round(clipped(base + bonus), 2)
+
+    if factor_profile == "profile_v10_mid_deep_drawdown_guard":
+        base = factor_profile_score(row, "profile_v4", base_score_col)
+        penalty = 3.0 if 9.0 <= raw_drawdown < 12.0 else 0.0
+        return round(clipped(base - penalty), 2)
+
+    if factor_profile == "profile_v11_mid_deep_drawdown_strict_guard":
+        base = factor_profile_score(row, "profile_v4", base_score_col)
+        penalty = 6.0 if 9.0 <= raw_drawdown < 12.0 else 0.0
+        return round(clipped(base - penalty), 2)
 
     if factor_profile in ("profile_v3", "profile_v4", "profile_v5"):
         calm_volume_fit = band_score(raw_volume_ratio, 0.65, 1.35, 2.6)

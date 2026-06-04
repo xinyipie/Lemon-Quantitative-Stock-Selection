@@ -1,13 +1,13 @@
 # 当前短线基准
 
-更新时间：2026-06-03
+更新日期：2026-06-04
 
 ## 定板版本
 
-当前短线主基准定为：
+当前短线正式稳健基准已经定板：
 
 ```text
-选股评分：profile_v4
+选股评分：profile_v9_sector_quality_guard
 风格门控：adaptive_quality_v6
 出场规则：baseline exit
 排序方向：desc
@@ -18,7 +18,7 @@
 对应代码配置：
 
 ```text
-SHORT_LIVE_FACTOR_PROFILE = "profile_v4"
+SHORT_LIVE_FACTOR_PROFILE = "profile_v9_sector_quality_guard"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
 ENABLE_LONGTERM_LIVE = False
@@ -27,7 +27,7 @@ ENABLE_LONGTERM_LIVE = False
 回测入口：
 
 ```text
-python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline
+python test.py --scenario profile_v4_adaptive_quality_v9_sector_quality_guard --exit-profile baseline
 ```
 
 实盘入口：
@@ -36,25 +36,28 @@ python test.py --scenario profile_v4_adaptive_quality_v6 --exit-profile baseline
 python main.py
 ```
 
-当前 `main.py` 默认只输出短线建议。波段/长线模块暂时不作为主线，等短线因子继续稳定后再单独整理。
+v6 保留为进攻型历史基准，可通过 `profile_v4_adaptive_quality_v6` 显式复跑。
 
-## 为什么定板
+## 为什么从 v6 切到 v9
 
-这版是目前跨 2024H2、2025 全年和 2026Q1 后最均衡的短线默认候选。
+v9 的含义是：在 v6 已验证的 `profile_v4 + adaptive_quality_v6` 基础上，加入轻量板块质量保护。它不是大幅改权重，而是让强板块在量能不过热时小幅上提，让弱板块且放量过热的候选小幅降权。
 
-| 版本 | 区间 | 笔数 | 胜率 | 总收益 | Alpha | 最大回撤 | Sharpe |
-|---|---|---:|---:|---:|---:|---:|---:|
-| profile_v4_adaptive_quality_v6 | 2024H2 | 20 | 40.00% | +8.56% | -4.58% | - | +0.835 |
-| score_desc 老基准 | 2026Q1 | 48 | 20.83% | -20.44% | -21.28% | 23.09% | -2.524 |
-| profile_v4_adaptive_quality_v6 | 2026Q1 | 16 | 50.00% | +1.93% | +1.09% | 3.84% | +0.458 |
-| score_desc 老基准 | 2025全年 | 251 | 35.06% | -10.99% | -32.18% | 32.61% | -0.258 |
-| profile_v4_adaptive_quality_v6 | 2025全年 | 154 | 45.45% | +61.01% | +39.82% | 20.72% | +1.740 |
+跨区间结果：
 
-核心结论：
+| 区间 | v6 | v9 | 判断 |
+|---|---:|---:|---|
+| 2024H1 | -14.79% | -14.79% | 持平，v9 IC 更好 |
+| 2024H2 | +8.56% | +9.55% | v9 小胜 |
+| 2024全年 | -7.50% | -6.65% | v9 小胜，胜率和夏普更好 |
+| 2025全年 | +61.01% | +60.49% | v9 小输 |
+| 2026Q1 | +1.93% | +4.99% | v9 明显胜 |
 
-- `weak_only` 是 Q1 防守有效线索，但全年常开会过度降频，2025 全年只有 +6.50%。
-- `active + sideways` 是 2025 全年主要收益来源，但在 Q1 的低质量样本会亏损严重。
-- `adaptive_quality_v6` 将两者结合：压力环境下接近 `weak_only`，正常环境保留高质量 `active + sideways`，并额外过滤“高分 + 放量过冲 + 板块偏弱”的追高风险。
+结论：
+
+- v6 在 2025 主升市略强，保留为进攻型历史基准。
+- v9 在 2024 和 2026Q1 这种波动环境中更稳健。
+- 2025 v9 仅小幅落后，且没有发现大规模替换失真。
+- 综合未来实盘环境不一定持续主牛市，v9 更适合作为默认稳健基准。
 
 ## 推荐容量结论
 
@@ -77,7 +80,7 @@ TopN 容量实验：
 
 ## 出场规则结论
 
-出场规则定为 `baseline exit`：
+出场规则固定为 `baseline exit`：
 
 ```text
 fallback_stop = -7.0%
@@ -86,36 +89,29 @@ trailing_stop = 7.0%
 trailing_activate = 3.0%
 ```
 
-已经验证过的出场实验：
+已验证过的出场实验：
 
 | 出场版本 | 2026Q1 | 2025全年 | 结论 |
 |---|---|---|---|
-| baseline | +1.93%，回撤 3.84% | +48.87%，回撤 20.72% | 当前默认 |
+| baseline | +1.93%，回撤 3.84% | +61.01%，回撤 20.72% | 默认裁判 |
 | exit_v1_mid_lock | Q1 更好 | 全年退化到 +26.68%，回撤升至 27.01% | 不升级 |
 | exit_v1_profit_guard | Q1 更好 | 全年略差到 +46.18%，回撤更高 | 不升级 |
 | exit_v2_conditional_lock | Q1 收益降到 +1.40% | 全年退化到 +34.12% | 不升级 |
 
-结论：卖点优化已进入边际收益低、过拟合风险高的阶段。后续实验固定 `baseline exit`，把卖点作为统一裁判。
+结论：卖点优化已经进入边际收益低、过拟合风险高的阶段。后续实验固定 `baseline exit`，把收益变化主要归因于选股质量。
 
-## 买卖点后续怎么用
+## 已归档短线实验
 
-后续不再把卖点作为主战场，但它仍然有两个用途：
-
-1. 回测裁判  
-   所有选股因子实验统一使用 `baseline exit`，这样结果变化主要来自选股质量。
-
-2. 实盘提示  
-   在持仓分析或自选股分析里展示风险信息，例如技术止损、目标价、高 MFE 回吐风险、弱结构盯盘提示。系统仍然只是辅助决策，不做自动交易。
+- v7 sector penalty：不升级，2025/2026Q1 没有稳定改善。
+- v8 sector rank：板块信号有效，但 2024H2 回撤明显，不升级。
+- v10 mid-deep drawdown guard：交易几乎不变，不升级。
+- v11 mid-deep drawdown strict guard：仅边缘改善，不升级。
 
 ## 下一阶段目标
 
-从“调卖点”切换到“提高选股质量”。
+短线主线暂时定板，下一步转向波段策略诊断：
 
-下一步实验进入短线因子优化，不再继续调推荐数量。
-
-目标：
-
-- 比较 2025 全年赚钱票 vs 亏钱票。
-- 比较 2026Q1 赚钱票 vs 亏钱票。
-- 分别观察 `active + sideways` 和 `weak_momentum`。
-- 优先研究板块硬过滤、回调位置、K线质量和分数门槛。
+- longterm_score 分布是否太窄；
+- 赢家/输家在行业RS、财务、动量、回调位置上的差异；
+- 高分低收益和低分高收益的错配样本；
+- 是否需要重构波段评分权重或候选池过滤。
