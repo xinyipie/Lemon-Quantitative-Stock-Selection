@@ -122,7 +122,15 @@ ENABLE_FINANCIAL_FILTER_SHORT = False  # 短线策略是否启用财务过滤（
 SHORT_LIVE_FACTOR_PROFILE = "profile_v9_sector_quality_guard"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
-ENABLE_LONGTERM_LIVE = False  # 当前主线先专注短线；波段策略整理完成后再打开
+ENABLE_LONGTERM_LIVE = True  # Web看板经营期启用长线观察池扫描；只记录池状态，不做交易执行
+LONGTERM_LIVE_PROFILE = "longterm_quality_lifecycle_v18_market_sync"  # 长线实盘启用时使用当前验证的市场同步观察池
+LONGTERM_LIVE_TOPN = 3
+LONGTERM_LIVE_MAX_INDUSTRY_PER_DAY = 2
+LONGTERM_ALERT_COOLDOWN_DAYS = 80
+LONGTERM_ELITE_MIN_COMPRESSION_SCORE = 80
+LONGTERM_ELITE_MIN_INDUSTRY_RS = 8
+LONGTERM_ELITE_DRAWDOWN_MIN = 7
+LONGTERM_ELITE_DRAWDOWN_MAX = 15
 
 # ==================== AI配置（通义千问） ====================
 # 配置说明：

@@ -110,6 +110,100 @@ class SignalStoreTest(unittest.TestCase):
         self.assertEqual(events[0]["event_type"], "NEW")
         self.assertEqual(len(state), 1)
 
+    def test_daily_run_key_is_reused_and_signal_row_is_updated(self):
+        first_run = self.store.record_run("20250605", "short", "short_v9", source="live", label="daily")
+        second_run = self.store.record_run("20250605", "short", "short_v9", source="live", label="daily")
+
+        self.assertEqual(first_run, second_run)
+
+        self.store.update_pool(
+            first_run,
+            "20250605",
+            "short",
+            "short_v9",
+            [SignalRecord(ts_code="000001.SZ", name="旧名", rank=1, score=70)],
+        )
+        self.store.update_pool(
+            second_run,
+            "20250605",
+            "short",
+            "short_v9",
+            [SignalRecord(ts_code="000001.SZ", name="新名", rank=1, score=88)],
+        )
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            run_count = conn.execute("select count(*) from signal_runs").fetchone()[0]
+            row = conn.execute("select name, score from signal_pool where run_id = ?", (first_run,)).fetchone()
+        finally:
+            conn.close()
+
+        self.assertEqual(run_count, 1)
+        self.assertEqual(row[0], "新名")
+        self.assertEqual(row[1], 88)
+
+    def test_recent_event_codes_returns_codes_inside_cooldown_window(self):
+        first_run = self.store.record_run("20250605", "longterm", "longterm_elite", source="live")
+        self.store.update_pool(
+            first_run,
+            "20250605",
+            "longterm",
+            "longterm_elite",
+            [SignalRecord(ts_code="000001.SZ", name="A", score=90, pool_type="longterm_elite")],
+        )
+        old_run = self.store.record_run("20250101", "longterm", "longterm_elite", source="live")
+        self.store.update_pool(
+            old_run,
+            "20250101",
+            "longterm",
+            "longterm_elite",
+            [SignalRecord(ts_code="000002.SZ", name="B", score=91, pool_type="longterm_elite")],
+        )
+
+        recent = self.store.recent_event_codes(
+            mode="longterm",
+            profile="longterm_elite",
+            event_type="NEW",
+            asof_date="20250620",
+            cooldown_days=80,
+        )
+
+        self.assertEqual(recent, {"000001.SZ"})
+
+    def test_longterm_tier_changes_are_recorded_as_upgrade_and_downgrade_events(self):
+        watch_run = self.store.record_run("20250605", "longterm", "longterm_watch", source="live")
+        self.store.update_pool(
+            watch_run,
+            "20250605",
+            "longterm",
+            "longterm_watch",
+            [SignalRecord(ts_code="000001.SZ", name="A", score=82, pool_type="longterm_watch")],
+        )
+
+        elite_run = self.store.record_run("20250606", "longterm", "longterm_elite", source="live")
+        self.store.update_pool(
+            elite_run,
+            "20250606",
+            "longterm",
+            "longterm_elite",
+            [SignalRecord(ts_code="000001.SZ", name="A", score=91, pool_type="longterm_elite")],
+        )
+
+        watch_again_run = self.store.record_run("20250607", "longterm", "longterm_watch", source="live")
+        self.store.update_pool(
+            watch_again_run,
+            "20250607",
+            "longterm",
+            "longterm_watch",
+            [SignalRecord(ts_code="000001.SZ", name="A", score=84, pool_type="longterm_watch")],
+        )
+
+        events = self.fetch_events()
+        event_types = [item["event_type"] for item in events]
+
+        self.assertIn("UPGRADED", event_types)
+        self.assertIn("DOWNGRADED", event_types)
+
 
 if __name__ == "__main__":
     unittest.main()

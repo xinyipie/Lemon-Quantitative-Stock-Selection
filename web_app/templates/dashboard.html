@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}策略工作台{% endblock %}
+{% block content %}
+{% set decision = decision|default({
+  "level": "等待服务重启",
+  "tone": "caution",
+  "stance": "页面模板已更新；重启 Web 服务后会显示完整的今日决策层。",
+  "reasons": ["当前运行进程尚未加载新版服务层"],
+  "next_actions": [
+    {"label": "查看短线复盘", "href": "/signals", "hint": "先查看历史信号表现。"},
+    {"label": "查看长线池", "href": "/longterm", "hint": "确认长线池当前状态。"},
+    {"label": "单股体检", "href": "/stock/000001", "hint": "输入代码或中文名检查自选股。"}
+  ]
+}) %}
+<header class="terminal-header">
+  <div>
+    <div class="eyebrow">Local Research Console</div>
+    <h1>策略工作台</h1>
+    <p>首页只放今日实盘和关键入口；历史回测信号放到短线复盘里，避免把过去数据误读成今日推荐。</p>
+  </div>
+  <form class="command-search" action="/stock" method="get">
+    <input name="code" placeholder="输入股票代码或中文名，例 平安银行 / 000001">
+    <button type="submit">体检</button>
+  </form>
+</header>
+
+<section class="status-strip">
+  <div class="status-cell"><span>历史数据日</span><strong>{{ status.latest_trade_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>最近实盘运行日</span><strong>{{ latest_live_short_run.trade_date|fmt_date if latest_live_short_run else 'NA' }}</strong></div>
+  <div class="status-cell"><span>历史回测最新日</span><strong>{{ signal_summary.latest_backtest_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>长线 Elite / Watch</span><strong>{{ signal_summary.longterm_elite }} / {{ signal_summary.longterm_watch }}</strong></div>
+  <div class="status-cell"><span>最新日线 / 基础池</span><strong>{{ status.latest_daily_stock_count }} / {{ status.stock_count }}</strong></div>
+</section>
+
+<section class="panel update-panel" data-update-status-url="/update/status">
+  <div>
+    <h2>一键同步</h2>
+    <p>更新行情、运行 main.py、回填短线复盘、刷新长线审计，并生成概念热度/新闻板块缓存。</p>
+    {% if update_status and update_status.message %}
+      <div class="filter-summary" data-update-message>当前状态：{{ update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
+    {% else %}
+      <div class="filter-summary" data-update-message>当前状态：尚未运行一键更新。</div>
+    {% endif %}
+    <pre class="update-error" data-update-error hidden></pre>
+  </div>
+  <form method="post" action="/update/run">
+    <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
+      {% if update_status and update_status.running %}正在更新{% else %}更新全部数据{% endif %}
+    </button>
+  </form>
+</section>
+
+{% if freshness and freshness.warnings %}
+<section class="notice-band">
+  <strong>数据同步提醒</strong>
+  {% for item in freshness.notes %}
+  <span>{{ item }}</span>
+  {% endfor %}
+  {% for item in freshness.warnings %}
+  <span>{{ item }}</span>
+  {% endfor %}
+</section>
+{% elif freshness and freshness.notes %}
+<section class="notice-band ok">
+  <strong>数据同步状态</strong>
+  {% for item in freshness.notes %}
+  <span>{{ item }}</span>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="metric-grid compact-metrics">
+  <div class="metric"><span>近期复盘样本</span><strong>{{ short_stats.count if short_stats else 0 }}</strong></div>
+  <div class="metric"><span>5日胜率</span><strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong></div>
+  <div class="metric"><span>平均MFE</span><strong>{% if short_stats and short_stats.avg_mfe is not none %}{{ "%+.2f"|format(short_stats.avg_mfe) }}%{% else %}-{% endif %}</strong></div>
+  <div class="metric"><span>平均MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
+</section>
+
+<section class="decision-panel {{ decision.tone }}">
+  <div>
+    <div class="eyebrow">Daily Decision</div>
+    <h2>今日决策：{{ decision.level }}</h2>
+    <p>{{ decision.stance }}</p>
+    <div class="hint-list compact">
+      {% for item in decision.reasons %}
+      <span>{{ item }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="action-list">
+    {% for item in decision.next_actions %}
+    <a href="{{ item.href }}">
+      <strong>{{ item.label }}</strong>
+      <span>{{ item.hint }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if admission_diagnostics %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>今日信号解释</h2>
+      <p>这里使用数据库中已经落地的运行事实，不用历史回测冒充今日推荐。</p>
+    </div>
+  </div>
+  <div class="diagnostic-list">
+    {% for item in admission_diagnostics["items"] %}
+    <div class="diagnostic-item {{ item.tone }}">
+      <strong>{{ item.label }}</strong>
+      <span>{{ item.text }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="workbench-grid">
+  <div class="panel main-panel">
+    <div class="panel-head">
+      <div>
+        <h2>最近实盘短线</h2>
+        <p>只展示实盘运行记录；如果日期不是今天，说明还没有生成当天信号，不用历史回测顶替。</p>
+      </div>
+      <a href="/signals">历史复盘</a>
+    </div>
+    {% if live_signals %}
+    <table class="dense-table">
+      <thead><tr><th>日期</th><th>排名</th><th>股票</th><th>行业</th><th>分数</th><th>入选依据</th></tr></thead>
+      <tbody>
+      {% for item in live_signals[:8] %}
+      <tr>
+        <td>{{ item.trade_date|fmt_date }}</td>
+        <td>{{ item.rank or '-' }}</td>
+        <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+        <td>{{ item.industry or '-' }}</td>
+        <td><strong>{{ "%.1f"|format(item.score or 0) }}</strong></td>
+        <td class="reason">{{ item.basis_text }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      {% if latest_live_short_run %}
+      最近一次实盘运行日为 <strong>{{ latest_live_short_run.trade_date|fmt_date }}</strong>，结果为 <strong>{{ latest_live_short_run.status_label }}</strong>。这代表脚本已执行，但短线 v9 当天没有留下可入池候选。
+      {% else %}
+      暂无实盘短线运行记录。运行 <code>python main.py</code> 后，这里会显示最近一次实盘结果。
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <h2>快速检测</h2>
+        <p>支持股票代码和中文名。</p>
+      </div>
+    </div>
+    <form class="quick-box" action="/stock" method="get">
+      <input name="code" placeholder="平安银行 / 000001 / 贵州茅台">
+      <button type="submit">打开体检卡</button>
+    </form>
+    <div class="hint-list">
+      <span>价格表现</span>
+      <span>估值质量</span>
+      <span>资金行为</span>
+      <span>历史信号</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>短线 v9 历史复盘预览</h2>
+      <p>这是回测回填数据，不是今日推荐。当前已补到 {{ signal_summary.latest_backtest_date|fmt_date }}；如果某些交易日没有记录，表示短线 v9 当天没有产生可入库的 Top3 信号。</p>
+    </div>
+    <a href="/signals">查看复盘表</a>
+  </div>
+  <table class="dense-table">
+    <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>入选依据</th><th>最终收益</th><th>盘中机会</th><th>盘中风险</th><th>结论</th><th>AI解释</th></tr></thead>
+    <tbody>
+    {% for item in backtest_signals[:8] %}
+    <tr>
+      <td>{{ item.trade_date|fmt_date }}</td>
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td>{{ "%.1f"|format(item.score or 0) }}</td>
+      <td class="reason">{{ item.basis_text }}</td>
+      <td>{{ item.final_return_text }}</td>
+      <td>{% if item.performance.mfe_pct is not none %}{{ "%+.2f"|format(item.performance.mfe_pct) }}%{% else %}-{% endif %}</td>
+      <td><span class="tag {{ item.mae_risk_tone }}">{% if item.performance.mae_pct is not none %}{{ "%+.2f"|format(item.performance.mae_pct) }}%{% else %}-{% endif %}</span></td>
+      <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else item.process_tone }}">{{ item.outcome_label }} · {{ item.process_label }}</span></td>
+      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9">暂无历史回测信号。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% if longterm_pool %}
+<section class="pool-board">
+  <div class="pool-column elite">
+    <div class="column-title">Elite</div>
+    {% for item in longterm_buckets.elite[:6] %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    {% else %}<div class="empty-mini">暂无强提醒</div>{% endfor %}
+  </div>
+  <div class="pool-column watch">
+    <div class="column-title">Watch</div>
+    {% for item in longterm_buckets.watch[:6] %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    {% else %}<div class="empty-mini">暂无观察标的</div>{% endfor %}
+  </div>
+  <div class="pool-column other">
+    <div class="column-title">Other</div>
+    {% for item in longterm_buckets.other[:6] %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    {% else %}<div class="empty-mini">暂无其他 active 状态</div>{% endfor %}
+  </div>
+</section>
+{% else %}
+<section class="longterm-state-card {{ longterm_pool_status.tone if longterm_pool_status else 'neutral' }}">
+  <div>
+    <span>长线池状态</span>
+    <h2>{{ longterm_pool_status.title if longterm_pool_status else '当前长线池：空仓' }}</h2>
+    <p>{{ longterm_pool_status.description if longterm_pool_status else '长线规则当前没有放行标的。' }}</p>
+  </div>
+  <a class="mini-button" href="/longterm">查看长线池</a>
+</section>
+{% endif %}
+
+<script>
+(() => {
+  const panel = document.querySelector("[data-update-status-url]");
+  if (!panel) return;
+  const statusUrl = panel.dataset.updateStatusUrl;
+  const message = panel.querySelector("[data-update-message]");
+  const button = panel.querySelector("[data-update-button]");
+  const errorBox = panel.querySelector("[data-update-error]");
+
+  function renderStatus(status) {
+    if (!status || !message || !button) return;
+    let text = `当前状态：${status.message || "状态读取中"}`;
+    if (status.started_at && status.running) {
+      text += `（开始于 ${status.started_at}，通常需要 5-30 分钟）`;
+    } else if (status.finished_at) {
+      text += `（完成于 ${status.finished_at}）`;
+    }
+    message.textContent = text;
+    button.disabled = Boolean(status.running);
+    button.textContent = status.running ? "正在更新" : "更新全部数据";
+    if (errorBox) {
+      const tail = status.state === "failed" ? (status.stderr_tail || status.stdout_tail || "") : "";
+      errorBox.hidden = !tail;
+      errorBox.textContent = tail.slice(-1200);
+    }
+    if (status.running) {
+      window.setTimeout(fetchStatus, 5000);
+    }
+  }
+
+  async function fetchStatus() {
+    try {
+      const response = await fetch(statusUrl, { cache: "no-store" });
+      if (!response.ok) return;
+      renderStatus(await response.json());
+    } catch (error) {
+      if (message) message.textContent = "当前状态：暂时读取不到更新进度，页面刷新后可重试。";
+    }
+  }
+
+  fetchStatus();
+})();
+</script>
+{% endblock %}

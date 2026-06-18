@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}市场雷达{% endblock %}
+{% block content %}
+<header class="terminal-header compact">
+  <div>
+    <div class="eyebrow">Market Radar</div>
+    <h1>市场雷达</h1>
+    <p>行业口径热度追踪，用来判断市场主线、过热风险和板块内候选观察名单。</p>
+  </div>
+  <form class="command-search" action="/sectors" method="get">
+    <input name="end" value="{{ filters.end }}" placeholder="结束日期，如 20260616，可留空">
+    <button type="submit">查看</button>
+  </form>
+</header>
+
+<section class="sector-hero {{ radar.summary.tone }}">
+  <div>
+    <span>今日行业状态</span>
+    <h2>{{ radar.summary.headline }}</h2>
+    <p>{{ radar.summary.stance }}</p>
+    {% if radar.message %}
+      <p>{{ radar.message }}</p>
+    {% endif %}
+  </div>
+  <div class="sector-hero-facts">
+    <div><span>最强健康主线</span><strong>{{ radar.summary.top_sector }}</strong><small>{{ radar.summary.top_stage }} · {{ "%.1f"|format(radar.summary.top_score) }}分</small></div>
+    <div><span>健康主线</span><strong>{{ radar.summary.healthy_count }}</strong><small>低位启动 / 趋势延续 / 弱修复</small></div>
+    <div><span>风险板块</span><strong>{{ radar.summary.risky_count }}</strong><small>过热高潮 / 退潮中</small></div>
+  </div>
+</section>
+
+{% set concept_items = concept_news.concepts.get("items", []) %}
+{% set news_positive = concept_news.news.get("positive", []) %}
+{% set news_negative = concept_news.news.get("negative", []) %}
+<section class="market-context-grid">
+  <section class="panel concept-heat-panel">
+    <div class="panel-head">
+      <div>
+        <h2>概念热度</h2>
+        <p>只展示本地缓存里的热门概念，用来解释题材温度，不直接等于买入信号。</p>
+      </div>
+      {% if concept_news.concepts.source_date %}
+        <span class="tag soft-tag">{{ concept_news.concepts.source_date|fmt_date }}</span>
+      {% endif %}
+    </div>
+    {% if concept_items %}
+    <div class="concept-strip">
+      {% for item in concept_items %}
+      <div class="concept-card">
+        <div>
+          <strong>{{ item.concept }}</strong>
+          <span class="{{ 'market-up' if item.change and item.change > 0 else 'market-down' if item.change and item.change < 0 else 'muted' }}">{{ item.change_text }}</span>
+        </div>
+        <div class="heat-bar wide"><i style="width: {{ item.heat_width }}%"></i></div>
+        <small>热度 {{ item.heat_text }}</small>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="empty-state soft">{{ concept_news.concepts.message }}</div>
+    {% endif %}
+  </section>
+
+  <section class="panel news-impact-panel">
+    <div class="panel-head">
+      <div>
+        <h2>新闻板块影响</h2>
+        <p>来自已入库信号的 news/concept 因子汇总，帮助判断消息面推向了哪些行业。</p>
+      </div>
+      {% if concept_news.news.source_date %}
+        <span class="tag soft-tag">{{ concept_news.news.source_date|fmt_date }}</span>
+      {% endif %}
+    </div>
+    {% if news_positive or news_negative %}
+    <div class="news-impact-grid">
+      <div>
+        <h3>正向影响</h3>
+        {% for item in news_positive %}
+        <div class="impact-card {{ item.tone }}">
+          <div class="impact-card-head">
+            <strong>{{ item.industry }}</strong>
+            <span class="market-up">{{ item.impact_text }}</span>
+          </div>
+          <small>新闻 {{ item.news_boost_text }} / 概念 {{ item.concept_boost_text }} / {{ item.signal_count }} 个信号</small>
+          <div class="impact-stock-list">
+            {% for stock in item.top_stocks %}
+              <a href="/stock/{{ stock.ts_code }}">{{ stock.name }} <span>{{ stock.ts_code }}</span><em>{{ stock.impact_text }}</em></a>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+          <div class="empty-mini">暂无正向行业归因。</div>
+        {% endfor %}
+      </div>
+      <div>
+        <h3>负向影响</h3>
+        {% for item in news_negative %}
+        <div class="impact-card {{ item.tone }}">
+          <div class="impact-card-head">
+            <strong>{{ item.industry }}</strong>
+            <span class="market-down">{{ item.impact_text }}</span>
+          </div>
+          <small>新闻 {{ item.news_boost_text }} / 概念 {{ item.concept_boost_text }} / {{ item.signal_count }} 个信号</small>
+          <div class="impact-stock-list">
+            {% for stock in item.top_stocks %}
+              <a href="/stock/{{ stock.ts_code }}">{{ stock.name }} <span>{{ stock.ts_code }}</span><em>{{ stock.impact_text }}</em></a>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+          <div class="empty-mini">暂无负向行业归因。</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+      <div class="empty-state soft">{{ concept_news.news.message }}</div>
+    {% endif %}
+  </section>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>健康主线</h2>
+      <p>优先看扩散充分、相对大盘有超额、但没有明显过热的行业。</p>
+    </div>
+    <span class="tag soft-tag">行业口径 · {{ radar.end_date|fmt_date }}</span>
+  </div>
+  {% if radar.healthy %}
+  <table class="dense-table sector-table">
+    <thead>
+      <tr>
+        <th>行业</th>
+        <th>状态</th>
+        <th>热度</th>
+        <th>5日表现</th>
+        <th>10日超额</th>
+        <th>扩散</th>
+        <th>动作</th>
+        <th>解释</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in radar.healthy %}
+      <tr>
+        <td><strong>{{ item.industry }}</strong><br><span class="muted">{{ item.stock_count }}只样本</span></td>
+        <td><span class="tag {{ item.tone }}">{{ item.stage }}</span></td>
+        <td>
+          <strong>{{ item.heat_score_text }}</strong>
+          <div class="heat-bar"><i style="width: {{ item.heat_width }}%"></i></div>
+        </td>
+        <td class="market-up">{{ item.avg_ret_5d_text }}</td>
+        <td class="market-up">{{ item.rel_ret_10d_text }}</td>
+        <td>
+          MA20 {{ item.above_ma20_text }}<br>
+          <span class="muted">放量 {{ item.volume_expansion_text }}</span>
+        </td>
+        <td><span class="tag {{ item.tone }}">{{ item.action }}</span></td>
+        <td class="reason">{{ item.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state soft">暂无健康主线。行业扩散不足时，空着比硬找机会更有价值。</div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>板块候选 Top3</h2>
+      <p>候选名单只用于进一步体检，不等于买入指令；短期涨幅过大时默认提示等分歧。</p>
+    </div>
+  </div>
+  {% if radar.candidate_groups %}
+  <div class="sector-candidate-grid">
+    {% for group in radar.candidate_groups %}
+    <section class="sector-candidate-group">
+      <div class="sector-candidate-head">
+        <div>
+          <strong>{{ group.industry }}</strong>
+          <span>{{ group.sector.stage }} · 热度 {{ group.sector.heat_score_text }} · {{ group.sector.action }}</span>
+        </div>
+        <small>{{ group.sector.summary }}</small>
+      </div>
+      <table class="dense-table sector-mini-table">
+        <thead>
+          <tr>
+            <th>排名</th>
+            <th>股票</th>
+            <th>分数</th>
+            <th>5日</th>
+            <th>10日</th>
+            <th>强于板块</th>
+            <th>动作</th>
+            <th>风险提示</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in group.candidates %}
+          <tr>
+            <td>{{ item.candidate_rank }}</td>
+            <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong><br><span class="muted">{{ item.ts_code }}</span></a></td>
+            <td><strong>{{ item.candidate_score_text }}</strong></td>
+            <td class="{{ 'market-up' if item.ret_5d >= 0 else 'market-down' }}">{{ item.ret_5d_text }}</td>
+            <td class="{{ 'market-up' if item.ret_10d >= 0 else 'market-down' }}">{{ item.ret_10d_text }}</td>
+            <td class="{{ 'market-up' if item.stock_vs_sector_10d >= 0 else 'market-down' }}">{{ item.stock_vs_sector_10d_text }}</td>
+            <td><span class="tag {{ item.tone }}">{{ item.action_tag }}</span></td>
+            <td class="reason">{{ item.risk_note }}<br><span class="muted">{{ item.candidate_reason }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+    <div class="empty-state soft">没有生成板块候选。可能是健康主线为空，或候选过热被过滤。</div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>过热/退潮提醒</h2>
+      <p>这里不是机会榜，而是提醒哪些行业已经不适合追价。</p>
+    </div>
+  </div>
+  {% if radar.risky %}
+  <table class="dense-table sector-table">
+    <thead>
+      <tr>
+        <th>行业</th>
+        <th>状态</th>
+        <th>热度</th>
+        <th>5日表现</th>
+        <th>10日超额</th>
+        <th>扩散</th>
+        <th>动作</th>
+        <th>解释</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in radar.risky %}
+      <tr>
+        <td><strong>{{ item.industry }}</strong><br><span class="muted">{{ item.stock_count }}只样本</span></td>
+        <td><span class="tag {{ item.tone }}">{{ item.stage }}</span></td>
+        <td><strong>{{ item.heat_score_text }}</strong></td>
+        <td>{{ item.avg_ret_5d_text }}</td>
+        <td>{{ item.rel_ret_10d_text }}</td>
+        <td>
+          MA20 {{ item.above_ma20_text }}<br>
+          <span class="muted">放量 {{ item.volume_expansion_text }}</span>
+        </td>
+        <td><span class="tag {{ item.tone }}">{{ item.action }}</span></td>
+        <td class="reason">{{ item.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <div class="empty-state soft">暂无明显过热或退潮板块。</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}短线复盘{% endblock %}
+{% block content %}
+{% set filters = filters|default({}) %}
+<header class="terminal-header compact">
+  <div>
+    <div class="eyebrow">Short Signal Review</div>
+    <h1>短线复盘</h1>
+    <p>展示短线 v9 定板版历史回测与 main.py 实盘运行记录。入选依据是当时已知信息；事后表现只在满期后用于复盘。</p>
+  </div>
+</header>
+
+<section class="status-strip">
+  <div class="status-cell"><span>本页记录</span><strong>{{ signals|length }}</strong></div>
+  <div class="status-cell"><span>最新日期</span><strong>{{ signals[0].trade_date|fmt_date if signals else 'NA' }}</strong></div>
+  <div class="status-cell"><span>来源</span><strong>回测 + 实盘</strong></div>
+  <div class="status-cell"><span>策略</span><strong>short_v9</strong></div>
+  <div class="status-cell"><span>用途</span><strong>复盘追踪</strong></div>
+</section>
+
+<section class="metric-grid short-review-metrics">
+  <div class="metric primary-metric"><span>5日胜率</span><strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong><small>基于 {{ short_stats.closed_count if short_stats else 0 }} 个已满期样本</small></div>
+  <div class="metric primary-metric"><span>平均5日收益</span><strong class="{% if short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d > 0 %}market-up{% elif short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d < 0 %}market-down{% endif %}">{% if short_stats and short_stats.avg_ret_5d is not none %}{{ "%+.2f"|format(short_stats.avg_ret_5d) }}%{% else %}-{% endif %}</strong><small>当前表内共 {{ short_stats.count if short_stats else 0 }} 条</small></div>
+  <div class="metric secondary-metric"><span>盘中机会 MFE</span><strong>{% if short_stats and short_stats.avg_mfe is not none %}{{ "%+.2f"|format(short_stats.avg_mfe) }}%{% else %}-{% endif %}</strong></div>
+  <div class="metric secondary-metric"><span>盘中风险 MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
+  <div class="metric secondary-metric"><span>机会/风险比</span><strong>{% if short_stats and short_stats.opportunity_risk_ratio is not none %}{{ "%.2f"|format(short_stats.opportunity_risk_ratio) }}{% else %}-{% endif %}</strong></div>
+</section>
+
+<form class="filter-bar" action="/signals" method="get">
+  <input name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
+  <input name="start" value="{{ filters.get('start', '') }}" placeholder="开始日期 20260101">
+  <input name="end" value="{{ filters.get('end', '') }}" placeholder="结束日期 20260615">
+  <input name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
+  <button type="submit">筛选</button>
+  <a class="ghost-button" href="/signals">重置</a>
+</form>
+
+<div class="filter-summary filter-tags">
+  <span class="filter-label">当前筛选</span>
+  {% if filters.get('is_default_window') %}
+    <span class="filter-chip">近{{ filters.get('default_window_days') }}日</span>
+    <span class="filter-chip">{{ filters.get('effective_start')|fmt_date }} - 最新</span>
+  {% elif filters.get('start') or filters.get('end') %}
+    <span class="filter-chip">{{ filters.get('start') or '最早' }} - {{ filters.get('end') or '最新' }}</span>
+  {% elif filters.get('effective_start') %}
+    <span class="filter-chip">近{{ filters.get('default_window_days') }}日起</span>
+    <span class="filter-chip">{{ filters.get('effective_start')|fmt_date }} - 最新</span>
+  {% else %}
+    <span class="filter-chip">全部日期</span>
+  {% endif %}
+  <span class="filter-chip">{% if filters.get('industry') %}行业：{{ filters.get('industry') }}{% else %}全部行业{% endif %}</span>
+  <span class="filter-chip">{% if filters.get('q') %}关键词：{{ filters.get('q') }}{% else %}无关键词{% endif %}</span>
+  <span class="filter-chip strong">共命中 {{ signals|length }} 条</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>历史 Top3 信号</h2>
+      <p>没有展示的交易日，表示短线 v9 当天没有产生可入库的 Top3 信号，或当前筛选条件没有命中。</p>
+    </div>
+  </div>
+  <table class="dense-table review-table">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>排名</th>
+        <th>股票</th>
+        <th>行业</th>
+        <th>分数</th>
+        <th>收益路径</th>
+        <th>复盘标签</th>
+        <th>AI解释</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in signals %}
+    <tr>
+      <td>{{ item.trade_date|fmt_date }}</td>
+      <td>{{ item.rank or '-' }}</td>
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td>{{ item.industry or '-' }}</td>
+      <td><strong class="score-main" title="{{ item.basis_text }}">{{ "%.1f"|format(item.score or 0) }}</strong><div class="muted">{{ item.basis_summary }}</div></td>
+      <td class="path-cell">
+        <strong class="{{ item.final_return_tone }}">{{ item.final_return_text }}</strong>
+        <div class="path-sub">
+          <span class="{% if item.performance.mfe_pct is none %}muted-cell{% endif %}">机会 {{ item.mfe_text }}</span>
+          <span class="{{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}muted-cell{% endif %}">风险 {{ item.mae_text }}</span>
+        </div>
+      </td>
+      <td>
+        <div class="tag-stack">
+          <span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span>
+          <span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span>
+          <span class="tag {{ item.process_tone }}">{{ item.process_label }}</span>
+        </div>
+      </td>
+      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">暂无短线回测信号。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

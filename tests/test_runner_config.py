@@ -89,8 +89,18 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(config.SHORT_LIVE_STYLE_GATE, "adaptive_quality_v6")
         self.assertEqual(config.SHORT_LIVE_SCORE_ORDER, "desc")
 
-    def test_live_report_defaults_to_short_only(self):
-        self.assertFalse(config.ENABLE_LONGTERM_LIVE)
+    def test_live_report_records_longterm_watchlist_state(self):
+        self.assertTrue(config.ENABLE_LONGTERM_LIVE)
+
+    def test_live_longterm_config_points_to_current_v18_candidate(self):
+        self.assertEqual(config.LONGTERM_LIVE_PROFILE, "longterm_quality_lifecycle_v18_market_sync")
+        self.assertEqual(config.LONGTERM_LIVE_TOPN, 3)
+        self.assertEqual(config.LONGTERM_LIVE_MAX_INDUSTRY_PER_DAY, 2)
+        self.assertEqual(config.LONGTERM_ALERT_COOLDOWN_DAYS, 80)
+        self.assertEqual(config.LONGTERM_ELITE_MIN_COMPRESSION_SCORE, 80)
+        self.assertEqual(config.LONGTERM_ELITE_MIN_INDUSTRY_RS, 8)
+        self.assertEqual(config.LONGTERM_ELITE_DRAWDOWN_MIN, 7)
+        self.assertEqual(config.LONGTERM_ELITE_DRAWDOWN_MAX, 15)
 
     def test_monthly_periods_cover_calendar_year(self):
         args = SimpleNamespace(

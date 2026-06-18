@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}长线观察池{% endblock %}
+{% block content %}
+<header class="terminal-header compact">
+  <div>
+    <div class="eyebrow">Long-Term Lifecycle Pool</div>
+    <h1>长线观察池</h1>
+    <p>长线不是每日强推清单，而是严格入池、持续观察、降级移出的生命周期池。</p>
+  </div>
+</header>
+
+<section class="status-strip">
+  <div class="status-cell"><span>Active合计</span><strong>{{ pool|length }}</strong></div>
+  <div class="status-cell"><span>Elite提醒</span><strong>{{ buckets.elite|length }}</strong></div>
+  <div class="status-cell"><span>Watch观察</span><strong>{{ buckets.watch|length }}</strong></div>
+  <div class="status-cell"><span>最近运行日</span><strong>{{ runs[0].trade_date|fmt_date if runs else 'NA' }}</strong></div>
+  <div class="status-cell"><span>最近运行状态</span><strong>{{ runs[0].status_label if runs else '未运行' }}</strong></div>
+</section>
+
+<section class="longterm-state-card {{ pool_status.tone if pool_status else 'neutral' }}">
+  <div>
+    <span>今日长线结论</span>
+    <h2>{{ pool_status.title if pool_status else '当前长线池：NA' }}</h2>
+    <p>{{ pool_status.description if pool_status else '' }}</p>
+  </div>
+  <strong>{{ pool_status.subtitle if pool_status else '暂无扫描记录' }}</strong>
+</section>
+
+{% if not pool %}
+<section class="panel attention-panel compact-attention">
+  <div class="panel-head">
+    <div>
+      <h2>空仓不是异常</h2>
+      <p>如果最近运行状态是“无入池标的”，说明脚本已执行但 v18 规则没有放行股票。下方历史验证用于复盘规则质量，不等于当前仍可买。</p>
+    </div>
+  </div>
+  <div class="hint-list">
+    <span>市场同步过滤</span>
+    <span>质量趋势过滤</span>
+    <span>池子压缩</span>
+    <span>Elite冷却</span>
+  </div>
+</section>
+{% endif %}
+
+{% if run_funnel %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>长线运行漏斗</h2>
+      <p>这是当前已入库的运行层级摘要；逐层过滤候选数还需要 main.py 后续写入 telemetry。</p>
+    </div>
+  </div>
+  <div class="funnel-grid">
+    {% for step in run_funnel.steps %}
+    <div class="funnel-step {{ step.tone }}">
+      <span>{{ step.label }}</span>
+      <strong>{{ step.value }}</strong>
+      <small>{{ step.hint }}</small>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if pool %}
+<section class="pool-board full">
+  <div class="pool-column elite">
+    <div class="column-title">Elite</div>
+    {% for item in buckets.elite %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
+      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+    </a>
+    {% else %}
+    <div class="empty-mini">暂无强提醒。Elite宁可少，不要凑。</div>
+    {% endfor %}
+  </div>
+  <div class="pool-column watch">
+    <div class="column-title">Watch</div>
+    {% for item in buckets.watch %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
+      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+    </a>
+    {% else %}
+    <div class="empty-mini">暂无观察中标的。</div>
+    {% endfor %}
+  </div>
+  <div class="pool-column other">
+    <div class="column-title">Other Active</div>
+    {% for item in buckets.other %}
+    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
+      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+    </a>
+    {% else %}
+    <div class="empty-mini">暂无其他 active 状态。</div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>最近运行</h2>
+      <p>只把最近扫描作为状态确认；连续 0 入池是规则未放行，不是页面漏数。</p>
+    </div>
+  </div>
+  {% if runs %}
+  <div class="timeline-list compact-timeline">
+    {% for item in runs[:5] %}
+    <div class="timeline-item {{ 'ok' if item.signal_count else 'muted' }}">
+      <strong>{{ item.trade_date|fmt_date }}</strong>
+      <span>{{ item.profile_label }} · {{ item.status_label }}{% if item.signal_count %} {{ item.signal_count }} 只{% endif %}</span>
+      <small>{{ item.source }}{% if item.label %} / {{ item.label }}{% endif %} · {{ item.created_at }}</small>
+    </div>
+    {% endfor %}
+  </div>
+  <details class="detail-fold">
+    <summary>查看完整运行日志</summary>
+    <table class="dense-table">
+      <thead><tr><th>运行日</th><th>层级</th><th>Profile</th><th>来源</th><th>入池数</th><th>状态</th><th>创建时间</th></tr></thead>
+      <tbody>
+      {% for item in runs %}
+      <tr>
+        <td>{{ item.trade_date|fmt_date }}</td>
+        <td>{{ item.profile_label }}</td>
+        <td>{{ item.profile }}</td>
+        <td>{{ item.source }}{% if item.label %} / {{ item.label }}{% endif %}</td>
+        <td><strong>{{ item.signal_count }}</strong></td>
+        <td><span class="tag {{ 'ok' if item.signal_count else '' }}">{{ item.status_label }}</span></td>
+        <td>{{ item.created_at }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <div class="empty-state soft">暂无长线运行记录。</div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>生命周期事件</h2>
+      <p>记录股票何时新入池、升级强提醒、降级观察或移出池。这里解释池子为什么变多、变少或变空。</p>
+    </div>
+  </div>
+  <table class="dense-table">
+    <thead><tr><th>日期</th><th>事件</th><th>状态变化</th><th>股票</th><th>Profile</th><th>分数变化</th><th>说明</th></tr></thead>
+    <tbody>
+    {% for item in events %}
+    <tr>
+      <td>{{ item.event_date|fmt_date }}</td>
+      <td><span class="tag {{ item.event_tone }}">{{ item.event_type_label }}</span></td>
+      <td>{{ item.state_path_label }}</td>
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td>{{ item.profile }}</td>
+      <td>{{ item.score_delta }}</td>
+      <td class="reason">{{ item.message or '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7">暂无生命周期事件。若最近运行无入池标的，这里为空是正常的。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>历史长线池验证</h2>
+      <p>这里是半年度总览，不受下方入池日期筛选影响；用于判断长线池规则在不同阶段的整体质量。</p>
+    </div>
+  </div>
+  <table class="dense-table">
+    <thead><tr><th>阶段</th><th>Profile</th><th>样本数</th><th>日期范围</th><th>80日均收益</th><th>80日胜率</th><th>跑赢比例</th><th>来源文件</th></tr></thead>
+    <tbody>
+    {% for item in audit_summary.runs %}
+    <tr>
+      <td>{{ item.period }}</td>
+      <td>{{ item.profile }}</td>
+      <td><strong>{{ item.sample_count }}</strong></td>
+      <td>{{ item.date_start|fmt_date }} → {{ item.date_end|fmt_date }}</td>
+      <td class="{{ 'market-up' if item.avg_ret_80d and item.avg_ret_80d > 0 else 'market-down' if item.avg_ret_80d and item.avg_ret_80d < 0 else 'muted-cell' }}">{{ item.avg_ret_80d_text }}</td>
+      <td>{{ item.win_rate_80d_text }}</td>
+      <td>{{ item.outperform_rate_80d_text }}</td>
+      <td class="muted">{{ item.source_name }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">暂无历史长线池审计数据。导入 reports/longterm_pool_quality_*.csv 后会显示。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>历史样本明细</h2>
+      <p>固定 10/40/80 日用于审计规则质量；入池/移出用于实盘生命周期管理。未满期样本会显示当前收益和已经走过的交易日。</p>
+    </div>
+  </div>
+  <form class="filter-bar compact-filter" action="/longterm" method="get">
+    <input name="start" value="{{ filters.get('start', '') if filters else '' }}" placeholder="开始入池日 20250101">
+    <input name="end" value="{{ filters.get('end', '') if filters else '' }}" placeholder="结束入池日 20260615">
+    <button type="submit">筛选</button>
+    <a class="ghost-button" href="/longterm">重置</a>
+  </form>
+  <div class="filter-summary">
+    当前明细筛选：
+    {% if sample_filter_summary and sample_filter_summary.is_filtered %}
+      请求区间 {{ sample_filter_summary.requested_start or '最早' }} - {{ sample_filter_summary.requested_end or '最新' }}
+      / 命中 {{ sample_filter_summary.sample_count }} 条
+      {% if sample_filter_summary.actual_start %}
+      / 实际入池日 {{ sample_filter_summary.actual_start|fmt_date }} - {{ sample_filter_summary.actual_end|fmt_date }}
+      {% endif %}
+    {% else %}
+      最近 {{ audit_samples|length }} 条
+    {% endif %}
+  </div>
+  <div class="hint-list compact">
+    <span>基准：沪深300</span>
+    <span>核心逻辑：市场同步 + 质量趋势 + 健康回调</span>
+    <span>MAE越深，说明持有过程越痛苦</span>
+  </div>
+  <table class="dense-table">
+    <thead><tr><th>入池日</th><th>阶段</th><th>股票</th><th>行业</th><th>分数</th><th>当前/阶段收益</th><th>10日</th><th>40日</th><th>80日</th><th>最大回撤</th><th>超额收益<br><span class="muted">vs 沪深300</span></th><th>生命周期</th></tr></thead>
+    <tbody>
+    {% for item in audit_samples %}
+    <tr>
+      <td>{{ item.select_date|fmt_date }}</td>
+      <td>{{ item.period }}</td>
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td>{{ item.industry or '-' }}</td>
+      <td>{{ "%.1f"|format(item.score or 0) }}</td>
+      <td class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</td>
+      <td class="{{ item.ret_10d_tone }}">{{ item.ret_10d_text }}</td>
+      <td class="{{ item.ret_40d_tone }}">{{ item.ret_40d_text }}</td>
+      <td class="{{ item.ret_80d_tone }}">{{ item.ret_80d_text }}</td>
+      <td><span class="tag {{ item.mae_pain_tone }}">{{ item.mae_80d_text }}</span></td>
+      <td class="{{ item.excess_80d_tone }}">{{ item.excess_80d_text }}</td>
+      <td><span class="tag {{ 'bad' if '已移出' in item.lifecycle_label else 'ok' if '完成' in item.lifecycle_label else '' }}">{{ item.lifecycle_label }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="12">暂无历史样本。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>全部 active 长线记录</h2></div>
+  {% if pool %}
+  <table class="dense-table">
+    <thead><tr><th>股票</th><th>行业</th><th>Profile</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
+    <tbody>
+    {% for item in pool %}
+    <tr>
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
+      <td>{{ item.industry or '-' }}</td>
+      <td>{{ item.profile }}</td>
+      <td>{{ item.first_seen_date|fmt_date }}</td>
+      <td>{{ item.last_seen_date|fmt_date }}</td>
+      <td>{{ "%.1f"|format(item.latest_score or 0) }}</td>
+      <td>{{ "%.1f"|format(item.highest_score or 0) }}</td>
+      <td>{{ item.days_in_pool }}</td>
+      <td class="reason">{{ item.last_reason or '-' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
+  {% endif %}
+</section>
+{% endblock %}

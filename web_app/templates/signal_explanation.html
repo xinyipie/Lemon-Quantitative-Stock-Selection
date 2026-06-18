@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}AI解释文档{% endblock %}
+{% block content %}
+{% set doc = explanation.doc %}
+{% set signal = explanation.signal %}
+<header class="terminal-header compact">
+  <div>
+    <div class="eyebrow">AI Explanation</div>
+    <h1>AI解释文档</h1>
+    <p>基于本地信号、因子和复盘结果生成。AI只负责解释已有事实，不生成交易执行指令。</p>
+  </div>
+  {% if signal %}
+  <a class="ghost-button" href="/stock/{{ signal.ts_code }}">查看单股体检</a>
+  {% endif %}
+</header>
+
+<section class="explain-hero">
+  <div>
+    <span class="tag">{{ explanation.source }}</span>
+    <h2>{{ doc.title }}</h2>
+    <p>{{ doc.summary }}</p>
+  </div>
+  {% if signal %}
+  <div class="explain-facts">
+    <div><span>日期</span><strong>{{ signal.trade_date|fmt_date }}</strong></div>
+    <div><span>策略</span><strong>{{ signal.profile }}</strong></div>
+    <div><span>分数</span><strong>{{ "%.1f"|format(signal.score or 0) }}</strong></div>
+    <div><span>结果</span><strong>{{ signal.outcome_label }}</strong></div>
+  </div>
+  {% endif %}
+</section>
+
+<section class="explain-grid">
+  <div class="panel">
+    <div class="panel-head"><h2>看好点</h2></div>
+    {% for item in doc.positives %}
+    <p class="good-line">{{ item }}</p>
+    {% else %}
+    <p class="muted">AI没有识别出足够明确的支持因素。</p>
+    {% endfor %}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>风险点</h2></div>
+    {% for item in doc.risks %}
+    <p class="risk-line">{{ item }}</p>
+    {% else %}
+    <p class="muted">没有额外风险标签，但仍需等待走势确认。</p>
+    {% endfor %}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>观察计划</h2></div>
+    <p>{{ doc.watch_plan }}</p>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>失效条件</h2></div>
+    <p>{{ doc.invalidation }}</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>原始信号依据</h2>
+      <p>用于核对AI解释是否忠于数据。</p>
+    </div>
+    {% if signal %}
+    <a href="/explain/signal/{{ signal.trade_date }}/{{ signal.ts_code }}?refresh=true">重新生成</a>
+    {% endif %}
+  </div>
+  {% if signal %}
+  <dl class="info-list wide">
+    <dt>股票</dt><dd>{{ signal.display_name }} {{ signal.display_code }}</dd>
+    <dt>行业</dt><dd>{{ signal.industry or '-' }}</dd>
+    <dt>入选依据</dt><dd>{{ signal.basis_text }}</dd>
+    <dt>事后表现</dt><dd>{{ signal.performance_text }}</dd>
+    <dt>过程标签</dt><dd>{{ signal.process_label }}</dd>
+    <dt>说明</dt><dd>{{ doc.confidence_note }}</dd>
+  </dl>
+  {% else %}
+  <div class="empty-state">没有可核对的原始信号。</div>
+  {% endif %}
+</section>
+{% endblock %}

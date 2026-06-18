@@ -1,0 +1,297 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""One-command updater for the local Web dashboard data.
+
+This script keeps three dashboard layers aligned:
+1. market history database;
+2. live short/longterm signal snapshots from main.py;
+3. historical short review and longterm pool audit tables.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sqlite3
+import subprocess
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+
+
+DEFAULT_SIGNAL_DB = Path("data") / "stock_signals.db"
+DEFAULT_HISTORY_DB = Path("data") / "stock_history.db"
+DEFAULT_CACHE_DIR = Path("data") / "cache"
+SHORT_PROFILE = "short_v9_final"
+SHORT_SCENARIO = "profile_v4_adaptive_quality_v9_sector_quality_guard"
+LONGTERM_PROFILE = "longterm_quality_lifecycle_v18_market_sync"
+
+
+@dataclass
+class RunResult:
+    name: str
+    returncode: int
+
+
+def normalize_date(value: str) -> str:
+    return str(value).replace("-", "")[:8]
+
+
+def today_text() -> str:
+    return datetime.now().strftime("%Y%m%d")
+
+
+def next_calendar_day(value: str) -> str:
+    date = datetime.strptime(normalize_date(value), "%Y%m%d")
+    return (date + timedelta(days=1)).strftime("%Y%m%d")
+
+
+def current_half_year_period(end_date: str) -> tuple[str, str, str]:
+    end_text = normalize_date(end_date)
+    year = end_text[:4]
+    if end_text[4:6] <= "06":
+        return f"{year}H1", f"{year}0101", end_text
+    return f"{year}H2", f"{year}0701", end_text
+
+
+def build_longterm_periods(end_date: str, full_history: bool = False) -> list[tuple[str, str, str]]:
+    current = current_half_year_period(end_date)
+    if not full_history:
+        return [current]
+    fixed = [
+        ("2024H1", "20240101", "20240630"),
+        ("2024H2", "20240701", "20241231"),
+        ("2025H1", "20250101", "20250630"),
+        ("2025H2", "20250701", "20251231"),
+    ]
+    periods = [item for item in fixed if item[1] <= normalize_date(end_date)]
+    if current[0] not in {item[0] for item in periods}:
+        periods.append(current)
+    return periods
+
+
+def latest_history_trade_date(history_db: Path = DEFAULT_HISTORY_DB) -> str | None:
+    if not history_db.exists():
+        return None
+    conn = sqlite3.connect(history_db)
+    try:
+        row = conn.execute("select max(trade_date) from stock_daily").fetchone()
+        return str(row[0]) if row and row[0] else None
+    finally:
+        conn.close()
+
+
+def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | None:
+    if not signal_db.exists():
+        return None
+    conn = sqlite3.connect(signal_db)
+    try:
+        row = conn.execute(
+            """
+            select max(p.trade_date)
+            from signal_pool p
+            join signal_runs r on r.run_id = p.run_id
+            where p.mode = 'short'
+              and p.profile = ?
+              and r.source = 'backtest_ic_short'
+            """,
+            (SHORT_PROFILE,),
+        ).fetchone()
+        return str(row[0]) if row and row[0] else None
+    finally:
+        conn.close()
+
+
+def run_command(args: list[str], dry_run: bool = False) -> RunResult:
+    print("\n> " + " ".join(args))
+    if dry_run:
+        return RunResult(args[1] if len(args) > 1 else args[0], 0)
+    completed = subprocess.run(args, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(f"命令失败，退出码 {completed.returncode}: {' '.join(args)}")
+    return RunResult(args[1] if len(args) > 1 else args[0], completed.returncode)
+
+
+def latest_ic_short_file(since_mtime: float | None = None) -> Path | None:
+    files = sorted(Path("backtest_results").glob("ic_short_*.csv"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in files:
+        if since_mtime is None or path.stat().st_mtime >= since_mtime:
+            return path
+    return None
+
+
+def run_update(args: argparse.Namespace) -> None:
+    target_end = normalize_date(args.end or today_text())
+    target_start = normalize_date(args.start or target_end)
+    py = sys.executable
+
+    if not args.skip_download:
+        download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
+        if args.skip_financial:
+            download_cmd.append("--skip-financial")
+        run_command(download_cmd, args.dry_run)
+
+    if not args.skip_history_import:
+        run_command(
+            [
+                py,
+                "history_db_importer.py",
+                "--cache-dir",
+                str(args.cache_dir),
+                "--db",
+                str(args.history_db),
+                "--start",
+                target_start,
+                "--end",
+                target_end,
+                "--tables",
+                "daily",
+                "daily_basic",
+                "moneyflow",
+                "index_daily",
+                "stock_basic",
+            ],
+            args.dry_run,
+        )
+
+    effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
+    print(f"\n有效最新交易日：{effective_end}")
+
+    if not args.skip_market_context:
+        run_command(
+            [
+                py,
+                "market_context_snapshot.py",
+                "--date",
+                effective_end,
+            ],
+            args.dry_run,
+        )
+
+    if not args.skip_main:
+        run_command([py, "main.py"], args.dry_run)
+
+    if not args.skip_short_review:
+        short_start = normalize_date(args.short_start) if args.short_start else _default_short_start(args.signal_db, effective_end)
+        if short_start <= effective_end:
+            before = datetime.now().timestamp()
+            run_command(
+                [
+                    py,
+                    "test.py",
+                    "--scenario",
+                    SHORT_SCENARIO,
+                    "--exit-profile",
+                    "baseline",
+                    "--topn",
+                    "3",
+                    "--start",
+                    short_start,
+                    "--end",
+                    effective_end,
+                    "--label",
+                    f"web_short_v9_{effective_end}",
+                ],
+                args.dry_run,
+            )
+            if args.dry_run:
+                print("> signal_backfill.py 会在回测后自动使用最新 ic_short_*.csv")
+            else:
+                ic_file = latest_ic_short_file(before)
+                if ic_file is None:
+                    print("未找到新的 ic_short_*.csv，跳过短线复盘回填。")
+                else:
+                    run_command(
+                        [
+                            py,
+                            "signal_backfill.py",
+                            "--source",
+                            str(ic_file),
+                            "--db",
+                            str(args.signal_db),
+                            "--profile",
+                            SHORT_PROFILE,
+                            "--top",
+                            "3",
+                        ],
+                        args.dry_run,
+                    )
+        else:
+            print(f"短线复盘已到 {effective_end}，跳过回测回填。")
+
+    if not args.skip_longterm_audit:
+        for period, start, end in build_longterm_periods(effective_end, full_history=args.full_history):
+            output = Path("reports") / f"longterm_pool_quality_{period}_v18_market_sync_full.md"
+            csv_output = Path("reports") / f"longterm_pool_quality_{period}_v18_market_sync_full.csv"
+            run_command(
+                [
+                    py,
+                    "longterm_pool_quality_audit.py",
+                    "--start",
+                    start,
+                    "--end",
+                    end,
+                    "--longterm-profile",
+                    LONGTERM_PROFILE,
+                    "--forward-days",
+                    "10",
+                    "40",
+                    "80",
+                    "--sample-step",
+                    "1",
+                    "--output",
+                    str(output),
+                    "--csv-output",
+                    str(csv_output),
+                ],
+                args.dry_run,
+            )
+            run_command(
+                [
+                    py,
+                    "longterm_history_importer.py",
+                    "--source",
+                    str(csv_output),
+                    "--db",
+                    str(args.signal_db),
+                ],
+                args.dry_run,
+            )
+
+    print("\nWeb 数据同步流程完成。")
+
+
+def _default_short_start(signal_db: Path, effective_end: str) -> str:
+    latest = latest_short_backtest_date(signal_db)
+    if latest:
+        return next_calendar_day(latest)
+    return f"{effective_end[:4]}0101"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="一键同步 Web 前端所需的行情、实盘、短线复盘、长线审计数据")
+    parser.add_argument("--start", default=None, help="行情补数起始日，默认等于 --end")
+    parser.add_argument("--end", default=None, help="目标日期 YYYYMMDD，默认今天")
+    parser.add_argument("--short-start", default=None, help="短线复盘回测起始日，默认从库内最新复盘日后一日开始")
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--history-db", type=Path, default=DEFAULT_HISTORY_DB)
+    parser.add_argument("--signal-db", type=Path, default=DEFAULT_SIGNAL_DB)
+    parser.add_argument("--full-history", action="store_true", help="重跑并导入 2024H1 起所有半年度长线审计")
+    parser.add_argument("--skip-financial", action="store_true", default=True, help="日常更新默认跳过财务下载")
+    parser.add_argument("--with-financial", dest="skip_financial", action="store_false", help="同时下载财务数据")
+    parser.add_argument("--skip-download", action="store_true")
+    parser.add_argument("--skip-history-import", action="store_true")
+    parser.add_argument("--skip-market-context", action="store_true")
+    parser.add_argument("--skip-main", action="store_true")
+    parser.add_argument("--skip-short-review", action="store_true")
+    parser.add_argument("--skip-longterm-audit", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
+    return parser.parse_args()
+
+
+def main() -> None:
+    run_update(parse_args())
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}单股查询{% endblock %}
+{% block content %}
+{% set stock = detail.stock %}
+{% set latest = detail.latest_daily %}
+{% set basic = detail.latest_basic %}
+{% set moneyflow = detail.latest_moneyflow %}
+{% set finance = detail.latest_finance %}
+{% set returns = detail.returns %}
+{% set signal = detail.signal_state %}
+{% set verdict = detail.verdict %}
+{% set found = detail.found if detail.found is defined else true %}
+{% set query_text = detail.query if detail.query is defined else '' %}
+{% set strategy_summary = strategy_summary|default({}) %}
+
+<header class="terminal-header compact">
+  <div>
+    <div class="eyebrow">Stock Diagnostic</div>
+    <h1>单股查询</h1>
+    <p>股票体检卡：行情、质量、资金、信号状态放在一起看。</p>
+  </div>
+  <form class="command-search" action="/stock" method="get">
+    <input name="code" placeholder="输入股票代码或中文名，例 000001 / 平安银行">
+    <button type="submit">查询</button>
+  </form>
+</header>
+
+{% if not found %}
+<section class="panel attention-panel">
+  <div class="panel-head">
+    <div>
+      <h2>未找到股票</h2>
+      <p>没有在本地历史库中找到“{{ query_text }}”。请检查股票代码或中文名，例如 000001 / 平安银行 / 贵州茅台。</p>
+    </div>
+  </div>
+  <form class="quick-box" action="/stock" method="get">
+    <input name="code" placeholder="重新输入股票代码或中文名">
+    <button type="submit">重新查询</button>
+  </form>
+</section>
+{% else %}
+<section class="stock-card">
+  <div>
+    <div class="stock-code">{{ stock.ts_code }}</div>
+    <h2>{{ stock.name or '' }}</h2>
+    <p>{{ stock.industry or '-' }} · 最新交易日 {{ detail.latest_trade_date or '-' }}</p>
+  </div>
+  <div class="price-block">
+    <span>最新收盘</span>
+    <strong>{{ "%.2f"|format(latest.close or 0) }}</strong>
+  </div>
+  <div class="verdict {{ verdict.level }}">
+    <span>系统结论</span>
+    <strong>{{ verdict.level }}</strong>
+    <small>综合线索 {{ verdict.score }} 项</small>
+  </div>
+</section>
+
+<section class="metric-grid">
+  <div class="metric"><span>近10日</span><strong>{{ returns["10d"] if returns["10d"] is not none else '-' }}%</strong></div>
+  <div class="metric"><span>近40日</span><strong>{{ returns["40d"] if returns["40d"] is not none else '-' }}%</strong></div>
+  <div class="metric"><span>近80日</span><strong>{{ returns["80d"] if returns["80d"] is not none else '-' }}%</strong></div>
+  <div class="metric"><span>信号状态</span><strong>{{ signal.state if signal else '未入池' }}</strong></div>
+</section>
+
+<section class="panel strategy-link-panel">
+  <div class="panel-head">
+    <div>
+      <h2>策略命中摘要</h2>
+      <p>把这只股票和短线/长线策略历史记录连起来看，避免只看单日行情。</p>
+    </div>
+  </div>
+  {% if strategy_summary.total %}
+  <div class="metric-grid compact-metrics">
+    <div class="metric"><span>历史命中</span><strong>{{ strategy_summary.total }}</strong></div>
+    <div class="metric"><span>短线/长线</span><strong>{{ strategy_summary.short_count }} / {{ strategy_summary.longterm_count }}</strong></div>
+    <div class="metric"><span>可评估胜率</span><strong>{% if strategy_summary.win_rate is not none %}{{ "%.1f"|format(strategy_summary.win_rate) }}%{% else %}-{% endif %}</strong></div>
+    <div class="metric"><span>历史最大MFE</span><strong>{% if strategy_summary.best_mfe is not none %}{{ "%+.2f"|format(strategy_summary.best_mfe) }}%{% else %}-{% endif %}</strong></div>
+  </div>
+  <p class="muted">最近一次命中：{{ strategy_summary.latest_date|fmt_date }} · {{ strategy_summary.latest_profile or '-' }} · {{ strategy_summary.latest_outcome or '待观察' }}</p>
+  {% else %}
+  <div class="empty-state soft">这只股票目前没有被定板策略命中过。它可以继续体检，但不应被误读为系统推荐。</div>
+  {% endif %}
+</section>
+
+<section class="diagnostic-grid">
+  <div class="panel">
+    <div class="panel-head"><h2>系统结论</h2></div>
+    <div class="verdict-list">
+      <div>
+        <h3>支持因素</h3>
+        {% for item in verdict.reasons %}
+        <p class="good-line">{{ item }}</p>
+        {% else %}
+        <p class="muted">暂无明显支持因素。</p>
+        {% endfor %}
+      </div>
+      <div>
+        <h3>风险因素</h3>
+        {% for item in verdict.risks %}
+        <p class="risk-line">{{ item }}</p>
+        {% else %}
+        <p class="muted">暂无明显风险标签。</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>价格表现</h2></div>
+    <dl class="info-list">
+      <dt>最新收盘</dt><dd>{{ "%.2f"|format(latest.close or 0) }} 元</dd>
+      <dt>近10日</dt><dd>{{ returns["10d"] if returns["10d"] is not none else '-' }}%</dd>
+      <dt>近40日</dt><dd>{{ returns["40d"] if returns["40d"] is not none else '-' }}%</dd>
+      <dt>近80日</dt><dd>{{ returns["80d"] if returns["80d"] is not none else '-' }}%</dd>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>估值质量</h2></div>
+    {% if not basic.pe_ttm and not basic.pb and not basic.total_mv %}
+    <p class="muted">当前历史库未导入 PE/PB/总市值字段，先参考财务质量项。</p>
+    {% endif %}
+    <dl class="info-list">
+      <dt>PE(TTM)</dt><dd>{{ "%.2f"|format(basic.pe_ttm or 0) if basic.pe_ttm else '-' }}</dd>
+      <dt>PB</dt><dd>{{ "%.2f"|format(basic.pb or 0) if basic.pb else '-' }}</dd>
+      <dt>总市值</dt><dd>{{ "%.1f"|format((basic.total_mv or 0) / 10000) if basic.total_mv else '-' }} 亿元</dd>
+      <dt>ROE</dt><dd>{{ finance.roe or '-' }}%</dd>
+      <dt>净利润同比</dt><dd>{{ finance.netprofit_yoy or '-' }}%</dd>
+      <dt>负债率</dt><dd>{{ finance.debt_to_assets or '-' }}%</dd>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>资金行为</h2></div>
+    <dl class="info-list">
+      <dt>主力净流入</dt><dd>{{ moneyflow.net_mf_amount or '-' }} 万元</dd>
+      <dt>换手率</dt><dd>{{ basic.turnover_rate or '-' }}%</dd>
+      <dt>量比</dt><dd>{{ basic.volume_ratio or '-' }}</dd>
+      <dt>信号 Profile</dt><dd>{{ signal.profile if signal else '-' }}</dd>
+      <dt>入池状态</dt><dd>{{ signal.state if signal else '未入池' }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>历史信号记录</h2>
+      <p>同一只股票在实盘或历史回测中出现过的记录，收益字段只用于事后复盘。</p>
+    </div>
+  </div>
+  <table class="dense-table">
+    <thead><tr><th>日期</th><th>来源</th><th>策略</th><th>排名</th><th>分数</th><th>入选依据</th><th>最终收益</th><th>盘中机会</th><th>盘中风险</th><th>信号质量</th><th>收益结果</th><th>过程标签</th><th>AI解释</th></tr></thead>
+    <tbody>
+    {% for item in stock_signals %}
+    <tr>
+      <td>{{ item.trade_date|fmt_date }}</td>
+      <td>{{ item.source_label }}</td>
+      <td>{{ item.profile }}</td>
+      <td>{{ item.rank or '-' }}</td>
+      <td><strong class="score-main" title="{{ item.basis_text }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
+      <td class="reason compact-reason"><span title="{{ item.basis_text }}">{{ item.basis_summary }}</span></td>
+      <td class="{{ item.final_return_tone }}">{{ item.final_return_text }}</td>
+      <td class="{% if item.performance.mfe_pct is none %}muted-cell{% endif %}">{{ item.mfe_text }}</td>
+      <td><span class="tag {{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}soft-tag{% endif %}">{{ item.mae_text }}{% if item.performance.mae_pct is not none %} · {{ item.mae_risk_label }}{% endif %}</span></td>
+      <td><span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span></td>
+      <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span></td>
+      <td><span class="tag {{ item.process_tone }}">{{ item.process_label }}</span></td>
+      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="13">这只股票暂无历史信号记录。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

@@ -44,6 +44,19 @@ from strategy_profiles import (
 
 LONGTERM_FACTOR_COLUMNS = [
     'longterm_score',
+    'winner_profile_score',
+    'winner_profile_reasons',
+    'v8_timing_gate',
+    'v8_timing_reasons',
+    'market_admission',
+    'market_admission_reasons',
+    'v9_quality_floor',
+    'v9_quality_reasons',
+    'quality_rank_score',
+    'quality_rank_reasons',
+    'risk_flags',
+    'pool_type',
+    'pool_rank_score',
     'score_momentum',
     'score_flow',
     'score_rs',
@@ -51,6 +64,12 @@ LONGTERM_FACTOR_COLUMNS = [
     'score_entry',
     'score_risk_penalty',
     'score_quality_guard',
+    'score_marketcap',
+    'score_position',
+    'score_value',
+    'score_safety',
+    'score_volume',
+    'score_repair_rs',
     'quality_guard_reasons',
     'drawdown_from_high',
     'industry_rs',
@@ -62,6 +81,12 @@ LONGTERM_FACTOR_COLUMNS = [
     'roe',
     'debt_ratio',
     'netprofit_yoy',
+    'total_mv',
+    'circ_mv',
+    'pe_ttm',
+    'pb',
+    'ps_ttm',
+    'dv_ratio',
 ]
 
 # ==================== 路径修复（确保能 import main.py）====================
@@ -1499,6 +1524,28 @@ class BacktestLongterm(BacktestV2):
             'score_rs',
             'score_fin',
             'score_entry',
+            'winner_profile_score',
+            'winner_profile_reasons',
+            'v8_timing_gate',
+            'v8_timing_reasons',
+            'market_admission',
+            'market_admission_reasons',
+            'v9_quality_floor',
+            'v9_quality_reasons',
+            'quality_rank_score',
+            'quality_rank_reasons',
+            'risk_flags',
+            'pool_type',
+            'pool_rank_score',
+            'score_risk_penalty',
+            'score_quality_guard',
+            'score_marketcap',
+            'score_position',
+            'score_value',
+            'score_safety',
+            'score_volume',
+            'score_repair_rs',
+            'quality_guard_reasons',
             'drawdown_from_high',
             'industry_rs',
             'price_vs_ma60',
@@ -1509,6 +1556,12 @@ class BacktestLongterm(BacktestV2):
             'roe',
             'debt_ratio',
             'netprofit_yoy',
+            'total_mv',
+            'circ_mv',
+            'pe_ttm',
+            'pb',
+            'ps_ttm',
+            'dv_ratio',
         ):
             if col in row:
                 item[col] = row.get(col)
@@ -1544,7 +1597,20 @@ class BacktestLongterm(BacktestV2):
                     return [], []   # 与父类签名一致：(selected_items, ic_pool)
 
                 # 按综合评分排序，取前 top_n
-                if 'longterm_score' in longterm_pool.columns:
+                if 'winner_profile_score' in longterm_pool.columns:
+                    sort_cols = ['winner_profile_score', 'pool_rank_score', 'quality_rank_score', 'longterm_score']
+                    sort_cols = [c for c in sort_cols if c in longterm_pool.columns]
+                    longterm_pool = longterm_pool.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+                elif 'pool_rank_score' in longterm_pool.columns:
+                    sort_cols = ['pool_rank_score', 'quality_rank_score', 'longterm_score']
+                    sort_cols = [c for c in sort_cols if c in longterm_pool.columns]
+                    longterm_pool = longterm_pool.sort_values(sort_cols, ascending=[False] * len(sort_cols))
+                elif 'quality_rank_score' in longterm_pool.columns:
+                    longterm_pool = longterm_pool.sort_values(
+                        ['quality_rank_score', 'longterm_score'],
+                        ascending=[False, False]
+                    )
+                elif 'longterm_score' in longterm_pool.columns:
                     longterm_pool = longterm_pool.sort_values(
                         'longterm_score', ascending=False
                     )
@@ -1776,7 +1842,7 @@ def main():
                         choices=['baseline', 'sector_penalty_light', 'sector_penalty_strict'],
                         help='短线候选池硬过滤实验：baseline=原硬过滤，sector_penalty_*=板块不符改扣分')
     parser.add_argument('--longterm-profile', type=str, default='zscore_v4_1',
-                        choices=['zscore_v4_1', 'zscore_v5_quality_guard', 'zscore_v7_quality_guard', 'legacy_raw_score_v1'],
+                        choices=['zscore_v4_1', 'zscore_v5_quality_guard', 'zscore_v7_quality_guard', 'repair_v1', 'repair_v2_balanced', 'repair_v3_midband', 'repair_v3_defensive_gate', 'repair_v4_market_admission', 'longterm_quality_trend_v1', 'longterm_quality_trend_v2', 'longterm_quality_trend_v3', 'longterm_quality_trend_v4_ranked_pool', 'longterm_quality_trend_v5_dual_pool', 'longterm_quality_trend_v6_clean_pool', 'longterm_quality_trend_v7_winner_profile', 'longterm_quality_trend_v8_timing_gate', 'longterm_quality_trend_v9_market_admission', 'longterm_quality_trend_v10_quality_position_guard', 'longterm_quality_trend_v10_relaxed_quality_position_guard', 'longterm_quality_trend_v11_balanced_pool', 'longterm_quality_trend_v12_base_reset_pool', 'longterm_quality_trend_v13_observation_pool', 'longterm_quality_trend_v14_large_quiet_pool', 'longterm_quality_trend_v15_confirmed_bull_pool', 'longterm_quality_lifecycle_v16', 'longterm_quality_lifecycle_v17_late_cycle_guard', 'longterm_quality_lifecycle_v18_market_sync', 'legacy_raw_score_v1'],
                         help='波段评分实验：zscore_v4_1=当前Z-Score评分；legacy_raw_score_v1=复刻2.0备份版原始五维评分')
     parser.add_argument('--conditional-lock', action='store_true',           help='启用短线弱质票条件化移动止损收紧实验')
     parser.add_argument('--conditional-lock-activation', type=float, default=6.0, help='条件化收紧激活阈值%%（默认6）')

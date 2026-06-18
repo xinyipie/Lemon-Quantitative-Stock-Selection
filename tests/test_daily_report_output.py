@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config
 from main import _write_daily_report
+import main
 
 
 class DailyReportOutputTest(unittest.TestCase):
@@ -143,6 +144,80 @@ class DailyReportOutputTest(unittest.TestCase):
         self.assertIn("止损纪律：跌破20.59元且不能收回则退出。", report)
         self.assertIn("止盈/移动止损：接近23.33元先锁定利润。", report)
         self.assertIn("仓位倾向：正常小仓位，分批参与。", report)
+
+    def test_longterm_report_marks_elite_alert(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_reports_dir = config.REPORTS_DIR
+            config.REPORTS_DIR = tmpdir
+            try:
+                _write_daily_report(
+                    "20260612",
+                    [],
+                    [
+                        {
+                            "code": "000001",
+                            "name": "长线A",
+                            "industry": "AI",
+                            "score": 88,
+                            "trend_strength": 76,
+                            "risk": "中等",
+                            "sentiment": "正面",
+                            "close": 10.0,
+                            "buy_price_low": 9.8,
+                            "buy_price_high": 10.2,
+                            "target_price": 13.0,
+                            "expected_gain_pct": 30,
+                            "hold_weeks": 12,
+                            "stop_loss_price": 9.0,
+                            "compression_score": 91,
+                            "elite_alert": True,
+                            "reason": "测试说明",
+                        }
+                    ],
+                    sentiment_data=None,
+                    market_style="sideways",
+                )
+            finally:
+                config.REPORTS_DIR = old_reports_dir
+
+            report = Path(tmpdir, "report_20260612.txt").read_text(encoding="utf-8")
+
+        self.assertIn("Elite", report)
+        self.assertIn("91", report)
+
+    def test_report_says_longterm_disabled_without_legacy_swing_reason(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_reports_dir = config.REPORTS_DIR
+            config.REPORTS_DIR = tmpdir
+            try:
+                _write_daily_report(
+                    "20260612",
+                    [],
+                    [],
+                    sentiment_data=None,
+                    market_style="sideways",
+                    include_longterm=False,
+                )
+            finally:
+                config.REPORTS_DIR = old_reports_dir
+
+            report = Path(tmpdir, "report_20260612.txt").read_text(encoding="utf-8")
+
+        self.assertIn("长线观察池未启用", report)
+        self.assertNotIn("暂无波段候选", report)
+        self.assertNotIn("波段策略暂停", report)
+
+
+class PlainLogRecordTest(unittest.TestCase):
+    def test_plain_log_record_converts_numpy_like_scalars(self):
+        class FakeScalar:
+            def item(self):
+                return 58.276
+
+        record = main._plain_log_record({"code": "000001.SZ", "score": FakeScalar(), "name": "平安银行"})
+
+        self.assertEqual(record["score"], 58.28)
+        self.assertEqual(record["code"], "000001.SZ")
 
 
 if __name__ == "__main__":

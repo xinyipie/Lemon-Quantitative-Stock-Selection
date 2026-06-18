@@ -8,12 +8,15 @@ import re
 import time
 import math
 from datetime import datetime, timedelta
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
 
 import config
 import ai_prompts
 import news_analyzer
 import market_analyzer
+from longterm_live_pipeline import build_live_watchlists
+from signal_store import DEFAULT_DB_PATH, SignalRecord, SignalStore
 from strategy_profiles import apply_short_profile
 
 # ==================== 日志初始化 ====================
@@ -200,8 +203,98 @@ def format_code(code: str) -> str:
         return f"{code}.SH"
     return f"{code}.SZ"
 
+
+def _plain_log_value(value):
+    """把 pandas/numpy 标量转成普通 Python 值，避免日志出现 np.float64(...)。"""
+    if hasattr(value, "item"):
+        try:
+            value = value.item()
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, float):
+        return round(value, 2)
+    return value
+
+
+def _plain_log_record(record: Dict) -> Dict:
+    """清洗日志用字典，保持业务数据不变。"""
+    return {key: _plain_log_value(value) for key, value in record.items()}
+
 def revert_code(code: str) -> str:
     return code.split('.')[0] if '.' in code else code
+
+
+@dataclass
+class ParsedStockCodes:
+    valid_codes: List[str] = field(default_factory=list)
+    invalid_tokens: List[str] = field(default_factory=list)
+    duplicate_codes: List[str] = field(default_factory=list)
+    source: str = ""
+
+
+def parse_stock_codes_from_text(text: str, source: str = "text") -> ParsedStockCodes:
+    """Parse pasted stock-code text into unique 6-digit codes."""
+    tokens = _tokenize_stock_code_text(text)
+    valid_codes: List[str] = []
+    invalid_tokens: List[str] = []
+    duplicate_codes: List[str] = []
+    seen = set()
+    for token in tokens:
+        code = normalize_stock_code_token(token)
+        if code is None:
+            if _looks_like_code_token(token):
+                invalid_tokens.append(token)
+            continue
+        if code in seen:
+            duplicate_codes.append(code)
+            continue
+        valid_codes.append(code)
+        seen.add(code)
+    return ParsedStockCodes(
+        valid_codes=valid_codes,
+        invalid_tokens=invalid_tokens,
+        duplicate_codes=duplicate_codes,
+        source=source,
+    )
+
+
+def parse_stock_code_args(args: List[str]) -> ParsedStockCodes:
+    """Parse either a watchlist file path or direct command-line stock-code text."""
+    if not args:
+        return ParsedStockCodes()
+    first = str(args[0])
+    if len(args) == 1 and os.path.exists(first):
+        try:
+            with open(first, "r", encoding="utf-8-sig") as f:
+                return parse_stock_codes_from_text(f.read(), source=first)
+        except UnicodeDecodeError:
+            with open(first, "r", encoding="gbk", errors="ignore") as f:
+                return parse_stock_codes_from_text(f.read(), source=first)
+    return parse_stock_codes_from_text(" ".join(args), source="command")
+
+
+def normalize_stock_code_token(token: str) -> Optional[str]:
+    token = str(token).strip().upper()
+    token = token.strip("()[]{}<>，,。；;：:、|/\\")
+    token = re.sub(r"^(SH|SZ)", "", token)
+    token = re.sub(r"\.(SH|SZ)$", "", token)
+    token = re.sub(r"^(沪|深)", "", token)
+    if re.fullmatch(r"\d{6}", token):
+        return token
+    return None
+
+
+def _tokenize_stock_code_text(text: str) -> List[str]:
+    cleaned_lines = []
+    for line in str(text).splitlines():
+        line = re.split(r"#|//|--", line, maxsplit=1)[0]
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines)
+    return [t for t in re.split(r"[\s,，;；、|]+", cleaned) if t]
+
+
+def _looks_like_code_token(token: str) -> bool:
+    return bool(re.search(r"\d", str(token))) and len(str(token).strip()) >= 4
 
 # ==================== 批量数据获取 ====================
 def get_batch_moneyflow(ts_codes: List[str], trade_date: str) -> Dict[str, float]:
@@ -1365,8 +1458,9 @@ def get_weekly_macro_trend(trade_date: str) -> Tuple[str, Dict]:
         'ma100_slope_pct': 0.0,  # CSI300 MA100（日线100日）近5日斜率
         'price_vs_ma100': 0.0,   # 价格相对MA100偏离百分比
     }
+    macro_data.update({'idx_ret_60d': 0.0, 'idx_ret_120d': 0.0})
     try:
-        start_dt = (datetime.strptime(trade_date, '%Y%m%d') - timedelta(days=150)).strftime('%Y%m%d')
+        start_dt = (datetime.strptime(trade_date, '%Y%m%d') - timedelta(days=365)).strftime('%Y%m%d')
         df = pro.index_daily(
             ts_code='000300.SH',
             start_date=start_dt,
@@ -1400,9 +1494,23 @@ def get_weekly_macro_trend(trade_date: str) -> Tuple[str, Dict]:
                 ma100_slope = (ma100_now - ma100_5d_ago) / ma100_5d_ago * 100
             price_vs_ma100 = (close_now - ma100_now) / ma100_now * 100
 
+        idx_ret_60d = 0.0
+        if len(df) > 60:
+            close_60d_ago = float(df.iloc[-61]['close'])
+            if close_60d_ago:
+                idx_ret_60d = (close_now - close_60d_ago) / close_60d_ago * 100
+
+        idx_ret_120d = 0.0
+        if len(df) > 120:
+            close_120d_ago = float(df.iloc[-121]['close'])
+            if close_120d_ago:
+                idx_ret_120d = (close_now - close_120d_ago) / close_120d_ago * 100
+
         macro_data['ma20_slope_pct']  = round(ma20_slope, 3)
         macro_data['ma100_slope_pct'] = round(ma100_slope, 3)
         macro_data['price_vs_ma100']  = round(price_vs_ma100, 2)
+        macro_data['idx_ret_60d'] = round(idx_ret_60d, 2)
+        macro_data['idx_ret_120d'] = round(idx_ret_120d, 2)
 
         # 三档判断
         if price_vs_ma100 < -3.0 or ma100_slope < -0.5:
@@ -1760,7 +1868,7 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
             try:
                 df = pro.daily_basic(
                     trade_date=trade_date,
-                    fields='ts_code,turnover_rate,volume_ratio'
+                    fields='ts_code,turnover_rate,volume_ratio,pe_ttm,pb,ps_ttm,dv_ratio,total_mv,circ_mv'
                 )
                 if not df.empty:
                     return df.drop_duplicates(subset='ts_code').reset_index(drop=True)
@@ -1823,7 +1931,12 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
 
         if has_basic_data:
             df_basic = df_basic.rename(columns={'turnover_rate': 'turnover'})
-            df_price = pd.merge(df_price, df_basic[['ts_code', 'turnover', 'volume_ratio']],
+            basic_cols = [
+                'ts_code', 'turnover', 'volume_ratio', 'pe_ttm', 'pb',
+                'ps_ttm', 'dv_ratio', 'total_mv', 'circ_mv'
+            ]
+            basic_cols = [c for c in basic_cols if c in df_basic.columns]
+            df_price = pd.merge(df_price, df_basic[basic_cols],
                                 on='ts_code', how='left')
             logger.info(f"✅ daily_basic 获取成功，共{len(df_basic)}只")
         else:
@@ -1844,6 +1957,9 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
         has_turnover_data = df['turnover'].notna().mean() > 0.5 if 'turnover' in df.columns else False
         df['turnover'] = pd.to_numeric(df['turnover'], errors='coerce').fillna(5.0)
         df['volume_ratio'] = pd.to_numeric(df['volume_ratio'], errors='coerce').fillna(1.0)
+        for basic_col in ("pe_ttm", "pb", "ps_ttm", "dv_ratio", "total_mv", "circ_mv"):
+            if basic_col not in df.columns:
+                df[basic_col] = None
         if not has_turnover_data:
             logger.warning("⚠️ turnover 有效数据不足50%，跳过换手率过滤")
 
@@ -1887,7 +2003,8 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
 
         df = df[[
             "code", "name", "industry", "close", "change", "turnover",
-            "volume_ratio", "main_net_inflow", "is_limit_up", "amount"
+            "volume_ratio", "main_net_inflow", "is_limit_up", "amount",
+            "pe_ttm", "pb", "ps_ttm", "dv_ratio", "total_mv", "circ_mv"
         ]].reset_index(drop=True)
         logger.info(f"✅ 基础选股完成：{len(df)}只")
         # 返回全市场 pct_chg 数据（供 check_market_risk / get_market_sentiment 复用，避免重复拉取）
@@ -3452,7 +3569,10 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         f"分数不足{cnt_score} | 财务不符{cnt_financial}"
     )
     if score_rejects:
-        top_rejects = sorted(score_rejects, key=lambda x: x["score"], reverse=True)[:5]
+        top_rejects = [
+            _plain_log_record(item)
+            for item in sorted(score_rejects, key=lambda x: x["score"], reverse=True)[:5]
+        ]
         logger.info(f"📊 短线分数不足Top5（门槛≥{score_threshold}）：{top_rejects}")
     logger.info(f"✅ 次日潜力筛选完成：{len(df_pool)}只（数据日期：{trade_date}）")
     return df_pool
@@ -3470,6 +3590,7 @@ def select_longterm_pool(
     regime: str = 'BULL_TREND',
     score_threshold: float = 70,   # Z-Score分布下的最低准入分（20~95范围，均值60，70≈前25%）
     longterm_profile: str = 'zscore_v4_1',
+    macro_data: Dict = None,
 ) -> pd.DataFrame:
     """
     波段选股 v4.1（中长线，持仓无固定时限，以技术信号为准）。
@@ -3521,14 +3642,105 @@ def select_longterm_pool(
         industry_rs = {}
     if profit_growth_dict is None:
         profit_growth_dict = {}
+    if macro_data is None:
+        macro_data = {}
     use_legacy_raw_score = (longterm_profile == 'legacy_raw_score_v1')
     use_v5_quality_guard = (longterm_profile in ('zscore_v5_quality_guard', 'zscore_v7_quality_guard'))
     use_v7_quality_guard = (longterm_profile == 'zscore_v7_quality_guard')
+    use_v11_balanced_pool = longterm_profile in (
+        'longterm_quality_trend_v11_balanced_pool',
+        'longterm_quality_trend_v12_base_reset_pool',
+    )
+    use_v12_base_reset_pool = (longterm_profile == 'longterm_quality_trend_v12_base_reset_pool')
+    use_v13_observation_pool = (longterm_profile == 'longterm_quality_trend_v13_observation_pool')
+    use_v14_large_quiet_pool = (longterm_profile == 'longterm_quality_trend_v14_large_quiet_pool')
+    use_v15_confirmed_bull_pool = (longterm_profile == 'longterm_quality_trend_v15_confirmed_bull_pool')
+    use_v16_lifecycle_pool = longterm_profile in (
+        'longterm_quality_lifecycle_v16',
+        'longterm_quality_lifecycle_v17_late_cycle_guard',
+        'longterm_quality_lifecycle_v18_market_sync',
+    )
+    use_v17_late_cycle_guard = (longterm_profile == 'longterm_quality_lifecycle_v17_late_cycle_guard')
+    use_v18_market_sync = (longterm_profile == 'longterm_quality_lifecycle_v18_market_sync')
+
+    if use_v12_base_reset_pool or use_v13_observation_pool or use_v14_large_quiet_pool or use_v15_confirmed_bull_pool:
+        price_vs_ma100 = macro_data.get("price_vs_ma100")
+        ma100_slope_pct = macro_data.get("ma100_slope_pct")
+        ma20_slope_pct = macro_data.get("ma20_slope_pct")
+        idx_ret_120d = macro_data.get("idx_ret_120d")
+        ma100_limit = 8.0 if use_v12_base_reset_pool else 15.0
+        slope_limit = 2.0 if use_v12_base_reset_pool else 3.0
+        if use_v14_large_quiet_pool or use_v15_confirmed_bull_pool:
+            if price_vs_ma100 is not None and float(price_vs_ma100) <= 0.0:
+                logger.info(f"长线v14跳过：沪深300未站上MA100 {float(price_vs_ma100):+.1f}%")
+                return pd.DataFrame()
+            if ma100_slope_pct is not None and float(ma100_slope_pct) <= 0.0:
+                logger.info(f"长线v14跳过：沪深300 MA100斜率未转正 {float(ma100_slope_pct):+.2f}%")
+                return pd.DataFrame()
+        if use_v15_confirmed_bull_pool:
+            if ma100_slope_pct is not None and float(ma100_slope_pct) < 0.6:
+                logger.info(f"longterm v15 skip: CSI300 MA100 slope too weak {float(ma100_slope_pct):+.2f}%")
+                return pd.DataFrame()
+            if idx_ret_120d is not None and float(idx_ret_120d) < 10.0:
+                logger.info(f"longterm v15 skip: CSI300 120d return too weak {float(idx_ret_120d):+.1f}%")
+                return pd.DataFrame()
+        if price_vs_ma100 is not None and float(price_vs_ma100) > ma100_limit:
+            logger.info(f"长线v12跳过：沪深300相对MA100过热 {float(price_vs_ma100):+.1f}%")
+            return pd.DataFrame()
+        if ma20_slope_pct is not None and float(ma20_slope_pct) > slope_limit:
+            logger.info(f"长线v12跳过：周线MA20斜率过热 {float(ma20_slope_pct):+.2f}%")
+            return pd.DataFrame()
 
     # ── 预计算全池动量代理，用于排名过滤 ──
     # 波段动量代理：用 ma20_slope（近5日均线斜率）+ 回调幅度反向（回调少=动量强）
     # 注意：正在回调的股票 ma20_slope 为负数是正常的（短线向下但长线向上），
     # 因此 P40 过滤门槛不使用绝对值，而是相对全池排名，且使用 P20 宽松门槛
+    v16_defensive_market = False
+    if use_v16_lifecycle_pool:
+        price_vs_ma100_v16 = float(macro_data.get("price_vs_ma100", 0.0) or 0.0)
+        ma100_slope_pct_v16 = float(macro_data.get("ma100_slope_pct", 0.0) or 0.0)
+        ma20_slope_pct_v16 = float(macro_data.get("ma20_slope_pct", 0.0) or 0.0)
+        idx_ret_60d_v16 = float(macro_data.get("idx_ret_60d", 0.0) or 0.0)
+        idx_ret_120d_v16 = float(macro_data.get("idx_ret_120d", 0.0) or 0.0)
+        v16_defensive_market = (
+            price_vs_ma100_v16 < 0.0
+            or ma100_slope_pct_v16 < 0.1
+            or idx_ret_120d_v16 < 0.0
+        )
+        late_cycle_decay = (
+            idx_ret_120d_v16 >= 14.0
+            and idx_ret_60d_v16 <= 4.0
+            and price_vs_ma100_v16 > 2.0
+        )
+        market_sync_ok = (
+            idx_ret_60d_v16 >= 5.0
+            and idx_ret_120d_v16 >= 5.0
+            and ma100_slope_pct_v16 >= 0.15
+            and price_vs_ma100_v16 > 0.0
+        )
+        if use_v18_market_sync and not market_sync_ok:
+            logger.info(
+                "longterm v18 skip: market sync not ready "
+                f"(idx_ret_60d={idx_ret_60d_v16:+.1f}%, idx_ret_120d={idx_ret_120d_v16:+.1f}%, "
+                f"ma100_slope={ma100_slope_pct_v16:+.2f}%, price_vs_ma100={price_vs_ma100_v16:+.1f}%)"
+            )
+            return pd.DataFrame()
+        if use_v17_late_cycle_guard and late_cycle_decay:
+            logger.info(
+                "longterm v17 skip: late-cycle momentum decay "
+                f"(idx_ret_120d={idx_ret_120d_v16:+.1f}%, idx_ret_60d={idx_ret_60d_v16:+.1f}%, "
+                f"price_vs_ma100={price_vs_ma100_v16:+.1f}%, ma20_slope={ma20_slope_pct_v16:+.2f}%)"
+            )
+            return pd.DataFrame()
+        if price_vs_ma100_v16 < -8.0 and ma100_slope_pct_v16 < -0.3 and idx_ret_120d_v16 < -10.0:
+            logger.info(
+                "longterm v16 skip: market trend too weak for lifecycle admission "
+                f"(price_vs_ma100={price_vs_ma100_v16:+.1f}%, "
+                f"ma100_slope={ma100_slope_pct_v16:+.2f}%, "
+                f"idx_ret_120d={idx_ret_120d_v16:+.1f}%)"
+            )
+            return pd.DataFrame()
+
     momentum_scores_raw = {}
     for ts_code, mdata in ma_dict.items():
         if not mdata:
@@ -3639,6 +3851,254 @@ def select_longterm_pool(
             cnt_fin += 1
             continue
 
+        if use_v11_balanced_pool:
+            rs_val = industry_rs.get(industry, 0.0) if industry_rs else 0.0
+            profit_data_v11 = profit_growth_dict.get(code, {})
+            yoy_v11 = profit_data_v11.get('netprofit_yoy')
+            turnover_v11 = float(row.get("turnover", 0) or 0)
+            volume_ratio_v11 = float(row.get("volume_ratio", 1) or 1)
+            pb_v11 = row.get("pb")
+            pe_v11 = row.get("pe_ttm", row.get("pe"))
+            ps_v11 = row.get("ps_ttm", row.get("ps"))
+
+            if ma20_slope <= 0.08:
+                cnt_momentum += 1
+                continue
+            if drawdown < 6.0:
+                cnt_drawdown += 1
+                continue
+            if price_vs_ma60 < -3.0 or price_vs_ma60 > 12.0:
+                cnt_support += 1
+                continue
+            if industry_rs and (rs_val < 2.0 or rs_val > 15.0):
+                cnt_industry += 1
+                continue
+            if turnover_v11 < 0.8 or turnover_v11 > 8.0:
+                cnt_fin += 1
+                continue
+            if volume_ratio_v11 < 0.45 or volume_ratio_v11 > 1.8:
+                cnt_fin += 1
+                continue
+            if roe is None or roe < 8.0:
+                cnt_fin += 1
+                continue
+            if debt_ratio is not None and debt_ratio > 65.0:
+                cnt_fin += 1
+                continue
+            if yoy_v11 is None or yoy_v11 < 20.0:
+                cnt_fin += 1
+                continue
+            if pb_v11 is None or pd.isna(pb_v11) or float(pb_v11) > 3.5:
+                cnt_fin += 1
+                continue
+            if pe_v11 is None or pd.isna(pe_v11) or (float(pe_v11) > 0 and float(pe_v11) > 55.0):
+                cnt_fin += 1
+                continue
+            if ps_v11 is None or pd.isna(ps_v11) or float(ps_v11) > 3.5:
+                cnt_fin += 1
+                continue
+
+        if use_v13_observation_pool:
+            rs_val = industry_rs.get(industry, 0.0) if industry_rs else 0.0
+            profit_data_v13 = profit_growth_dict.get(code, {})
+            yoy_v13 = profit_data_v13.get('netprofit_yoy')
+            turnover_v13 = float(row.get("turnover", 0) or 0)
+            volume_ratio_v13 = float(row.get("volume_ratio", 1) or 1)
+            pb_v13 = row.get("pb")
+            pe_v13 = row.get("pe_ttm", row.get("pe"))
+            ps_v13 = row.get("ps_ttm", row.get("ps"))
+
+            if ma20_slope < 0.05:
+                cnt_momentum += 1
+                continue
+            if drawdown < 6.0 or drawdown > 22.0:
+                cnt_drawdown += 1
+                continue
+            if price_vs_ma60 < -2.0 or price_vs_ma60 > 13.0:
+                cnt_support += 1
+                continue
+            if industry_rs and (rs_val < 1.0 or rs_val > 16.0):
+                cnt_industry += 1
+                continue
+            if turnover_v13 < 0.6 or turnover_v13 > 6.5:
+                cnt_fin += 1
+                continue
+            if volume_ratio_v13 < 0.45 or volume_ratio_v13 > 1.8:
+                cnt_fin += 1
+                continue
+            if roe is None or roe < 7.0:
+                cnt_fin += 1
+                continue
+            if debt_ratio is not None and debt_ratio > 70.0:
+                cnt_fin += 1
+                continue
+            if yoy_v13 is None or yoy_v13 < 8.0:
+                cnt_fin += 1
+                continue
+            if pb_v13 is None or pd.isna(pb_v13) or float(pb_v13) > 4.5:
+                cnt_fin += 1
+                continue
+            if pe_v13 is None or pd.isna(pe_v13) or (float(pe_v13) > 0 and float(pe_v13) > 70.0):
+                cnt_fin += 1
+                continue
+            if ps_v13 is None or pd.isna(ps_v13) or float(ps_v13) > 5.0:
+                cnt_fin += 1
+                continue
+
+        if use_v14_large_quiet_pool or use_v15_confirmed_bull_pool:
+            rs_val = industry_rs.get(industry, 0.0) if industry_rs else 0.0
+            profit_data_v14 = profit_growth_dict.get(code, {})
+            yoy_v14 = profit_data_v14.get('netprofit_yoy')
+            turnover_v14 = float(row.get("turnover", 0) or 0)
+            volume_ratio_v14 = float(row.get("volume_ratio", 1) or 1)
+            main_net_inflow_v14 = float(row.get("main_net_inflow", 0) or 0)
+            total_mv_v14 = row.get("total_mv")
+            pb_v14 = row.get("pb")
+            pe_v14 = row.get("pe_ttm", row.get("pe"))
+            ps_v14 = row.get("ps_ttm", row.get("ps"))
+
+            if total_mv_v14 is None or pd.isna(total_mv_v14) or float(total_mv_v14) < 800000.0:
+                cnt_fin += 1
+                continue
+            if main_net_inflow_v14 < 1000.0:
+                cnt_fin += 1
+                continue
+            if ma20_slope < 0.05 or ma20_slope > 0.35:
+                cnt_momentum += 1
+                continue
+            if drawdown < 8.0 or drawdown > 22.0:
+                cnt_drawdown += 1
+                continue
+            if price_vs_ma60 < -2.0 or price_vs_ma60 > 13.0:
+                cnt_support += 1
+                continue
+            if industry_rs and (rs_val < 1.0 or rs_val > 12.0):
+                cnt_industry += 1
+                continue
+            if turnover_v14 < 0.6 or turnover_v14 > 5.0:
+                cnt_fin += 1
+                continue
+            if volume_ratio_v14 < 0.45 or volume_ratio_v14 > 1.2:
+                cnt_fin += 1
+                continue
+            if roe is None or roe < 7.0:
+                cnt_fin += 1
+                continue
+            if debt_ratio is not None and debt_ratio > 70.0:
+                cnt_fin += 1
+                continue
+            if yoy_v14 is None or yoy_v14 < 15.0:
+                cnt_fin += 1
+                continue
+            if pb_v14 is None or pd.isna(pb_v14) or float(pb_v14) > 4.5:
+                cnt_fin += 1
+                continue
+            if pe_v14 is None or pd.isna(pe_v14) or (float(pe_v14) > 0 and float(pe_v14) > 70.0):
+                cnt_fin += 1
+                continue
+            if ps_v14 is None or pd.isna(ps_v14) or float(ps_v14) > 5.0:
+                cnt_fin += 1
+                continue
+
+        v16_branch = None
+        if use_v16_lifecycle_pool:
+            rs_val = industry_rs.get(industry, 0.0) if industry_rs else 0.0
+            profit_data_v16 = profit_growth_dict.get(code, {})
+            yoy_v16 = profit_data_v16.get('netprofit_yoy')
+            turnover_v16 = float(row.get("turnover", 0) or 0)
+            volume_ratio_v16 = float(row.get("volume_ratio", 1) or 1)
+            total_mv_v16 = row.get("total_mv")
+            pb_v16 = row.get("pb")
+            pe_v16 = row.get("pe_ttm", row.get("pe"))
+            ps_v16 = row.get("ps_ttm", row.get("ps"))
+
+            if total_mv_v16 is None or pd.isna(total_mv_v16):
+                cnt_fin += 1
+                continue
+            if pb_v16 is None or pd.isna(pb_v16):
+                cnt_fin += 1
+                continue
+            if pe_v16 is None or pd.isna(pe_v16):
+                cnt_fin += 1
+                continue
+            if ps_v16 is None or pd.isna(ps_v16):
+                cnt_fin += 1
+                continue
+            if roe is None or yoy_v16 is None:
+                cnt_fin += 1
+                continue
+
+            total_mv_v16 = float(total_mv_v16)
+            pb_v16 = float(pb_v16)
+            pe_v16 = float(pe_v16)
+            ps_v16 = float(ps_v16)
+            yoy_v16 = float(yoy_v16)
+
+            if v16_defensive_market:
+                v16_branch = "defensive"
+                if total_mv_v16 < 800000.0:
+                    cnt_fin += 1
+                    continue
+                if turnover_v16 < 0.5 or turnover_v16 > 4.0:
+                    cnt_fin += 1
+                    continue
+                if volume_ratio_v16 < 0.4 or volume_ratio_v16 > 1.5:
+                    cnt_fin += 1
+                    continue
+                if pb_v16 > 3.5 or (pe_v16 > 0 and pe_v16 > 55.0) or ps_v16 > 4.0:
+                    cnt_fin += 1
+                    continue
+                if roe < 7.0 or yoy_v16 < 0.0:
+                    cnt_fin += 1
+                    continue
+                if debt_ratio is not None and debt_ratio > 65.0:
+                    cnt_fin += 1
+                    continue
+                if ma20_slope < -0.05:
+                    cnt_momentum += 1
+                    continue
+                if drawdown < 5.0 or drawdown > 22.0:
+                    cnt_drawdown += 1
+                    continue
+                if price_vs_ma60 < -5.0 or price_vs_ma60 > 12.0:
+                    cnt_support += 1
+                    continue
+                if industry_rs and rs_val < -5.0:
+                    cnt_industry += 1
+                    continue
+            else:
+                v16_branch = "elastic"
+                if total_mv_v16 < 300000.0 or total_mv_v16 > 3000000.0:
+                    cnt_fin += 1
+                    continue
+                if turnover_v16 < 1.0 or turnover_v16 > 6.0:
+                    cnt_fin += 1
+                    continue
+                if volume_ratio_v16 < 0.45 or volume_ratio_v16 > 1.8:
+                    cnt_fin += 1
+                    continue
+                if pb_v16 > 6.5 or (pe_v16 > 0 and pe_v16 > 120.0) or ps_v16 > 8.0:
+                    cnt_fin += 1
+                    continue
+                if roe < 5.0 or yoy_v16 < 0.0:
+                    cnt_fin += 1
+                    continue
+                if debt_ratio is not None and debt_ratio > 75.0:
+                    cnt_fin += 1
+                    continue
+                if ma20_slope < 0.03:
+                    cnt_momentum += 1
+                    continue
+                if drawdown < 5.0 or drawdown > 25.0:
+                    cnt_drawdown += 1
+                    continue
+                if price_vs_ma60 < -3.0 or price_vs_ma60 > 18.0:
+                    cnt_support += 1
+                    continue
+                if industry_rs and (rs_val < 1.0 or rs_val > 20.0):
+                    cnt_industry += 1
+                    continue
+
         main_net_inflow = float(row.get("main_net_inflow", 0))
         vol_accel  = ma_data.get("vol_accelerating", False)
         eod_strong = ma_data.get("eod_strong", False)
@@ -3730,6 +4190,12 @@ def select_longterm_pool(
                 "turnover": round(float(row.get("turnover", 0)), 2),
                 "volume_ratio": round(float(row.get("volume_ratio", 1)), 2),
                 "main_net_inflow": round(main_net_inflow, 2),
+                "total_mv": row.get("total_mv"),
+                "circ_mv": row.get("circ_mv"),
+                "pe_ttm": row.get("pe_ttm", row.get("pe")),
+                "pb": row.get("pb"),
+                "ps_ttm": row.get("ps_ttm", row.get("ps")),
+                "dv_ratio": row.get("dv_ratio"),
                 "ma20": round(ma20, 2),
                 "ma60": round(ma60, 2),
                 "ma20_slope": round(ma20_slope, 3),
@@ -3946,6 +4412,12 @@ def select_longterm_pool(
             "turnover":         round(float(row.get("turnover", 0)), 2),
             "volume_ratio":     round(float(row.get("volume_ratio", 1)), 2),
             "main_net_inflow":  round(main_net_inflow, 2),
+            "total_mv":         row.get("total_mv"),
+            "circ_mv":          row.get("circ_mv"),
+            "pe_ttm":           row.get("pe_ttm", row.get("pe")),
+            "pb":               row.get("pb"),
+            "ps_ttm":           row.get("ps_ttm", row.get("ps")),
+            "dv_ratio":         row.get("dv_ratio"),
             # ── 均线 ──
             "ma20":             round(ma20, 2),
             "ma60":             round(ma60, 2),
@@ -3985,6 +4457,7 @@ def select_longterm_pool(
             "_raw_fin":         raw_fin,
             "_raw_entry":       raw_entry,
             "_risk_penalty":    risk_penalty,
+            "_v16_branch":      v16_branch,
             "_quality_guard_reasons": "、".join(quality_guard_reasons) if quality_guard_reasons else "无",
         })
 
@@ -4055,8 +4528,119 @@ def select_longterm_pool(
             score = float(longterm_scores[i])
             rec["longterm_score"]  = round(score, 1)
             rec["longterm_profile"] = longterm_profile
+            if use_v11_balanced_pool:
+                quality_rank_score = 70.0
+                quality_rank_score += min(max((float(rec.get("roe") or 0.0) - 8.0) * 1.2, 0.0), 12.0)
+                quality_rank_score += min(max((float(rec.get("netprofit_yoy") or 0.0) - 20.0) * 0.25, 0.0), 10.0)
+                quality_rank_score += min(max((12.0 - float(rec.get("price_vs_ma60") or 0.0)) * 0.8, 0.0), 8.0)
+                quality_rank_score += min(max((float(rec.get("drawdown_from_high") or 0.0) - 6.0) * 0.5, 0.0), 6.0)
+                quality_rank_score = min(100.0, quality_rank_score)
+                rec["quality_rank_score"] = round(quality_rank_score, 1)
+                rec["pool_type"] = "balanced_quality"
+                rec["pool_rank_score"] = round(quality_rank_score, 1)
+                rec["pool_admitted"] = True
+                rec["v11_balanced_guard"] = quality_rank_score >= 78.0
+                rec["v11_balanced_reasons"] = "quality_position_pullback_ok"
+            if use_v13_observation_pool:
+                roe_score = min(max((float(rec.get("roe") or 0.0) - 7.0) * 1.0, 0.0), 12.0)
+                growth_score = min(max((float(rec.get("netprofit_yoy") or 0.0) - 8.0) * 0.22, 0.0), 12.0)
+                price_gap = abs(float(rec.get("price_vs_ma60") or 0.0) - 6.0)
+                position_score = max(0.0, 12.0 - price_gap * 1.2)
+                drawdown_gap = abs(float(rec.get("drawdown_from_high") or 0.0) - 12.0)
+                pullback_score = max(0.0, 10.0 - drawdown_gap * 0.8)
+                pb_val = float(rec.get("pb") or 99.0)
+                ps_val = float(rec.get("ps_ttm") or 99.0)
+                value_score = max(0.0, 8.0 - max(pb_val - 2.5, 0.0) * 2.0 - max(ps_val - 3.0, 0.0) * 1.5)
+                heat_penalty = 0.0
+                if float(rec.get("industry_rs") or 0.0) > 12.0:
+                    heat_penalty += 3.0
+                if float(rec.get("turnover") or 0.0) > 4.5:
+                    heat_penalty += 3.0
+                observation_score = min(
+                    100.0,
+                    55.0 + roe_score + growth_score + position_score + pullback_score + value_score - heat_penalty,
+                )
+                rec["quality_rank_score"] = round(observation_score, 1)
+                rec["pool_type"] = "observation_quality"
+                rec["pool_rank_score"] = round(observation_score, 1)
+                rec["pool_admitted"] = observation_score >= 75.0
+                rec["v13_observation_guard"] = observation_score >= 75.0
+                rec["v13_observation_reasons"] = "balanced_quality_value_position"
+            if use_v14_large_quiet_pool or use_v15_confirmed_bull_pool:
+                roe_score = min(max((float(rec.get("roe") or 0.0) - 7.0) * 1.0, 0.0), 12.0)
+                growth_score = min(max((float(rec.get("netprofit_yoy") or 0.0) - 15.0) * 0.20, 0.0), 12.0)
+                flow_score = min(max(float(rec.get("main_net_inflow") or 0.0) / 1000.0, 0.0), 8.0)
+                drawdown_gap = abs(float(rec.get("drawdown_from_high") or 0.0) - 12.0)
+                pullback_score = max(0.0, 10.0 - drawdown_gap * 0.8)
+                price_gap = abs(float(rec.get("price_vs_ma60") or 0.0) - 7.0)
+                position_score = max(0.0, 10.0 - price_gap * 1.0)
+                quiet_score = max(0.0, 8.0 - max(float(rec.get("turnover") or 0.0) - 2.5, 0.0) * 1.2)
+                observation_score = min(
+                    100.0,
+                    55.0 + roe_score + growth_score + flow_score + pullback_score + position_score + quiet_score,
+                )
+                rec["quality_rank_score"] = round(observation_score, 1)
+                rec["pool_type"] = "confirmed_bull_observation" if use_v15_confirmed_bull_pool else "large_quiet_observation"
+                rec["pool_rank_score"] = round(observation_score, 1)
+                rec["pool_admitted"] = observation_score >= 75.0
+                if use_v15_confirmed_bull_pool:
+                    rec["v15_confirmed_bull_guard"] = observation_score >= 75.0
+                    rec["v15_confirmed_bull_reasons"] = "confirmed_bull_large_quiet_quality_pullback"
+                else:
+                    rec["v14_large_quiet_guard"] = observation_score >= 75.0
+                    rec["v14_large_quiet_reasons"] = "macro_large_quiet_quality_pullback"
             # 各维度贡献分（可视化用，保持与原明细字段名兼容）
             rec["score_momentum"]  = round(float(z_momentum[i]) * 3.0, 2)  # ×3便于观察量级
+            if use_v16_lifecycle_pool:
+                branch = rec.get("_v16_branch") or "elastic"
+                roe_val_v16 = float(rec.get("roe") or 0.0)
+                yoy_val_v16 = float(rec.get("netprofit_yoy") or 0.0)
+                pb_val_v16 = float(rec.get("pb") or 99.0)
+                pe_val_v16 = float(rec.get("pe_ttm") or 999.0)
+                ps_val_v16 = float(rec.get("ps_ttm") or 99.0)
+                turnover_val_v16 = float(rec.get("turnover") or 0.0)
+                volume_ratio_val_v16 = float(rec.get("volume_ratio") or 1.0)
+                total_mv_val_v16 = float(rec.get("total_mv") or 0.0)
+                drawdown_val_v16 = float(rec.get("drawdown_from_high") or 0.0)
+                price_vs_ma60_val_v16 = float(rec.get("price_vs_ma60") or 0.0)
+                industry_rs_val_v16 = float(rec.get("industry_rs") or 0.0)
+                main_inflow_val_v16 = float(rec.get("main_net_inflow") or 0.0)
+
+                if branch == "defensive":
+                    roe_score = min(max((roe_val_v16 - 6.0) * 1.0, 0.0), 10.0)
+                    growth_score = min(max(yoy_val_v16 * 0.2, 0.0), 8.0)
+                    value_score = max(0.0, 14.0 - max(pb_val_v16 - 2.5, 0.0) * 2.0 - max(pe_val_v16 - 35.0, 0.0) * 0.12 - max(ps_val_v16 - 2.5, 0.0) * 2.0)
+                    crowding_score = max(0.0, 10.0 - max(turnover_val_v16 - 2.0, 0.0) * 1.6 - max(volume_ratio_val_v16 - 1.0, 0.0) * 4.0)
+                    mv_score = min(max((total_mv_val_v16 - 800000.0) / 120000.0, 0.0), 8.0)
+                    pullback_score = max(0.0, 10.0 - abs(drawdown_val_v16 - 10.0) * 0.8)
+                    position_score = max(0.0, 8.0 - abs(price_vs_ma60_val_v16 - 4.0) * 0.9)
+                    industry_score = min(max((industry_rs_val_v16 + 5.0) * 0.8, 0.0), 8.0)
+                    flow_score = min(max(main_inflow_val_v16 / 1000.0, 0.0), 4.0)
+                    lifecycle_score = min(100.0, 34.0 + roe_score + growth_score + value_score + crowding_score + mv_score + pullback_score + position_score + industry_score + flow_score)
+                    pool_type = "defensive_quality_lifecycle"
+                    reasons = "defensive_quality_low_crowding_value_position"
+                else:
+                    roe_score = min(max((roe_val_v16 - 5.0) * 1.0, 0.0), 10.0)
+                    growth_score = min(max(yoy_val_v16 * 0.25, 0.0), 12.0)
+                    value_score = max(0.0, 12.0 - max(pb_val_v16 - 4.0, 0.0) * 1.5 - max(pe_val_v16 - 60.0, 0.0) * 0.06 - max(ps_val_v16 - 4.0, 0.0) * 1.2)
+                    crowding_score = max(0.0, 12.0 - max(turnover_val_v16 - 3.5, 0.0) * 2.0 - max(volume_ratio_val_v16 - 1.2, 0.0) * 4.0)
+                    mv_gap = abs(total_mv_val_v16 - 1200000.0) / 300000.0
+                    mv_score = max(0.0, 8.0 - mv_gap)
+                    pullback_score = max(0.0, 10.0 - abs(drawdown_val_v16 - 12.0) * 0.7)
+                    position_score = max(0.0, 8.0 - abs(price_vs_ma60_val_v16 - 8.0) * 0.7)
+                    industry_score = min(max(industry_rs_val_v16 * 0.7, 0.0), 10.0)
+                    flow_score = min(max(main_inflow_val_v16 / 1000.0, 0.0), 6.0)
+                    lifecycle_score = min(100.0, 30.0 + roe_score + growth_score + value_score + crowding_score + mv_score + pullback_score + position_score + industry_score + flow_score)
+                    pool_type = "elastic_quality_lifecycle"
+                    reasons = "elastic_midcap_quality_industry_pullback"
+
+                rec["longterm_score"] = round(lifecycle_score, 1)
+                rec["quality_rank_score"] = round(lifecycle_score, 1)
+                rec["pool_type"] = pool_type
+                rec["pool_rank_score"] = round(lifecycle_score, 1)
+                rec["pool_admitted"] = lifecycle_score >= 82.0
+                rec["v16_lifecycle_guard"] = lifecycle_score >= 82.0
+                rec["v16_lifecycle_reasons"] = reasons
             rec["score_flow"]      = round(float(z_flow[i])     * 2.5, 2)
             rec["score_rs"]        = round(float(z_rs[i])       * (1.0 if use_v5_quality_guard else 2.0), 2)
             rec["score_fin"]       = round(float(z_fin[i])      * (0.8 if use_v5_quality_guard else 1.5), 2)
@@ -4067,7 +4651,7 @@ def select_longterm_pool(
                 rec["score_quality_guard"] = round(float(arr_penalty[i]) * -10.0, 2)
                 rec["quality_guard_reasons"] = rec.get("_quality_guard_reasons", "无")
             # 清理内部原始值字段（不写入最终输出）
-            for k in ("_raw_momentum", "_raw_flow", "_raw_rs", "_raw_fin", "_raw_entry", "_risk_penalty", "_quality_guard_reasons"):
+            for k in ("_raw_momentum", "_raw_flow", "_raw_rs", "_raw_fin", "_raw_entry", "_risk_penalty", "_quality_guard_reasons", "_v16_branch"):
                 rec.pop(k, None)
             valid_stocks.append(rec)
 
@@ -4081,10 +4665,41 @@ def select_longterm_pool(
             filtered_by_threshold = before_threshold - len(df_pool)
             if filtered_by_threshold > 0:
                 logger.debug(f"   波段门槛过滤：{filtered_by_threshold}只低于{score_threshold}分被排除")
-        df_pool = df_pool.sort_values(
-            by=["longterm_score", "main_net_inflow"],
-            ascending=[False, False]
-        ).head(20).reset_index(drop=True)
+        if use_v11_balanced_pool and "v11_balanced_guard" in df_pool.columns:
+            df_pool = df_pool[df_pool["v11_balanced_guard"] == True]
+            df_pool = df_pool.sort_values(
+                by=["quality_rank_score", "longterm_score", "main_net_inflow"],
+                ascending=[False, False, False]
+            ).head(20).reset_index(drop=True)
+        elif use_v13_observation_pool and "v13_observation_guard" in df_pool.columns:
+            df_pool = df_pool[df_pool["v13_observation_guard"] == True]
+            df_pool = df_pool.sort_values(
+                by=["pool_rank_score", "longterm_score", "main_net_inflow"],
+                ascending=[False, False, False]
+            ).head(20).reset_index(drop=True)
+        elif use_v14_large_quiet_pool and "v14_large_quiet_guard" in df_pool.columns:
+            df_pool = df_pool[df_pool["v14_large_quiet_guard"] == True]
+            df_pool = df_pool.sort_values(
+                by=["pool_rank_score", "longterm_score", "main_net_inflow"],
+                ascending=[False, False, False]
+            ).head(20).reset_index(drop=True)
+        elif use_v15_confirmed_bull_pool and "v15_confirmed_bull_guard" in df_pool.columns:
+            df_pool = df_pool[df_pool["v15_confirmed_bull_guard"] == True]
+            df_pool = df_pool.sort_values(
+                by=["pool_rank_score", "longterm_score", "main_net_inflow"],
+                ascending=[False, False, False]
+            ).head(20).reset_index(drop=True)
+        elif use_v16_lifecycle_pool and "v16_lifecycle_guard" in df_pool.columns:
+            df_pool = df_pool[df_pool["v16_lifecycle_guard"] == True]
+            df_pool = df_pool.sort_values(
+                by=["pool_rank_score", "longterm_score", "main_net_inflow"],
+                ascending=[False, False, False]
+            ).head(20).reset_index(drop=True)
+        else:
+            df_pool = df_pool.sort_values(
+                by=["longterm_score", "main_net_inflow"],
+                ascending=[False, False]
+            ).head(20).reset_index(drop=True)
 
     logger.info(
         f"✅ 波段选股v4.0完成：{len(df_pool)}只 | "
@@ -4849,12 +5464,13 @@ def run_daily_selection(
             regime=regime,
             score_threshold=getattr(config, 'LONGTERM_SCORE_THRESHOLD', {}).get(regime, 70),
             longterm_profile=longterm_profile,
+            macro_data=macro_data,
         )
         result['longterm_pool'] = longterm_pool
     elif include_longterm:
-        logger.info(f"📊 波段选股跳过（机制：{regime}，仅BULL_TREND/BULL_PULLBACK执行）")
+        logger.info(f"📊 长线观察池跳过（机制：{regime}，仅BULL_TREND/BULL_PULLBACK执行）")
     else:
-        logger.info("📊 波段选股跳过（短线回测 include_longterm=False）")
+        logger.info("📊 长线观察池未启用（ENABLE_LONGTERM_LIVE=False）")
 
     return result
 
@@ -4862,7 +5478,12 @@ def run_daily_selection(
 # ==================== 主程序 ====================
 def main():
     include_longterm = bool(getattr(config, 'ENABLE_LONGTERM_LIVE', False))
-    mode_label = "短线 + 波段" if include_longterm else "短线"
+    longterm_live_profile = getattr(
+        config,
+        'LONGTERM_LIVE_PROFILE',
+        'longterm_quality_trend_v15_confirmed_bull_pool',
+    )
+    mode_label = "短线 + 长线观察池" if include_longterm else "短线"
     logger.info(f"===== 🚀 A股AI选股助手启动（{mode_label}）=====")
     start_time = datetime.now()
 
@@ -4875,6 +5496,7 @@ def main():
         trade_date=None,
         enable_news=True,
         include_longterm=include_longterm,
+        longterm_profile=longterm_live_profile,
     )
     trade_date     = sel['trade_date']
     sentiment_data = sel['sentiment_data']
@@ -4882,6 +5504,31 @@ def main():
     longterm_pool  = sel['longterm_pool']
     macro_mode     = sel.get('macro_mode', 'cautious')
     macro_data     = sel.get('macro_data', {})
+    longterm_watch_pool = longterm_pool
+    longterm_elite_pool = pd.DataFrame()
+
+    if include_longterm and not longterm_pool.empty:
+        live_lists = build_live_watchlists(
+            longterm_pool,
+            trade_date=trade_date,
+            max_watch=getattr(config, 'LONGTERM_LIVE_TOPN', 3),
+            max_industry=getattr(config, 'LONGTERM_LIVE_MAX_INDUSTRY_PER_DAY', 2),
+            elite_min_score=getattr(config, 'LONGTERM_ELITE_MIN_COMPRESSION_SCORE', 80),
+            elite_min_industry_rs=getattr(config, 'LONGTERM_ELITE_MIN_INDUSTRY_RS', 8),
+            elite_min_drawdown=getattr(config, 'LONGTERM_ELITE_DRAWDOWN_MIN', 7),
+            elite_max_drawdown=getattr(config, 'LONGTERM_ELITE_DRAWDOWN_MAX', 15),
+        )
+        longterm_watch_pool = live_lists.watchlist
+        longterm_elite_pool = live_lists.elite
+        longterm_watch_pool, longterm_elite_pool = _apply_longterm_elite_cooldown(
+            longterm_watch_pool,
+            longterm_elite_pool,
+            trade_date=trade_date,
+        )
+        logger.info(
+            f"长线实盘压缩：原始{len(longterm_pool)}只 -> "
+            f"观察{len(longterm_watch_pool)}只，精英提醒{len(longterm_elite_pool)}只"
+        )
 
     # ── AI 分析 ──
     if not stock_pool.empty:
@@ -4919,13 +5566,13 @@ def main():
             item['accel_score']       = qdata.get('accel_score', '-')
             item['atr_14']            = qdata.get('atr_14', '-')
 
-    if not longterm_pool.empty:
-        ai_longterm = ai_analyze_longterm(longterm_pool)
-        quant_map_lt = longterm_pool.set_index('code').to_dict('index')
-        price_map_lt = dict(zip(longterm_pool['code'].astype(str), longterm_pool['close']))
-        buy_map_lt   = dict(zip(longterm_pool['code'].astype(str),
-                                zip(longterm_pool['buy_price_low'], longterm_pool['buy_price_high'])))
-        trend_map_lt = dict(zip(longterm_pool['code'].astype(str), longterm_pool['trend_strength']))
+    if not longterm_watch_pool.empty:
+        ai_longterm = ai_analyze_longterm(longterm_watch_pool)
+        quant_map_lt = longterm_watch_pool.set_index('code').to_dict('index')
+        price_map_lt = dict(zip(longterm_watch_pool['code'].astype(str), longterm_watch_pool['close']))
+        buy_map_lt   = dict(zip(longterm_watch_pool['code'].astype(str),
+                                zip(longterm_watch_pool['buy_price_low'], longterm_watch_pool['buy_price_high'])))
+        trend_map_lt = dict(zip(longterm_watch_pool['code'].astype(str), longterm_watch_pool['trend_strength']))
         for item in ai_longterm:
             code = str(item.get('code', ''))
             item['close'] = price_map_lt.get(code, 0)
@@ -4944,6 +5591,9 @@ def main():
             item['vol_shrinking']     = qdata.get('vol_shrinking', False)
             item['roe']               = qdata.get('roe')
             item['revenue_growth']    = qdata.get('revenue_growth')
+            item['compression_score'] = qdata.get('compression_score', '-')
+            item['alert_tier']        = qdata.get('alert_tier', 'watch')
+            item['elite_alert']       = qdata.get('elite_alert', False)
 
     # 打印宏观趋势（BEAR_TREND时提前return，get_weekly_macro_trend未执行，macro_data为空）
     macro_label = {'active': '🟢 主动做多', 'cautious': '🟡 谨慎观望', 'defensive': '🔴 防御避险'}.get(macro_mode, macro_mode)
@@ -5020,11 +5670,11 @@ def main():
     else:
         logger.info("  暂无短线候选")
 
-    # 打印波段建议（取评分前3）
-    logger.info("\n【📊 波段建议 Top3（1-8周）】")
-    long_top3 = sorted(ai_longterm, key=lambda x: x.get("trend_strength", 0), reverse=True)[:3]
-    if long_top3:
-        for rank, item in enumerate(long_top3, 1):
+    # 打印长线观察池（最多展示前10个，避免把观察池误读为满仓买入清单）
+    logger.info("\n【📊 长线观察池 Top10（仅观察，等待人工确认）】")
+    long_top = sorted(ai_longterm, key=lambda x: x.get("trend_strength", 0), reverse=True)[:10]
+    if long_top:
+        for rank, item in enumerate(long_top, 1):
             risk_icon = {'低': '🟢', '中等': '🟡', '高': '🔴'}.get(item.get('risk', ''), '⚪')
             logger.info(
                 f"  #{rank} {item['code']} {item['name']}  评分{item.get('score', 0)}分  "
@@ -5034,13 +5684,22 @@ def main():
                 f"     {item.get('reason','')}"
             )
     else:
-        logger.info("  暂无波段候选")
+        if include_longterm:
+            logger.info("  暂无长线观察候选")
+        else:
+            logger.info("  长线观察池未启用")
 
     elapsed = (datetime.now() - start_time).total_seconds()
     logger.info(f"\n===== 🎯 完成 | 耗时：{elapsed:.1f}秒 =====")
 
     # 保存实盘选股记录（用于事后IC验证）
-    _save_live_selections(trade_date, stock_pool, longterm_pool, sel.get('regime', 'BULL_TREND'))
+    _save_live_selections(trade_date, stock_pool, longterm_watch_pool, sel.get('regime', 'BULL_TREND'))
+    _persist_signal_snapshot(
+        trade_date,
+        stock_pool,
+        longterm_watch_pool if include_longterm else None,
+        longterm_elite_pool if include_longterm else None,
+    )
 
     # 生成每日报告文件
     _write_daily_report(
@@ -5050,6 +5709,7 @@ def main():
         regime_data=regime_data,
         position_multiplier=pos_mult,
         market_style=sel.get('market_style', ''),
+        include_longterm=include_longterm,
     )
 
 
@@ -5106,6 +5766,149 @@ def _save_live_selections(trade_date: str, stock_pool: pd.DataFrame,
     write_header = not os.path.exists(out_path)
     new_df.to_csv(out_path, mode='a', header=write_header, index=False, encoding='utf-8-sig')
     logger.info(f"📝 实盘记录已追加：{len(rows)} 条 → {out_path}")
+
+
+def _persist_signal_snapshot(
+    trade_date: str,
+    stock_pool: pd.DataFrame,
+    longterm_watch: Optional[pd.DataFrame],
+    longterm_elite: Optional[pd.DataFrame],
+    db_path=DEFAULT_DB_PATH,
+) -> None:
+    store = SignalStore(db_path)
+    try:
+        _persist_one_signal_pool(
+            store,
+            trade_date=trade_date,
+            mode="short",
+            profile=getattr(config, "SHORT_LIVE_FACTOR_PROFILE", "short"),
+            records=_signal_records_from_df(stock_pool, pool_type="short_top", score_col="score"),
+        )
+        if longterm_watch is not None:
+            _persist_one_signal_pool(
+                store,
+                trade_date=trade_date,
+                mode="longterm",
+                profile="longterm_watch",
+                records=_signal_records_from_df(longterm_watch, pool_type="longterm_watch", score_col="compression_score"),
+            )
+        if longterm_elite is not None:
+            _persist_one_signal_pool(
+                store,
+                trade_date=trade_date,
+                mode="longterm",
+                profile="longterm_elite",
+                records=_signal_records_from_df(longterm_elite, pool_type="longterm_elite", score_col="compression_score"),
+            )
+    finally:
+        store.close()
+
+
+def _apply_longterm_elite_cooldown(
+    longterm_watch: pd.DataFrame,
+    longterm_elite: pd.DataFrame,
+    trade_date: str,
+    db_path=DEFAULT_DB_PATH,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    if longterm_elite is None or longterm_elite.empty:
+        return longterm_watch, longterm_elite
+
+    store = SignalStore(db_path)
+    try:
+        recent_codes = store.recent_event_codes(
+            mode="longterm",
+            profile="longterm_elite",
+            event_type="NEW",
+            asof_date=trade_date,
+            cooldown_days=getattr(config, "LONGTERM_ALERT_COOLDOWN_DAYS", 80),
+        )
+    finally:
+        store.close()
+
+    if not recent_codes:
+        return longterm_watch, longterm_elite
+
+    elite = longterm_elite.copy()
+    elite["ts_code"] = elite["ts_code"].astype(str)
+    suppressed = set(elite[elite["ts_code"].isin(recent_codes)]["ts_code"])
+    elite = elite[~elite["ts_code"].isin(suppressed)].reset_index(drop=True)
+
+    watch = longterm_watch.copy()
+    if suppressed and "ts_code" in watch.columns:
+        mask = watch["ts_code"].astype(str).isin(suppressed)
+        watch.loc[mask, "elite_alert"] = False
+        watch.loc[mask, "alert_tier"] = "watch"
+
+    return watch, elite
+
+
+def _persist_one_signal_pool(
+    store: SignalStore,
+    trade_date: str,
+    mode: str,
+    profile: str,
+    records: List[SignalRecord],
+) -> None:
+    run_id = store.record_run(trade_date=trade_date, mode=mode, profile=profile, source="live", label="daily")
+    store.update_pool(run_id=run_id, trade_date=trade_date, mode=mode, profile=profile, records=records)
+
+
+def _signal_records_from_df(df: pd.DataFrame, pool_type: str, score_col: str) -> List[SignalRecord]:
+    if df is None or df.empty:
+        return []
+    records: List[SignalRecord] = []
+    for idx, row in df.reset_index(drop=True).iterrows():
+        ts_code = str(row.get("ts_code") or format_code(str(row.get("code", ""))))
+        score = row.get(score_col, row.get("score", row.get("longterm_score")))
+        records.append(
+            SignalRecord(
+                ts_code=ts_code,
+                name=str(row.get("name", "")),
+                industry=str(row.get("industry", "")),
+                rank=int(row.get("snapshot_rank", idx + 1) or idx + 1),
+                score=_safe_optional_float(score),
+                pool_type=pool_type,
+                reason=str(row.get("pool_type", pool_type)),
+                factors=_signal_factor_payload(row),
+            )
+        )
+    return records
+
+
+def _signal_factor_payload(row: pd.Series) -> Dict:
+    keep_cols = [
+        "score",
+        "longterm_score",
+        "compression_score",
+        "pool_rank_score",
+        "industry_rs",
+        "drawdown_from_high",
+        "price_vs_ma60",
+        "turnover",
+        "pb",
+        "roe",
+        "netprofit_yoy",
+        "factor_profile",
+        "style_gate",
+        "alert_tier",
+        "elite_alert",
+    ]
+    payload = {}
+    for col in keep_cols:
+        if col in row.index:
+            value = row.get(col)
+            if pd.notna(value):
+                payload[col] = value.item() if hasattr(value, "item") else value
+    return payload
+
+
+def _safe_optional_float(value):
+    try:
+        if value in ("", "-", None) or pd.isna(value):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _short_recommendation_title(count: int, compact: bool = False) -> str:
@@ -5258,7 +6061,7 @@ def _format_main_inflow(value) -> str:
     return f"{sign}{amount}（{direction}）"
 
 
-def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: List[Dict], sentiment_data: Dict = None, macro_mode: str = 'cautious', macro_data: Dict = None, regime: str = 'BULL_TREND', regime_data: Dict = None, position_multiplier: float = 1.0, market_style: str = ''):
+def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: List[Dict], sentiment_data: Dict = None, macro_mode: str = 'cautious', macro_data: Dict = None, regime: str = 'BULL_TREND', regime_data: Dict = None, position_multiplier: float = 1.0, market_style: str = '', include_longterm: bool = False):
     report_path = os.path.join(config.REPORTS_DIR, f"report_{trade_date}.txt")
 
     def sep(char='─', n=60):
@@ -5483,13 +6286,14 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
         }.get(regime, '当前市场条件下无满足条件的短线候选')
         lines.append(f"  {no_short_reason}\n\n")
 
-    # ── 三、波段建议 ─────────────────────────────────────
-    lines.append("【三、波段建议 Top3（持有 1-8 周）】\n")
-    lines.append("  入选条件：MA20＞MA60（中期上升趋势）+ 回调5-35% + 缩量回踩支撑 + 行业RS不弱\n\n")
+    # ── 三、长线观察池 ─────────────────────────────────────
+    lines.append("【三、长线观察池 Top10（仅观察，等待人工确认）】\n")
+    lines.append("  入选条件：强牛市大盘确认 + 中长期趋势向上 + 大市值相对安静 + 质量/回调结构合格\n")
+    lines.append("  使用方式：入池代表进入观察名单，不等同于立即买入；降级或移出时再提示风险变化。\n\n")
 
-    long_top3 = sorted(ai_longterm, key=lambda x: x.get("trend_strength", 0), reverse=True)[:3]
-    if long_top3:
-        for rank, item in enumerate(long_top3, 1):
+    long_top = sorted(ai_longterm, key=lambda x: x.get("trend_strength", 0), reverse=True)[:10]
+    if long_top:
+        for rank, item in enumerate(long_top, 1):
             risk      = item.get('risk', '-')
             sentiment = item.get('sentiment', '-')
             risk_icon = {'低': '🟢', '中等': '🟡', '高': '🔴'}.get(risk, '⚪')
@@ -5500,6 +6304,8 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
             lines.append(f"      趋势强度：{item.get('trend_strength', 0):.1f}  "
                          f"综合评分：{item.get('score', 0):.0f}分  "
                          f"{risk_icon}风险:{risk}  情绪:{sent_icon}{sentiment}\n")
+            if item.get("elite_alert"):
+                lines.append(f"      Elite提醒：压缩分 {item.get('compression_score', '-')}\n")
             lines.append(f"      当前价格：{item.get('close', '-')}元\n")
             lines.append(f"      建议买入：{item.get('buy_price_low', '-')} ~ "
                          f"{item.get('buy_price_high', '-')} 元（MA20 附近分批进场）\n")
@@ -5539,10 +6345,13 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
             lines.append(f"      {item.get('reason', '')}\n")
             lines.append('\n')
     else:
-        no_long_reason = {
-            'BEAR_TREND':  '熊市下跌阶段，波段策略暂停（需BULL_TREND或BULL_PULLBACK状态才启用）',
-            'BEAR_BOUNCE': '熊市反弹，波段策略暂停（MA60趋势未回正，不适合持仓1-8周）',
-        }.get(regime, '当前无满足条件的波段候选（趋势未达标或大盘偏弱）')
+        if not include_longterm:
+            no_long_reason = '长线观察池未启用（ENABLE_LONGTERM_LIVE=False），今日仅输出短线建议'
+        else:
+            no_long_reason = {
+                'BEAR_TREND':  '熊市下跌阶段，长线观察池暂停（需BULL_TREND或BULL_PULLBACK状态才启用）',
+                'BEAR_BOUNCE': '熊市反弹，长线观察池暂停（MA60趋势未回正，不适合持仓1-8周）',
+            }.get(regime, '当前无满足条件的长线观察候选（趋势未达标或大盘偏弱）')
         lines.append(f"  {no_long_reason}\n\n")
 
     # ── 四、操作纪律 ─────────────────────────────────────
@@ -5593,6 +6402,16 @@ def analyze_batch_stocks(stock_codes: List[str], trade_date: str = None) -> List
     """
     if not stock_codes:
         logger.warning("股票代码列表为空")
+        return []
+
+    parsed = parse_stock_codes_from_text(" ".join(map(str, stock_codes)), source="batch")
+    stock_codes = parsed.valid_codes
+    if parsed.duplicate_codes:
+        logger.info(f"已去重重复股票代码：{len(parsed.duplicate_codes)} 个")
+    if parsed.invalid_tokens:
+        logger.warning(f"已忽略无效股票代码：{', '.join(parsed.invalid_tokens[:10])}")
+    if not stock_codes:
+        logger.warning("没有可分析的有效股票代码")
         return []
 
     if trade_date is None:
@@ -5777,40 +6596,22 @@ def analyze_batch_stocks(stock_codes: List[str], trade_date: str = None) -> List
     return result
 
 
-def analyze_from_file(file_path: str, output_path: str = None) -> None:
+def analyze_from_inputs(inputs: List[str], output_path: str = None) -> None:
     """
-    从文件读取股票代码并分析，输出到文件
-
-    Args:
-        file_path: 输入文件路径（每行一个股票代码）
-        output_path: 输出文件路径，默认为 reports/batch_analysis_YYYYMMDD.txt
+    从文件或命令行股票代码读取输入并批量分析。
     """
-    logger.info(f"📄 从文件读取股票代码：{file_path}")
-
-    # 读取股票代码
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-    except Exception as e:
-        logger.error(f"读取文件失败：{e}")
-        return
-
-    # 解析股票代码（支持注释和空行）
-    stock_codes = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        # 支持格式：600000 或 600000.SH 或 600000 贵州茅台
-        code = line.split()[0]
-        if code.replace('.', '').isdigit() or '.' in code:
-            stock_codes.append(code)
+    parsed = parse_stock_code_args(inputs)
+    stock_codes = parsed.valid_codes
 
     if not stock_codes:
-        logger.error("文件中没有有效的股票代码")
+        logger.error("没有读到有效股票代码")
         return
 
     logger.info(f"📊 共读取 {len(stock_codes)} 个股票代码")
+    if parsed.duplicate_codes:
+        logger.info(f"  已去重重复代码：{len(parsed.duplicate_codes)} 个")
+    if parsed.invalid_tokens:
+        logger.warning(f"  已忽略无效内容：{', '.join(parsed.invalid_tokens[:10])}")
 
     # 批量分析
     results = analyze_batch_stocks(stock_codes)
@@ -5819,6 +6620,21 @@ def analyze_from_file(file_path: str, output_path: str = None) -> None:
         logger.error("分析失败，无结果")
         return
 
+    _write_batch_analysis_report(results, output_path=output_path)
+
+
+def analyze_from_file(file_path: str, output_path: str = None) -> None:
+    """
+    从文件读取股票代码并分析，输出到文件
+
+    Args:
+        file_path: 输入文件路径（每行一个股票代码）
+        output_path: 输出文件路径，默认为 reports/batch_analysis_YYYYMMDD.txt
+    """
+    analyze_from_inputs([file_path], output_path=output_path)
+
+
+def _write_batch_analysis_report(results: List[Dict], output_path: str = None) -> None:
     # 生成输出文件
     if output_path is None:
         trade_date = get_latest_trade_date()
@@ -5873,9 +6689,11 @@ def analyze_from_file(file_path: str, output_path: str = None) -> None:
 if __name__ == "__main__":
     import sys
 
-    # 支持命令行参数：python main.py analyze watchlist.txt
+    # 支持命令行参数：
+    #   python main.py analyze watchlist.txt
+    #   python main.py analyze 000001,600519 sh600000
     if len(sys.argv) >= 3 and sys.argv[1] == 'analyze':
-        analyze_from_file(sys.argv[2])
+        analyze_from_inputs(sys.argv[2:])
     else:
         main()
 

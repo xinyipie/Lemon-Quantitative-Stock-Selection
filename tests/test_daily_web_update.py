@@ -1,0 +1,58 @@
+import unittest
+from argparse import Namespace
+from pathlib import Path
+from unittest.mock import patch
+
+from daily_web_update import (
+    build_longterm_periods,
+    current_half_year_period,
+    next_calendar_day,
+    run_update,
+)
+
+
+class DailyWebUpdateTest(unittest.TestCase):
+    def test_current_half_year_period(self):
+        self.assertEqual(current_half_year_period("20260615"), ("2026H1", "20260101", "20260615"))
+        self.assertEqual(current_half_year_period("20260702"), ("2026H2", "20260701", "20260702"))
+
+    def test_full_history_periods_include_fixed_halves_and_current_half(self):
+        periods = build_longterm_periods("20260615", full_history=True)
+
+        self.assertEqual(periods[0], ("2024H1", "20240101", "20240630"))
+        self.assertEqual(periods[-1], ("2026H1", "20260101", "20260615"))
+        self.assertNotIn(("2026H2", "20260701", "20260615"), periods)
+
+    def test_next_calendar_day(self):
+        self.assertEqual(next_calendar_day("20260529"), "20260530")
+
+    def test_run_update_refreshes_market_context_before_main(self):
+        calls = []
+        args = Namespace(
+            end="20260616",
+            start="20260616",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=False,
+            skip_main=True,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_financial=True,
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260616"
+        ):
+            run_update(args)
+
+        self.assertTrue(any("market_context_snapshot.py" in command for command in calls))
+
+
+if __name__ == "__main__":
+    unittest.main()

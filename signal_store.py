@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +107,9 @@ class SignalStore:
                 created_at text not null,
                 unique(event_date, mode, profile, ts_code, event_type)
             );
+
+            create unique index if not exists idx_signal_runs_unique_key
+            on signal_runs(run_date, trade_date, mode, profile, source, coalesce(label, ''));
             """
         )
         self.conn.commit()
@@ -120,6 +123,24 @@ class SignalStore:
         label: str | None = None,
         run_date: str | None = None,
     ) -> int:
+        existing = self.conn.execute(
+            """
+            select run_id
+            from signal_runs
+            where run_date = ?
+              and trade_date = ?
+              and mode = ?
+              and profile = ?
+              and source = ?
+              and coalesce(label, '') = coalesce(?, '')
+            order by run_id desc
+            limit 1
+            """,
+            (run_date or trade_date, trade_date, mode, profile, source, label),
+        ).fetchone()
+        if existing:
+            return int(existing["run_id"])
+
         now = _now()
         cur = self.conn.execute(
             """
@@ -146,6 +167,7 @@ class SignalStore:
         with self.conn:
             for record in normalized:
                 self._insert_signal_pool(run_id, trade_date, mode, profile, record, now)
+                self._insert_tier_transition_event(trade_date, mode, profile, record, now)
                 self._upsert_active_state(trade_date, mode, profile, record, now)
 
             active_rows = self.conn.execute(
@@ -170,11 +192,20 @@ class SignalStore:
     ) -> None:
         self.conn.execute(
             """
-            insert or ignore into signal_pool(
+            insert into signal_pool(
                 run_id, trade_date, mode, profile, ts_code, name, industry,
                 rank, score, pool_type, reason, factor_json, created_at
             )
             values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(run_id, ts_code) do update set
+                name = excluded.name,
+                industry = excluded.industry,
+                rank = excluded.rank,
+                score = excluded.score,
+                pool_type = excluded.pool_type,
+                reason = excluded.reason,
+                factor_json = excluded.factor_json,
+                created_at = excluded.created_at
             """,
             (
                 run_id,
@@ -306,6 +337,49 @@ class SignalStore:
             now=now,
         )
 
+    def _insert_tier_transition_event(
+        self,
+        trade_date: str,
+        mode: str,
+        profile: str,
+        record: SignalRecord,
+        now: str,
+    ) -> None:
+        if mode != "longterm":
+            return
+        new_tier = _longterm_tier(profile, record.pool_type)
+        if new_tier == "other":
+            return
+        rows = self.conn.execute(
+            """
+            select *
+            from pool_state
+            where mode = ?
+              and ts_code = ?
+              and profile <> ?
+              and state = 'active'
+            """,
+            (mode, record.ts_code, profile),
+        ).fetchall()
+        for row in rows:
+            old_tier = _longterm_tier(row["profile"], row["last_reason"])
+            event_type = _tier_transition_event_type(old_tier, new_tier)
+            if event_type is None:
+                continue
+            self._insert_event(
+                event_date=trade_date,
+                mode=mode,
+                profile=profile,
+                ts_code=record.ts_code,
+                event_type=event_type,
+                old_state=old_tier,
+                new_state=new_tier,
+                old_score=row["latest_score"],
+                new_score=record.score,
+                message=f"{record.ts_code} {old_tier} → {new_tier}",
+                now=now,
+            )
+
     def _insert_event(
         self,
         event_date: str,
@@ -342,6 +416,37 @@ class SignalStore:
         ).fetchone()
         return int(row["cnt"] or 1)
 
+    def recent_event_codes(
+        self,
+        mode: str,
+        profile: str,
+        event_type: str,
+        asof_date: str,
+        cooldown_days: int,
+    ) -> set[str]:
+        """Return codes with a matching event inside the cooldown window."""
+        end_date = _parse_date(asof_date)
+        start_date = end_date - timedelta(days=int(cooldown_days))
+        rows = self.conn.execute(
+            """
+            select distinct ts_code
+            from pool_events
+            where mode = ?
+              and profile = ?
+              and event_type = ?
+              and event_date >= ?
+              and event_date <= ?
+            """,
+            (
+                mode,
+                profile,
+                event_type,
+                start_date.strftime("%Y%m%d"),
+                end_date.strftime("%Y%m%d"),
+            ),
+        ).fetchall()
+        return {str(row["ts_code"]) for row in rows}
+
 
 def _dedupe_records(records: list[SignalRecord]) -> list[SignalRecord]:
     deduped: dict[str, SignalRecord] = {}
@@ -355,5 +460,30 @@ def _max_score(old_score: float | None, new_score: float | None) -> float | None
     return max(scores) if scores else None
 
 
+def _longterm_tier(profile: str | None, pool_type: str | None = None) -> str:
+    text = f"{profile or ''} {pool_type or ''}".lower()
+    if "elite" in text:
+        return "elite"
+    if "watch" in text or "longterm" in text:
+        return "watch"
+    return "other"
+
+
+def _tier_transition_event_type(old_tier: str, new_tier: str) -> str | None:
+    order = {"other": 0, "watch": 1, "elite": 2}
+    old_value = order.get(old_tier, 0)
+    new_value = order.get(new_tier, 0)
+    if new_value > old_value:
+        return "UPGRADED"
+    if new_value < old_value:
+        return "DOWNGRADED"
+    return None
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_date(value: str) -> datetime:
+    text = str(value).replace("-", "")[:8]
+    return datetime.strptime(text, "%Y%m%d")
