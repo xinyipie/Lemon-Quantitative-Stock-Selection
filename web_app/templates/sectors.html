@@ -8,7 +8,7 @@
     <p>行业口径热度追踪，用来判断市场主线、过热风险和板块内候选观察名单。</p>
   </div>
   <form class="command-search" action="/sectors" method="get">
-    <input name="end" value="{{ filters.end }}" placeholder="结束日期，如 20260616，可留空">
+    <input name="end" value="{{ filters.end }}" placeholder="结束日期，如 20260616；留空 = 使用历史库最新交易日">
     <button type="submit">查看</button>
   </form>
 </header>
@@ -24,96 +24,253 @@
   </div>
   <div class="sector-hero-facts">
     <div><span>最强健康主线</span><strong>{{ radar.summary.top_sector }}</strong><small>{{ radar.summary.top_stage }} · {{ "%.1f"|format(radar.summary.top_score) }}分</small></div>
-    <div><span>健康主线</span><strong>{{ radar.summary.healthy_count }}</strong><small>低位启动 / 趋势延续 / 弱修复</small></div>
-    <div><span>风险板块</span><strong>{{ radar.summary.risky_count }}</strong><small>过热高潮 / 退潮中</small></div>
+    <div><span>健康主线</span><strong>{{ radar.summary.healthy_count }}</strong><small>当前展示 {{ radar.summary.healthy_display_count }} 个 · 低位启动/趋势延续/弱修复</small></div>
+    <div><span>风险板块</span><strong>{{ radar.summary.risky_count }}</strong><small>当前展示 {{ radar.summary.risky_display_count }} 个 · 过热高潮/退潮中</small></div>
   </div>
 </section>
 
 {% set concept_items = concept_news.concepts.get("items", []) %}
+{% set theme_items = concept_news.theme_filter.get("items", []) if concept_news.theme_filter else [] %}
 {% set news_positive = concept_news.news.get("positive", []) %}
 {% set news_negative = concept_news.news.get("negative", []) %}
-<section class="market-context-grid">
-  <section class="panel concept-heat-panel">
+{% set news_items = concept_news.news.get("items", []) %}
+{% set news_selection = concept_news.news.get("selection", {}) %}
+
+<section class="radar-decision-grid">
+  <section class="panel radar-decision-card {{ decision.tone }}">
     <div class="panel-head">
       <div>
-        <h2>概念热度</h2>
-        <p>只展示本地缓存里的热门概念，用来解释题材温度，不直接等于买入信号。</p>
+        <h2>今日主线判断</h2>
+        <p>先判断市场有没有可做方向，再看个股。概念和新闻只作辅助，不单独触发买入。</p>
       </div>
-      {% if concept_news.concepts.source_date %}
-        <span class="tag soft-tag">{{ concept_news.concepts.source_date|fmt_date }}</span>
-      {% endif %}
+      <span class="tag {{ decision.tone }}">置信度 {{ decision.confidence }}</span>
     </div>
-    {% if concept_items %}
-    <div class="concept-strip">
-      {% for item in concept_items %}
-      <div class="concept-card">
-        <div>
-          <strong>{{ item.concept }}</strong>
-          <span class="{{ 'market-up' if item.change and item.change > 0 else 'market-down' if item.change and item.change < 0 else 'muted' }}">{{ item.change_text }}</span>
-        </div>
-        <div class="heat-bar wide"><i style="width: {{ item.heat_width }}%"></i></div>
-        <small>热度 {{ item.heat_text }}</small>
+    <div class="decision-main">
+      <strong>{{ decision.alignment }}</strong>
+      <p>{{ decision.primary_action }}</p>
+      <small>{{ decision.explanation }}</small>
+    </div>
+    <div class="decision-tags">
+      <div>
+        <span>重点方向</span>
+        {% if decision.focus_industries %}
+          {% for industry in decision.focus_industries %}
+            <a class="tag soft-tag" href="#sector-{{ industry }}">{{ industry }}</a>
+          {% endfor %}
+        {% else %}
+          <em>暂无</em>
+        {% endif %}
       </div>
-      {% endfor %}
+      <div>
+        <span>风险回避</span>
+        {% if decision.avoid_industries %}
+          {% for industry in decision.avoid_industries %}
+            <span class="tag bad">{{ industry }}</span>
+          {% endfor %}
+        {% else %}
+          <em>暂无明确风险板块</em>
+        {% endif %}
+      </div>
     </div>
-    {% else %}
-      <div class="empty-state soft">{{ concept_news.concepts.message }}</div>
-    {% endif %}
+    <div class="filter-summary">{{ decision.source_note }}</div>
   </section>
 
-  <section class="panel news-impact-panel">
+  <section class="panel strategy-overlap-panel">
     <div class="panel-head">
       <div>
-        <h2>新闻板块影响</h2>
-        <p>来自已入库信号的 news/concept 因子汇总，帮助判断消息面推向了哪些行业。</p>
+        <h2>策略共振观察</h2>
+        <p>只列真实入库的短线/长线信号，并要求落在健康主线或正向消息行业里。</p>
+      </div>
+      {% if strategy_overlap.source_date %}
+        <span class="tag soft-tag">{{ strategy_overlap.source_date|fmt_date }}</span>
+      {% endif %}
+    </div>
+    {% if strategy_overlap["items"] %}
+      <div class="strategy-overlap-list">
+        {% for item in strategy_overlap["items"] %}
+        <a class="strategy-overlap-item" href="/stock/{{ item.ts_code }}">
+          <div>
+            <strong>{{ item.name }}</strong>
+            <span>{{ item.ts_code }} · {{ item.industry }}</span>
+          </div>
+          <div>
+            <b>{{ item.score_text }}</b>
+            <small>{{ item.mode_text }} · {{ item.action }}</small>
+          </div>
+          <p>{{ item.reason }}</p>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state soft">{{ strategy_overlap.message }}</div>
+    {% endif %}
+  </section>
+</section>
+
+<section class="market-context-grid message-layout">
+  <section class="panel message-radar-panel">
+    <div class="panel-head">
+      <div>
+        <h2>消息面雷达</h2>
+        <p>先看消息来源和筛选链路，再看它推向哪些行业。消息只做催化解释，不单独构成买入信号。</p>
       </div>
       {% if concept_news.news.source_date %}
         <span class="tag soft-tag">{{ concept_news.news.source_date|fmt_date }}</span>
       {% endif %}
     </div>
-    {% if news_positive or news_negative %}
-    <div class="news-impact-grid">
+    <div class="message-audit-grid">
       <div>
-        <h3>正向影响</h3>
-        {% for item in news_positive %}
-        <div class="impact-card {{ item.tone }}">
-          <div class="impact-card-head">
-            <strong>{{ item.industry }}</strong>
-            <span class="market-up">{{ item.impact_text }}</span>
-          </div>
-          <small>新闻 {{ item.news_boost_text }} / 概念 {{ item.concept_boost_text }} / {{ item.signal_count }} 个信号</small>
-          <div class="impact-stock-list">
-            {% for stock in item.top_stocks %}
-              <a href="/stock/{{ stock.ts_code }}">{{ stock.name }} <span>{{ stock.ts_code }}</span><em>{{ stock.impact_text }}</em></a>
-            {% endfor %}
-          </div>
-        </div>
-        {% else %}
-          <div class="empty-mini">暂无正向行业归因。</div>
-        {% endfor %}
+        <span>消息筛选链路</span>
+        <strong>{{ news_selection.get("path_text", "暂无新闻筛选链路") }}</strong>
       </div>
       <div>
-        <h3>负向影响</h3>
-        {% for item in news_negative %}
-        <div class="impact-card {{ item.tone }}">
-          <div class="impact-card-head">
-            <strong>{{ item.industry }}</strong>
-            <span class="market-down">{{ item.impact_text }}</span>
-          </div>
-          <small>新闻 {{ item.news_boost_text }} / 概念 {{ item.concept_boost_text }} / {{ item.signal_count }} 个信号</small>
-          <div class="impact-stock-list">
-            {% for stock in item.top_stocks %}
-              <a href="/stock/{{ stock.ts_code }}">{{ stock.name }} <span>{{ stock.ts_code }}</span><em>{{ stock.impact_text }}</em></a>
-            {% endfor %}
-          </div>
-        </div>
-        {% else %}
-          <div class="empty-mini">暂无负向行业归因。</div>
-        {% endfor %}
+        <span>消息评级</span>
+        <strong>{{ news_selection.get("quality_text", "暂无有效消息") }}</strong>
+      </div>
+      <div>
+        <span>保留规则</span>
+        <strong>{{ news_selection.get("rule_text", "新闻缓存为空时，消息面不参与市场判断。") }}</strong>
       </div>
     </div>
+
+    {% if news_items %}
+      <div class="message-news-list">
+        {% for item in news_items %}
+        <article class="message-news-card {{ item.tone }}">
+          <div class="message-news-head">
+            <div>
+              <span class="message-grade">{{ item.grade }}</span>
+              <strong>{{ item.title }}</strong>
+            </div>
+            <b class="{{ 'market-up' if item.impact == 'positive' else 'market-down' }}">{{ item.impact_text }} {{ item.boost_text }}</b>
+          </div>
+          <div class="message-news-meta">
+            <span>{{ item.quality }}</span>
+            <span>强度 {{ item.strength_text }}</span>
+            <span>{{ item.duration }}</span>
+            <span>{{ item.sectors_text }}</span>
+          </div>
+          <p>{{ item.reason or item.why_selected }}</p>
+          <small>{{ item.why_selected }}</small>
+          <details class="message-detail">
+            <summary>查看详情</summary>
+            <div class="message-source-box">
+              <span>原始新闻</span>
+              <strong>{{ item.source_title or item.title }}</strong>
+              <p>
+                {% if item.source %}
+                  {{ item.source }}
+                {% else %}
+                  来源未记录
+                {% endif %}
+                {% if item.source_time %}
+                  · {{ item.source_time }}
+                {% endif %}
+                {% if item.source_providers_text %}
+                  · {{ item.source_providers_text }}
+                {% endif %}
+                {% if item.raw_source_count and item.raw_source_count > 1 %}
+                  · {{ item.raw_source_count }} 个来源合并
+                {% endif %}
+              </p>
+              {% if (item.news_value_score_text and item.news_value_score_text != '-') or item.value_reason_text %}
+                <p class="message-value-line">
+                  价值排序 {{ item.news_value_score_text }}
+                  {% if item.value_reason_text %}
+                    · {{ item.value_reason_text }}
+                  {% endif %}
+                </p>
+              {% endif %}
+              {% if item.source_excerpt %}
+                <small>{{ item.source_excerpt }}</small>
+              {% endif %}
+              {% if item.source_url %}
+                <a href="{{ item.source_url }}" target="_blank" rel="noreferrer">打开原文</a>
+              {% endif %}
+            </div>
+            <div class="message-detail-grid">
+              <div>
+                <span>影响路径</span>
+                <strong>{{ item.impact_path }}</strong>
+              </div>
+              <div>
+                <span>交易含义</span>
+                <strong>{{ item.trading_hint }}</strong>
+              </div>
+              <div>
+                <span>风险提示</span>
+                <strong>{{ item.risk_note }}</strong>
+              </div>
+            </div>
+            <div class="message-verify-list">
+              <strong>验证点</strong>
+              <ul>
+                {% for point in item.verification_points %}
+                  <li>{{ point }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </details>
+        </article>
+        {% endfor %}
+      </div>
     {% else %}
       <div class="empty-state soft">{{ concept_news.news.message }}</div>
+    {% endif %}
+  </section>
+
+  <section class="panel concept-heat-panel">
+    <div class="panel-head">
+      <div>
+        <h2>概念热度</h2>
+        <p>用来观察题材温度和短期拥挤度，不直接等于买入信号。</p>
+      </div>
+      {% if concept_news.concepts.source_date %}
+        <span class="tag soft-tag">{{ concept_news.concepts.source_date|fmt_date }}</span>
+      {% endif %}
+    </div>
+    {% if concept_news.concepts.source_kind == "news_proxy" %}
+      <div class="filter-summary">真实概念热度为空，当前展示“新闻板块影响”折算出的代理热度。</div>
+    {% endif %}
+    {% if concept_items %}
+      <div class="concept-strip compact">
+        {% for item in concept_items %}
+        <div class="concept-card">
+          <div>
+            <strong>{{ item.concept }}</strong>
+            <span class="{{ 'market-up' if item.change and item.change > 0 else 'market-down' if item.change and item.change < 0 else 'muted' }}">{{ item.change_text }}</span>
+          </div>
+          <div class="heat-bar wide"><i style="width: {{ item.heat_width }}%"></i></div>
+          <small>热度 {{ item.heat_text }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state soft">{{ concept_news.concepts.message }}</div>
+    {% endif %}
+    {% if theme_items %}
+      <div class="theme-filter-block">
+        <div class="panel-subhead">
+          <strong>AI题材筛选</strong>
+          {% if concept_news.theme_filter.source_date %}
+            <span>{{ concept_news.theme_filter.source_date|fmt_date }}</span>
+          {% endif %}
+        </div>
+        <div class="theme-filter-list compact">
+          {% for item in theme_items %}
+          <div class="theme-filter-item {{ item.tone }}">
+            <div>
+              <strong>{{ item.theme }}</strong>
+              <span class="tag {{ item.tone }}">{{ item.verdict }}</span>
+            </div>
+            <small>{{ item.level_text }} · {{ item.horizon }}</small>
+            {% if item.reason %}
+              <p>{{ item.reason }}</p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
     {% endif %}
   </section>
 </section>
@@ -143,7 +300,7 @@
     <tbody>
       {% for item in radar.healthy %}
       <tr>
-        <td><strong>{{ item.industry }}</strong><br><span class="muted">{{ item.stock_count }}只样本</span></td>
+        <td><a class="sector-anchor-link" href="#{{ item.anchor_id }}"><strong>{{ item.industry }}</strong><br><span class="muted">{{ item.stock_count }}只样本 · 看候选</span></a></td>
         <td><span class="tag {{ item.tone }}">{{ item.stage }}</span></td>
         <td>
           <strong>{{ item.heat_score_text }}</strong>
@@ -169,14 +326,14 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>板块候选 Top3</h2>
-      <p>候选名单只用于进一步体检，不等于买入指令；短期涨幅过大时默认提示等分歧。</p>
+      <h2>各主线板块候选</h2>
+      <p>这里是每个健康主线里的候选 Top3，用于进一步体检；真正优先看的，是上方“策略共振观察”。</p>
     </div>
   </div>
   {% if radar.candidate_groups %}
   <div class="sector-candidate-grid">
     {% for group in radar.candidate_groups %}
-    <section class="sector-candidate-group">
+    <section class="sector-candidate-group" id="{{ group.anchor_id }}">
       <div class="sector-candidate-head">
         <div>
           <strong>{{ group.industry }}</strong>
@@ -220,7 +377,7 @@
   {% endif %}
 </section>
 
-<section class="panel">
+<section class="panel" id="risk-sectors">
   <div class="panel-head">
     <div>
       <h2>过热/退潮提醒</h2>

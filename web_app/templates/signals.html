@@ -14,7 +14,7 @@
   <div class="status-cell"><span>本页记录</span><strong>{{ signals|length }}</strong></div>
   <div class="status-cell"><span>最新日期</span><strong>{{ signals[0].trade_date|fmt_date if signals else 'NA' }}</strong></div>
   <div class="status-cell"><span>来源</span><strong>回测 + 实盘</strong></div>
-  <div class="status-cell"><span>策略</span><strong>short_v9</strong></div>
+  <div class="status-cell"><span>策略</span><strong>short_v9_final</strong></div>
   <div class="status-cell"><span>用途</span><strong>复盘追踪</strong></div>
 </section>
 
@@ -69,8 +69,9 @@
         <th>行业</th>
         <th>分数</th>
         <th>收益路径</th>
+        <th>系统原因</th>
         <th>复盘标签</th>
-        <th>AI解释</th>
+        <th>AI状态</th>
       </tr>
     </thead>
     <tbody>
@@ -80,7 +81,7 @@
       <td>{{ item.rank or '-' }}</td>
       <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
       <td>{{ item.industry or '-' }}</td>
-      <td><strong class="score-main" title="{{ item.basis_text }}">{{ "%.1f"|format(item.score or 0) }}</strong><div class="muted">{{ item.basis_summary }}</div></td>
+      <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong><div class="muted">{{ item.basis_summary }}</div></td>
       <td class="path-cell">
         <strong class="{{ item.final_return_tone }}">{{ item.final_return_text }}</strong>
         <div class="path-sub">
@@ -88,6 +89,7 @@
           <span class="{{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}muted-cell{% endif %}">风险 {{ item.mae_text }}</span>
         </div>
       </td>
+      <td class="reason system-reason" title="{{ item.score_tooltip }}">{{ item.recommend_reason }}</td>
       <td>
         <div class="tag-stack">
           <span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span>
@@ -95,10 +97,10 @@
           <span class="tag {{ item.process_tone }}">{{ item.process_label }}</span>
         </div>
       </td>
-      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
     </tr>
     {% else %}
-    <tr><td colspan="8">暂无短线回测信号。</td></tr>
+    <tr><td colspan="9">暂无短线回测信号。</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -7,12 +7,21 @@ from web_app.services.update_service import build_update_command, read_update_st
 
 
 class UpdateServiceTest(unittest.TestCase):
-    def test_build_update_command_uses_daily_web_update(self):
-        command = build_update_command(end="20260616", full_history=True)
+    def test_build_update_command_defaults_to_daily_mode(self):
+        command = build_update_command(end="20260616")
 
         self.assertIn("daily_web_update.py", command)
         self.assertIn("--end", command)
         self.assertIn("20260616", command)
+        self.assertIn("--mode", command)
+        self.assertIn("daily", command)
+        self.assertNotIn("--full-history", command)
+
+    def test_build_update_command_can_request_full_mode(self):
+        command = build_update_command(end="20260616", mode="full", full_history=True)
+
+        self.assertIn("--mode", command)
+        self.assertIn("full", command)
         self.assertIn("--full-history", command)
 
     def test_run_update_job_records_finished_status(self):

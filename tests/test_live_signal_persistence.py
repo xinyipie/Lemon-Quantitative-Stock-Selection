@@ -53,6 +53,32 @@ class LiveSignalPersistenceTest(unittest.TestCase):
             ],
         )
 
+    def test_short_signal_payload_keeps_score_breakdown_and_rule_reasons(self):
+        row = pd.Series(
+            {
+                "code": "000001",
+                "score": 56.0,
+                "original_score": 66.0,
+                "factor_profile": "profile_v9_sector_quality_guard",
+                "factor_inflow": 82.0,
+                "factor_sector": 61.0,
+                "factor_pattern": 38.0,
+                "volume_ratio": 3.2,
+                "drawdown_from_high": 9.5,
+                "main_net_inflow": 1200.0,
+            }
+        )
+
+        payload = main._signal_factor_payload(row)
+
+        self.assertEqual(payload["original_score"], 66.0)
+        self.assertEqual(payload["factor_inflow"], 82.0)
+        self.assertIn("资金分较强", payload["rule_reasons"])
+        self.assertIn("板块热度较好", payload["rule_reasons"])
+        self.assertIn("量比3.20偏热", payload["risk_reasons"])
+        self.assertIn("回撤9.5%进入风险区", payload["risk_reasons"])
+        self.assertIn("轻仓观察", payload["action_hint"])
+
     def test_elite_cooldown_suppresses_recent_repeated_alerts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "signals.db"

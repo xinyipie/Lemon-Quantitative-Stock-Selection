@@ -212,6 +212,19 @@ class WebServicesTest(unittest.TestCase):
         self.assertTrue(any("事后复盘" in item for item in freshness["notes"]))
         self.assertFalse(freshness["warnings"])
 
+    def test_data_freshness_warns_when_live_signal_is_ahead_of_history_db(self):
+        freshness = build_data_freshness(
+            status={"latest_trade_date": "20260615"},
+            latest_live_short_run={"trade_date": "20260617"},
+            signal_summary={"latest_backtest_date": "20260612"},
+        )
+
+        self.assertEqual(freshness["history_date"], "20260615")
+        self.assertEqual(freshness["live_date"], "20260617")
+        self.assertEqual(freshness["history_lag_days"], 2)
+        self.assertTrue(any("历史行情库" in item and "20260615" in item and "20260617" in item for item in freshness["warnings"]))
+        self.assertFalse(freshness["is_fresh"])
+
     def test_dashboard_decision_explains_empty_signal_day(self):
         decision = build_dashboard_decision(
             latest_live_short_run={"trade_date": "20260615", "signal_count": 0},
@@ -223,6 +236,7 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(decision["level"], "今日不宜开新仓")
         self.assertIn("短线 v9 未产生入池信号", decision["reasons"])
         self.assertGreaterEqual(len(decision["next_actions"]), 3)
+        self.assertEqual(decision["next_actions"][0]["label"], "单股体检")
 
     def test_default_signal_start_uses_100_calendar_days(self):
         self.assertEqual(build_default_signal_start("20260615", days=100), "20260307")
@@ -365,6 +379,7 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(samples[0]["ret_40d_tone"], "muted")
         self.assertEqual(samples[0]["excess_80d_text"], "未满")
         self.assertEqual(samples[0]["mae_pain_tone"], "risk-high")
+        self.assertEqual(samples[0]["lifecycle_label"], "窗口未满 t+2")
 
     def test_dashboard_decision_promotes_live_signals_when_present(self):
         decision = build_dashboard_decision(
@@ -462,6 +477,139 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(signal["mfe_text"], "+9.00%")
         self.assertEqual(signal["mae_text"], "-8.00%")
 
+    def test_short_signal_exposes_rule_reasons_and_score_tooltip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20250102", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20250102",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            score=56,
+                            factors={
+                                "original_score": 66,
+                                "factor_inflow": 82,
+                                "factor_sector": 61,
+                                "factor_pattern": 38,
+                                "rule_reasons": ["资金分较强", "板块热度较好"],
+                                "risk_reasons": ["形态38分偏弱"],
+                                "action_hint": "轻仓观察，次日不能站稳关键位就放弃",
+                            },
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertIn("资金分较强", signal["recommend_reason"])
+        self.assertIn("形态38分偏弱", signal["risk_reason_text"])
+        self.assertIn("总分：56.0", signal["score_tooltip"])
+        self.assertIn("原始分 66.0", signal["score_tooltip"])
+        self.assertIn("处理：轻仓观察", signal["score_tooltip"])
+
+    def test_short_signal_reason_fallback_does_not_show_pool_enum(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20250102", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20250102",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[SignalRecord(ts_code="000001.SZ", score=75, reason="short_top", factors={})],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertNotEqual(signal["recommend_reason"], "short_top")
+        self.assertIn("v9分较高", signal["recommend_reason"])
+        self.assertIn("因子拆解缺失", signal["recommend_reason"])
+
+    def test_short_signal_marks_cached_ai_explanation_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20250102", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20250102",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[SignalRecord(ts_code="000001.SZ", score=75, reason="short_top", factors={})],
+                )
+            finally:
+                store.close()
+
+            import sqlite3
+
+            conn = sqlite3.connect(signal_db)
+            try:
+                conn.execute(
+                    """
+                    create table ai_analysis_documents (
+                        id integer primary key autoincrement,
+                        doc_type text not null,
+                        cache_key text not null unique,
+                        trade_date text,
+                        ts_code text,
+                        mode text,
+                        profile text,
+                        source_ref text,
+                        source text,
+                        model text,
+                        prompt_version text,
+                        input_hash text,
+                        doc_json text not null,
+                        summary text,
+                        created_at text not null,
+                        updated_at text not null
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    insert into ai_analysis_documents(
+                        doc_type, cache_key, trade_date, ts_code, mode, profile, source,
+                        doc_json, summary, created_at, updated_at
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "signal_explanation",
+                        "signal:20250102:000001.SZ",
+                        "20250102",
+                        "000001.SZ",
+                        "short",
+                        "short_v9_final",
+                        "ai",
+                        "{}",
+                        "cached",
+                        "2026-06-18 00:00:00",
+                        "2026-06-18 00:00:00",
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertEqual(signal["explanation_label"], "AI已缓存")
+        self.assertEqual(signal["explanation_tone"], "ok")
+
     def test_short_signal_display_uses_plain_process_labels_and_risk_levels(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_db = Path(tmpdir) / "signals.db"
@@ -513,6 +661,8 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(signal["final_return_tone"], "muted")
         self.assertEqual(signal["mfe_text"], "待观察")
         self.assertEqual(signal["mae_text"], "待观察")
+        self.assertEqual(signal["quality_label"], "待验证信号")
+        self.assertEqual(signal["result_tag"], "待验证信号/窗口未满")
 
 
 if __name__ == "__main__":

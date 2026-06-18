@@ -16,6 +16,7 @@ from typing import Callable, Dict, List, Optional
 import pandas as pd
 
 import config
+from news_source_provider import fetch_market_news
 
 logger = logging.getLogger(__name__)
 
@@ -232,13 +233,15 @@ def build_concept_industry_boosts(hot_concepts: List[Dict]) -> Dict[str, float]:
 def ai_parse_news_to_sectors(
     news_titles: List[str],
     call_ai_api_fn: Callable,
+    max_titles: int = 30,
 ) -> List[Dict]:
     """
     用 AI 将新闻标题解读为板块影响（方案A）。
 
     Args:
-        news_titles:    新闻标题列表（最多15条）
+        news_titles:    新闻标题列表
         call_ai_api_fn: main.py 中的 call_ai_api 函数引用（避免循环 import）
+        max_titles:     送入 AI 的标题上限，默认30条
 
     Returns:
         List of dicts:
@@ -255,7 +258,7 @@ def ai_parse_news_to_sectors(
     import json
     import ai_prompts
 
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles[:15]))
+    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(news_titles[:max_titles]))
     prompt = ai_prompts.PROMPT_NEWS_TO_SECTOR.format(news_titles=titles_text)
 
     try:
@@ -342,11 +345,35 @@ def build_sector_boosts(ai_news_result: List[Dict]) -> Dict[str, float]:
 
 # ==================== 新闻情绪综合分析（保留+增强） ====================
 
-def get_policy_news(days: int = 3) -> pd.DataFrame:
+def get_policy_news(days: int = 3, prefer_rich: bool = True) -> pd.DataFrame:
     """
     获取近期财经要闻（使用 akshare）。
     失败时返回空 DataFrame，不影响主流程。
     """
+    if prefer_rich:
+        try:
+            rich_records = fetch_market_news(days=days, limit=20)
+            if rich_records:
+                df = pd.DataFrame(
+                    [
+                        {
+                            "title": item.get("title") or "",
+                            "date": item.get("publish_time") or "",
+                            "source": item.get("source") or item.get("provider") or "",
+                            "url": item.get("url") or "",
+                            "content": item.get("content_excerpt") or item.get("title") or "",
+                            "provider": item.get("provider") or "",
+                        }
+                        for item in rich_records
+                        if item.get("title")
+                    ]
+                )
+                if not df.empty:
+                    logger.info(f"✅ 多源新闻获取完成：{len(df)} 条（含来源/链接/摘要）")
+                    return df
+        except Exception as e:
+            logger.warning(f"⚠️ 多源新闻获取失败，回退旧新闻接口：{e}")
+
     try:
         import akshare as ak
         df = ak.stock_news_em(symbol="全部")

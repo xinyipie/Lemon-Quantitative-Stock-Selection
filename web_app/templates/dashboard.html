@@ -35,7 +35,7 @@
 <section class="panel update-panel" data-update-status-url="/update/status">
   <div>
     <h2>一键同步</h2>
-    <p>更新行情、运行 main.py、回填短线复盘、刷新长线审计，并生成概念热度/新闻板块缓存。</p>
+    <p>默认只做日常轻量同步：更新行情、市场上下文并运行 main.py。需要补历史复盘时再点完整同步。</p>
     {% if update_status and update_status.message %}
       <div class="filter-summary" data-update-message>当前状态：{{ update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
     {% else %}
@@ -43,11 +43,18 @@
     {% endif %}
     <pre class="update-error" data-update-error hidden></pre>
   </div>
-  <form method="post" action="/update/run">
-    <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
-      {% if update_status and update_status.running %}正在更新{% else %}更新全部数据{% endif %}
-    </button>
-  </form>
+  <div class="update-actions">
+    <form method="post" action="/update/run?mode=daily">
+      <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running %}正在同步{% else %}日常同步{% endif %}
+      </button>
+    </form>
+    <form method="post" action="/update/run?mode=full">
+      <button class="ghost-button" type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
+        完整同步
+      </button>
+    </form>
+  </div>
 </section>
 
 {% if freshness and freshness.warnings %}
@@ -97,6 +104,38 @@
   </div>
 </section>
 
+{% if daily_brief and daily_brief.doc %}
+<section class="panel ai-brief-panel">
+  <div class="panel-head">
+    <div>
+      <h2>今日AI摘要</h2>
+      <p>基于当天已入库的短线、长线和数据状态生成；AI只解释事实，不替代交易纪律。</p>
+    </div>
+    <span class="tag {{ 'ok' if daily_brief.source == 'cache' else 'warn' }}">{{ 'AI已缓存' if daily_brief.source == 'cache' else '规则摘要' }}</span>
+  </div>
+  <div class="ai-brief-summary">{{ daily_brief.doc.summary }}</div>
+  <div class="ai-brief-grid">
+    <div>
+      <strong>可关注事实</strong>
+      <ul>
+        {% for item in daily_brief.doc.positives[:3] %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <strong>风险与克制</strong>
+      <ul>
+        {% for item in daily_brief.doc.risks[:3] %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="muted">{{ daily_brief.doc.confidence_note }}</div>
+</section>
+{% endif %}
+
 {% if admission_diagnostics %}
 <section class="panel">
   <div class="panel-head">
@@ -127,7 +166,7 @@
     </div>
     {% if live_signals %}
     <table class="dense-table">
-      <thead><tr><th>日期</th><th>排名</th><th>股票</th><th>行业</th><th>分数</th><th>入选依据</th></tr></thead>
+      <thead><tr><th>日期</th><th>排名</th><th>股票</th><th>行业</th><th>分数</th><th>系统原因</th></tr></thead>
       <tbody>
       {% for item in live_signals[:8] %}
       <tr>
@@ -135,8 +174,8 @@
         <td>{{ item.rank or '-' }}</td>
         <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
         <td>{{ item.industry or '-' }}</td>
-        <td><strong>{{ "%.1f"|format(item.score or 0) }}</strong></td>
-        <td class="reason">{{ item.basis_text }}</td>
+        <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
+        <td class="reason">{{ item.recommend_reason }}</td>
       </tr>
       {% endfor %}
       </tbody>
@@ -181,19 +220,19 @@
     <a href="/signals">查看复盘表</a>
   </div>
   <table class="dense-table">
-    <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>入选依据</th><th>最终收益</th><th>盘中机会</th><th>盘中风险</th><th>结论</th><th>AI解释</th></tr></thead>
+    <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>系统原因</th><th>收益路径</th><th>盘中机会</th><th>盘中风险</th><th>复盘标签</th><th>AI状态</th></tr></thead>
     <tbody>
     {% for item in backtest_signals[:8] %}
     <tr>
       <td>{{ item.trade_date|fmt_date }}</td>
       <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-      <td>{{ "%.1f"|format(item.score or 0) }}</td>
-      <td class="reason">{{ item.basis_text }}</td>
-      <td>{{ item.final_return_text }}</td>
-      <td>{% if item.performance.mfe_pct is not none %}{{ "%+.2f"|format(item.performance.mfe_pct) }}%{% else %}-{% endif %}</td>
-      <td><span class="tag {{ item.mae_risk_tone }}">{% if item.performance.mae_pct is not none %}{{ "%+.2f"|format(item.performance.mae_pct) }}%{% else %}-{% endif %}</span></td>
+      <td><span class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</span></td>
+      <td class="reason">{{ item.recommend_reason }}</td>
+      <td class="{{ item.final_return_tone }}">{{ item.final_return_text }}</td>
+      <td class="opportunity-cell">{% if item.performance.mfe_pct is not none %}{{ "%+.2f"|format(item.performance.mfe_pct) }}%{% else %}<span class="muted">待观察</span>{% endif %}</td>
+      <td><span class="risk-pill {{ item.mae_risk_tone }}">{% if item.performance.mae_pct is not none %}{{ "%+.2f"|format(item.performance.mae_pct) }}%{% else %}待观察{% endif %}</span></td>
       <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else item.process_tone }}">{{ item.outcome_label }} · {{ item.process_label }}</span></td>
-      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
     </tr>
     {% else %}
     <tr><td colspan="9">暂无历史回测信号。</td></tr>
@@ -240,20 +279,27 @@
   if (!panel) return;
   const statusUrl = panel.dataset.updateStatusUrl;
   const message = panel.querySelector("[data-update-message]");
-  const button = panel.querySelector("[data-update-button]");
+  const buttons = panel.querySelectorAll("[data-update-button]");
   const errorBox = panel.querySelector("[data-update-error]");
 
   function renderStatus(status) {
-    if (!status || !message || !button) return;
+    if (!status || !message || !buttons.length) return;
     let text = `当前状态：${status.message || "状态读取中"}`;
     if (status.started_at && status.running) {
-      text += `（开始于 ${status.started_at}，通常需要 5-30 分钟）`;
+      const eta = status.mode === "full" ? "通常需要 5-30 分钟" : "通常需要 1-5 分钟";
+      text += `（开始于 ${status.started_at}，${eta}）`;
     } else if (status.finished_at) {
       text += `（完成于 ${status.finished_at}）`;
     }
     message.textContent = text;
-    button.disabled = Boolean(status.running);
-    button.textContent = status.running ? "正在更新" : "更新全部数据";
+    buttons.forEach((button, index) => {
+      button.disabled = Boolean(status.running);
+      if (status.running) {
+        button.textContent = index === 0 ? "正在同步" : "请稍候";
+      } else {
+        button.textContent = index === 0 ? "日常同步" : "完整同步";
+      }
+    });
     if (errorBox) {
       const tail = status.state === "failed" ? (status.stderr_tail || status.stdout_tail || "") : "";
       errorBox.hidden = !tail;

@@ -121,7 +121,7 @@
   <details class="detail-fold">
     <summary>查看完整运行日志</summary>
     <table class="dense-table">
-      <thead><tr><th>运行日</th><th>层级</th><th>Profile</th><th>来源</th><th>入池数</th><th>状态</th><th>创建时间</th></tr></thead>
+      <thead><tr><th>运行日</th><th>策略层级</th><th>内部版本</th><th>来源</th><th>入池数</th><th>状态</th><th>创建时间</th></tr></thead>
       <tbody>
       {% for item in runs %}
       <tr>
@@ -150,7 +150,7 @@
     </div>
   </div>
   <table class="dense-table">
-    <thead><tr><th>日期</th><th>事件</th><th>状态变化</th><th>股票</th><th>Profile</th><th>分数变化</th><th>说明</th></tr></thead>
+    <thead><tr><th>日期</th><th>事件</th><th>状态变化</th><th>股票</th><th>策略版本</th><th>分数变化</th><th>说明</th></tr></thead>
     <tbody>
     {% for item in events %}
     <tr>
@@ -177,12 +177,12 @@
     </div>
   </div>
   <table class="dense-table">
-    <thead><tr><th>阶段</th><th>Profile</th><th>样本数</th><th>日期范围</th><th>80日均收益</th><th>80日胜率</th><th>跑赢比例</th><th>来源文件</th></tr></thead>
+    <thead><tr><th>阶段</th><th>策略版本</th><th>样本数</th><th>日期范围</th><th>80日均收益</th><th>80日胜率</th><th>跑赢比例</th><th>来源文件</th></tr></thead>
     <tbody>
     {% for item in audit_summary.runs %}
     <tr>
       <td>{{ item.period }}</td>
-      <td>{{ item.profile }}</td>
+      <td title="{{ item.profile }}">{{ item.profile_label }}</td>
       <td><strong>{{ item.sample_count }}</strong></td>
       <td>{{ item.date_start|fmt_date }} → {{ item.date_end|fmt_date }}</td>
       <td class="{{ 'market-up' if item.avg_ret_80d and item.avg_ret_80d > 0 else 'market-down' if item.avg_ret_80d and item.avg_ret_80d < 0 else 'muted-cell' }}">{{ item.avg_ret_80d_text }}</td>
@@ -256,7 +256,7 @@
   <div class="panel-head"><h2>全部 active 长线记录</h2></div>
   {% if pool %}
   <table class="dense-table">
-    <thead><tr><th>股票</th><th>行业</th><th>Profile</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
+    <thead><tr><th>股票</th><th>行业</th><th>策略版本</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
     <tbody>
     {% for item in pool %}
     <tr>

@@ -1,6 +1,8 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 from fastapi.testclient import TestClient
@@ -8,7 +10,12 @@ from fastapi.testclient import TestClient
 from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
 from web_app.app import app
-from web_app.services.sector_service import build_concept_news_radar, build_sector_radar
+from web_app.services.sector_service import (
+    build_concept_news_radar,
+    build_market_radar_decision,
+    build_sector_radar,
+    build_strategy_overlap,
+)
 
 
 def daily_rows(code: str, closes: list[float], industry: str, name: str) -> tuple[list[dict], dict]:
@@ -97,7 +104,11 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("过热/退潮", response.text)
         self.assertIn("sector-candidate-group", response.text)
         self.assertIn("concept-heat-panel", response.text)
-        self.assertIn("news-impact-panel", response.text)
+        self.assertIn("message-radar-panel", response.text)
+        self.assertIn("留空 = 使用历史库最新交易日", response.text)
+        self.assertIn("message-detail", response.text)
+        self.assertIn("消息筛选链路", response.text)
+        self.assertIn("消息评级", response.text)
 
     def test_concept_news_radar_reads_cache_and_signal_boosts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -106,6 +117,10 @@ class SectorWebTest(unittest.TestCase):
             cache_dir.mkdir()
             (cache_dir / "hot_concepts_20260616.json").write_text(
                 '[{"concept":"AI","change":3.2,"heat":88.5},{"concept":"Robotics","change":1.1,"heat":55.0}]',
+                encoding="utf-8",
+            )
+            (cache_dir / "theme_filter_20260616.json").write_text(
+                '{"date":"20260616","items":[{"theme":"AI","level":"strong","verdict":"强催化","horizon":"short","reason":"真实概念热度靠前"}]}',
                 encoding="utf-8",
             )
             store = SignalStore(signal_db)
@@ -147,9 +162,566 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(radar["concepts"]["source_date"], "20260616")
         self.assertEqual(radar["concepts"]["items"][0]["concept"], "AI")
         self.assertEqual(radar["concepts"]["items"][0]["heat_text"], "88.5")
+        self.assertEqual(radar["theme_filter"]["items"][0]["theme"], "AI")
+        self.assertEqual(radar["theme_filter"]["items"][0]["level"], "strong")
         self.assertEqual(radar["news"]["positive"][0]["industry"], "Software")
         self.assertEqual(radar["news"]["positive"][0]["top_stocks"][0]["ts_code"], "000001.SZ")
         self.assertEqual(radar["news"]["negative"][0]["industry"], "Property")
+
+    def test_sector_radar_exposes_display_counts_and_anchors(self):
+        heat_rows = []
+        for idx in range(9):
+            heat_rows.append(
+                {
+                    "industry": f"健康{idx}",
+                    "stage": "趋势延续",
+                    "heat_score": 90 - idx,
+                    "avg_ret_5d": 2.0,
+                    "rel_ret_10d": 3.0,
+                    "above_ma20_ratio": 0.8,
+                    "volume_expansion_ratio": 0.5,
+                    "stock_count": 12,
+                    "summary": "健康主线",
+                }
+            )
+        for idx in range(9):
+            heat_rows.append(
+                {
+                    "industry": f"风险{idx}",
+                    "stage": "退潮中",
+                    "heat_score": 60 - idx,
+                    "avg_ret_5d": -2.0,
+                    "rel_ret_10d": -3.0,
+                    "above_ma20_ratio": 0.2,
+                    "volume_expansion_ratio": 0.3,
+                    "stock_count": 10,
+                    "summary": "风险板块",
+                }
+            )
+        candidate_rows = [
+            {
+                "industry": "健康0",
+                "candidate_rank": 1,
+                "ts_code": "000001.SZ",
+                "name": "候选A",
+                "candidate_score": 72,
+                "ret_5d": 1.2,
+                "ret_10d": 3.4,
+                "stock_vs_sector_10d": 0.8,
+                "risk_note": "",
+                "candidate_reason": "强于板块",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "history.db"
+            db_path.touch()
+            fake_frames = {"daily": pd.DataFrame(), "stock_basic": pd.DataFrame(), "daily_basic": pd.DataFrame(), "moneyflow": pd.DataFrame(), "index_daily": pd.DataFrame()}
+            with patch("web_app.services.sector_service._latest_trade_date", return_value="20260616"), patch(
+                "web_app.services.sector_service.load_history_frames", return_value=fake_frames
+            ), patch(
+                "web_app.services.sector_service.calculate_sector_heat",
+                return_value=(pd.DataFrame(heat_rows), pd.DataFrame()),
+            ), patch(
+                "web_app.services.sector_service.rank_sector_stocks",
+                return_value=pd.DataFrame(candidate_rows),
+            ):
+                radar = build_sector_radar(db_path, top_sectors=8)
+
+        self.assertEqual(radar["summary"]["healthy_count"], 9)
+        self.assertEqual(radar["summary"]["healthy_display_count"], 8)
+        self.assertEqual(radar["summary"]["risky_count"], 9)
+        self.assertEqual(radar["summary"]["risky_display_count"], 8)
+        self.assertEqual(radar["healthy"][0]["anchor_id"], "sector-健康0")
+        self.assertEqual(radar["candidate_groups"][0]["anchor_id"], "sector-健康0")
+
+    def test_concept_heat_falls_back_to_news_sector_cache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "hot_concepts_20260616.json").write_text("[]", encoding="utf-8")
+            (cache_dir / "news_sector_20260616.json").write_text(
+                """
+                {
+                  "date": "20260616",
+                  "items": [
+                    {"news": "AI算力政策继续支持", "sectors": ["计算机"], "impact": "positive", "strength": 8, "reason": "政策催化"}
+                  ],
+                  "boosts": {"计算机": 21}
+                }
+                """,
+                encoding="utf-8",
+            )
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260616")
+
+        self.assertEqual(radar["concepts"]["source_date"], "20260616")
+        self.assertEqual(radar["concepts"]["source_kind"], "news_proxy")
+        self.assertEqual(radar["concepts"]["items"][0]["concept"], "消息面：计算机")
+        self.assertIn("政策催化", radar["news"]["positive"][0]["reasons"])
+
+    def test_news_cache_exposes_selection_audit_and_ranked_news_items(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260616.json").write_text(
+                """
+                {
+                  "date": "20260616",
+                  "titles": [
+                    "两部门推动设备更新，电力设备和机械设备需求提升",
+                    "银行转债融资压力升温",
+                    "普通公司动态不构成行业催化",
+                    "重复报道：设备更新政策继续推进"
+                  ],
+                  "items": [
+                    {
+                      "news": "两部门推动设备更新，电力设备和机械设备需求提升",
+                      "type": "产业政策",
+                      "sectors": ["机械设备", "电力设备"],
+                      "impact": "positive",
+                      "strength": 8,
+                      "duration": "1-3天",
+                      "reason": "政策催化明确，利好设备链"
+                    },
+                    {
+                      "news": "银行转债融资压力升温",
+                      "type": "资金压力",
+                      "sectors": ["银行"],
+                      "impact": "negative",
+                      "strength": 6,
+                      "duration": "短期",
+                      "reason": "资本补充压力扰动估值"
+                    }
+                  ],
+                  "boosts": {"机械设备": 24, "电力设备": 24, "银行": -12}
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260616")
+
+        selection = radar["news"]["selection"]
+        self.assertEqual(selection["raw_title_count"], 4)
+        self.assertEqual(selection["ai_item_count"], 2)
+        self.assertEqual(selection["displayed_sector_count"], 3)
+        self.assertIn("4条候选新闻", selection["path_text"])
+        self.assertIn("价值排序", selection["path_text"])
+        self.assertEqual(radar["news"]["items"][0]["grade"], "A级")
+        self.assertEqual(radar["news"]["items"][0]["quality"], "产业政策")
+        self.assertIn("入选依据", radar["news"]["items"][0]["why_selected"])
+        self.assertEqual(radar["news"]["items"][1]["grade"], "B级")
+
+    def test_news_cache_merges_duplicate_news_and_adds_trade_details(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260616.json").write_text(
+                """
+                {
+                  "date": "20260616",
+                  "titles": [
+                    "设备更新项目清单下达",
+                    "设备更新项目清单下达",
+                    "银行转债融资压力升温"
+                  ],
+                  "items": [
+                    {
+                      "news": "设备更新项目清单下达",
+                      "type": "产业政策",
+                      "sectors": ["机械设备"],
+                      "impact": "positive",
+                      "strength": 8,
+                      "duration": "1周+",
+                      "reason": "设备更新资金落地，利好制造业"
+                    },
+                    {
+                      "news": "设备更新项目清单下达",
+                      "type": "产业政策",
+                      "sectors": ["电力设备"],
+                      "impact": "positive",
+                      "strength": 8,
+                      "duration": "1周+",
+                      "reason": "同一事件继续映射设备链"
+                    },
+                    {
+                      "news": "银行转债融资压力升温",
+                      "type": "资金压力",
+                      "sectors": ["银行"],
+                      "impact": "negative",
+                      "strength": 6,
+                      "duration": "短期",
+                      "reason": "资本补充压力扰动估值"
+                    }
+                  ],
+                  "boosts": {"机械设备": 24, "电力设备": 24, "银行": -12}
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260616")
+
+        news_items = radar["news"]["items"]
+        self.assertEqual(len(news_items), 2)
+        self.assertEqual(news_items[0]["title"], "设备更新项目清单下达")
+        self.assertEqual(set(news_items[0]["sectors"]), {"机械设备", "电力设备"})
+        self.assertIn("产业政策 → 机械设备、电力设备", news_items[0]["impact_path"])
+        self.assertIn("不单独构成买入理由", news_items[0]["trading_hint"])
+        self.assertGreaterEqual(len(news_items[0]["verification_points"]), 2)
+        self.assertIn("持续性", news_items[0]["risk_note"])
+
+    def test_sector_page_shows_news_detail_control_without_duplicate_news_section(self):
+        client = TestClient(app)
+
+        response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("查看详情", response.text)
+        self.assertIn("交易含义", response.text)
+        self.assertIn("验证点", response.text)
+        self.assertNotIn("消息行业明细", response.text)
+
+    def test_news_cache_attaches_raw_source_details_to_ai_item(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260618.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260618",
+                        "titles": ["设备更新项目清单下达"],
+                        "raw_news": [
+                            {
+                                "title": "设备更新项目清单下达",
+                                "source": "财联社",
+                                "provider": "cls_key",
+                                "providers": ["cls_key"],
+                                "sources": ["财联社"],
+                                "source_count": 1,
+                                "publish_time": "2026-06-18 09:30:00",
+                                "url": "https://example.com/news/1",
+                                "content_excerpt": "2000亿设备更新清单即将下达，利好制造业。",
+                            }
+                        ],
+                        "items": [
+                            {
+                                "news": "设备更新项目清单下达",
+                                "type": "产业政策",
+                                "sectors": ["机械设备"],
+                                "impact": "positive",
+                                "strength": 8,
+                                "duration": "1周",
+                                "reason": "设备更新资金落地，利好制造业。",
+                            }
+                        ],
+                        "boosts": {"机械设备": 24},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260618")
+
+        item = radar["news"]["items"][0]
+        self.assertEqual(item["source_title"], "设备更新项目清单下达")
+        self.assertEqual(item["source"], "财联社")
+        self.assertEqual(item["source_url"], "https://example.com/news/1")
+        self.assertIn("利好制造业", item["source_excerpt"])
+
+    def test_news_cache_matches_short_ai_title_to_long_raw_title(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260618.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260618",
+                        "titles": ["国家安全部：警惕软件供应链投毒"],
+                        "raw_news": [
+                            {
+                                "title": "国家安全部：警惕软件供应链投毒",
+                                "source": "东方财富",
+                                "provider": "eastmoney",
+                                "providers": ["eastmoney"],
+                                "sources": ["东方财富"],
+                                "source_count": 1,
+                                "publish_time": "2026-06-18 07:13:02",
+                                "url": "https://example.com/security",
+                                "content_excerpt": "近期集中爆发多起供应链投毒攻击事件。",
+                            }
+                        ],
+                        "items": [
+                            {
+                                "news": "警惕软件供应链投毒",
+                                "type": "风险提示",
+                                "sectors": ["计算机"],
+                                "impact": "negative",
+                                "strength": 6,
+                                "duration": "短期",
+                                "reason": "软件供应链安全风险升温。",
+                            }
+                        ],
+                        "boosts": {"计算机": -12},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260618")
+
+        item = radar["news"]["items"][0]
+        self.assertEqual(item["source_title"], "国家安全部：警惕软件供应链投毒")
+        self.assertEqual(item["source_url"], "https://example.com/security")
+
+    def test_news_cache_fuzzy_matches_ai_summary_title_to_raw_title(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260618.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260618",
+                        "titles": ["美国总统特朗普签署了一项旨在结束对伊战争并重开霍尔木兹海峡的临时协议"],
+                        "raw_news": [
+                            {
+                                "title": "美国总统特朗普签署了一项旨在结束对伊战争并重开霍尔木兹海峡的临时协议",
+                                "source": "财新",
+                                "provider": "caixin",
+                                "providers": ["caixin"],
+                                "sources": ["财新"],
+                                "source_count": 1,
+                                "publish_time": "2026-06-18",
+                                "url": "https://example.com/hormuz",
+                                "content_excerpt": "协议结束战争并重开海峡。",
+                            }
+                        ],
+                        "items": [
+                            {
+                                "news": "特朗普签署霍尔木兹协议",
+                                "type": "国际政治",
+                                "sectors": ["采掘"],
+                                "impact": "positive",
+                                "strength": 9,
+                                "duration": "1周+",
+                                "reason": "利好油价稳定预期。",
+                            }
+                        ],
+                        "boosts": {"采掘": 27},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260618")
+
+        item = radar["news"]["items"][0]
+        self.assertEqual(item["source_title"], "美国总统特朗普签署了一项旨在结束对伊战争并重开霍尔木兹海峡的临时协议")
+        self.assertEqual(item["source_url"], "https://example.com/hormuz")
+
+    def test_sector_page_renders_raw_news_source_details(self):
+        client = TestClient(app)
+        fake_radar = {
+            "end_date": "20260618",
+            "summary": {
+                "tone": "neutral",
+                "headline": "行业热度测试",
+                "stance": "仅测试",
+                "top_sector": "-",
+                "top_stage": "-",
+                "top_score": 0,
+                "healthy_count": 0,
+                "healthy_display_count": 0,
+                "risky_count": 0,
+                "risky_display_count": 0,
+            },
+            "message": "",
+            "healthy": [],
+            "risky": [],
+            "candidate_groups": [],
+        }
+        fake_news = {
+            "concepts": {"items": [], "message": "", "source_kind": "empty"},
+            "theme_filter": {"items": []},
+            "news": {
+                "source_date": "20260618",
+                "selection": {"path_text": "1条原始新闻", "quality_text": "A", "rule_text": "测试"},
+                "positive": [],
+                "negative": [],
+                "message": "",
+                "items": [
+                    {
+                        "tone": "ok",
+                        "grade": "A级",
+                        "title": "设备更新项目清单下达",
+                        "impact": "positive",
+                        "impact_text": "利好",
+                        "boost_text": "+24.0",
+                        "quality": "产业政策",
+                        "strength_text": "8/10",
+                        "duration": "1周",
+                        "sectors_text": "机械设备",
+                        "reason": "设备更新资金落地。",
+                        "why_selected": "来源可信。",
+                        "source_title": "设备更新项目清单下达",
+                        "source": "财联社",
+                        "source_time": "2026-06-18 09:30:00",
+                        "source_url": "https://example.com/news/1",
+                        "source_excerpt": "2000亿设备更新清单即将下达，利好制造业。",
+                        "source_providers_text": "财联社",
+                        "raw_source_count": 1,
+                        "impact_path": "产业政策 -> 机械设备",
+                        "trading_hint": "只做催化解释。",
+                        "risk_note": "注意兑现风险。",
+                        "verification_points": ["看行业承接"],
+                    }
+                ],
+            },
+        }
+        with patch("web_app.app.build_sector_radar", return_value=fake_radar), patch(
+            "web_app.app.build_concept_news_radar", return_value=fake_news
+        ), patch("web_app.app.build_market_radar_decision", return_value={"tone": "neutral", "confidence": "低", "alignment": "测试", "primary_action": "观察", "explanation": "", "focus_industries": [], "avoid_industries": [], "source_note": ""}), patch(
+            "web_app.app.build_strategy_overlap", return_value={"items": [], "message": "无"}
+        ):
+            response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("原始新闻", response.text)
+        self.assertIn("财联社", response.text)
+        self.assertIn("https://example.com/news/1", response.text)
+        self.assertIn("2000亿设备更新", response.text)
+
+    def test_risky_sector_actions_are_nuanced(self):
+        heat_rows = [
+            {
+                "industry": "过热A",
+                "stage": "过热高潮",
+                "heat_score": 90,
+                "avg_ret_5d": 12.0,
+                "rel_ret_10d": 9.0,
+                "above_ma20_ratio": 0.95,
+                "volume_expansion_ratio": 0.9,
+                "stock_count": 20,
+                "summary": "加速过热",
+            },
+            {
+                "industry": "退潮A",
+                "stage": "退潮中",
+                "heat_score": 40,
+                "avg_ret_5d": -6.0,
+                "rel_ret_10d": -8.0,
+                "above_ma20_ratio": 0.1,
+                "volume_expansion_ratio": 0.2,
+                "stock_count": 20,
+                "summary": "退潮较深",
+            },
+            {
+                "industry": "退潮B",
+                "stage": "退潮中",
+                "heat_score": 55,
+                "avg_ret_5d": -1.0,
+                "rel_ret_10d": -1.5,
+                "above_ma20_ratio": 0.45,
+                "volume_expansion_ratio": 0.35,
+                "stock_count": 20,
+                "summary": "等待企稳",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "history.db"
+            db_path.touch()
+            fake_frames = {"daily": pd.DataFrame(), "stock_basic": pd.DataFrame(), "daily_basic": pd.DataFrame(), "moneyflow": pd.DataFrame(), "index_daily": pd.DataFrame()}
+            with patch("web_app.services.sector_service._latest_trade_date", return_value="20260616"), patch(
+                "web_app.services.sector_service.load_history_frames", return_value=fake_frames
+            ), patch(
+                "web_app.services.sector_service.calculate_sector_heat",
+                return_value=(pd.DataFrame(heat_rows), pd.DataFrame()),
+            ), patch(
+                "web_app.services.sector_service.rank_sector_stocks",
+                return_value=pd.DataFrame(),
+            ):
+                radar = build_sector_radar(db_path, top_sectors=8)
+
+        actions = {item["action"] for item in radar["risky"]}
+        self.assertIn("停止追涨", actions)
+        self.assertIn("暂不参与", actions)
+        self.assertIn("等待企稳", actions)
+
+    def test_market_radar_decision_identifies_mainline_alignment(self):
+        radar = {
+            "end_date": "20260616",
+            "summary": {"market_line": "有主线", "healthy_count": 2, "risky_count": 1},
+            "healthy": [
+                {"industry": "计算机", "stage": "趋势延续", "heat_score": 82, "action": "看承接"},
+                {"industry": "铜", "stage": "低位启动", "heat_score": 76, "action": "低吸观察"},
+            ],
+            "risky": [{"industry": "银行", "stage": "退潮中", "heat_score": 35}],
+        }
+        concept_news = {
+            "news": {
+                "positive": [{"industry": "计算机", "impact_score": 21}],
+                "negative": [{"industry": "银行", "impact_score": -12}],
+            },
+            "concepts": {"items": []},
+            "theme_filter": {"items": []},
+        }
+
+        decision = build_market_radar_decision(radar, concept_news)
+
+        self.assertEqual(decision["alignment"], "主线共振")
+        self.assertEqual(decision["confidence"], "高")
+        self.assertEqual(decision["focus_industries"], ["计算机"])
+        self.assertIn("优先", decision["primary_action"])
+        self.assertIn("银行", decision["avoid_industries"])
+
+    def test_strategy_overlap_uses_real_signals_inside_healthy_or_news_sectors(self):
+        radar = {
+            "end_date": "20260616",
+            "healthy": [
+                {"industry": "计算机", "stage": "趋势延续", "heat_score": 82, "action": "看承接"},
+                {"industry": "铜", "stage": "低位启动", "heat_score": 76, "action": "低吸观察"},
+            ],
+        }
+        concept_news = {
+            "news": {
+                "positive": [{"industry": "计算机", "impact_score": 21}],
+                "negative": [],
+            }
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run(
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    run_id,
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(ts_code="000001.SZ", name="AI强股", industry="计算机", score=70, rank=1, reason="短线信号"),
+                        SignalRecord(ts_code="000002.SZ", name="铜强股", industry="铜", score=66, rank=2, reason="短线信号"),
+                        SignalRecord(ts_code="000003.SZ", name="无关强股", industry="银行", score=90, rank=3, reason="短线信号"),
+                    ],
+                )
+            finally:
+                store.close()
+
+            overlap = build_strategy_overlap(signal_db, radar, concept_news, limit=5)
+
+        codes = [item["ts_code"] for item in overlap["items"]]
+        self.assertEqual(codes, ["000001.SZ", "000002.SZ"])
+        self.assertEqual(overlap["source_date"], "20260616")
+        self.assertEqual(overlap["items"][0]["industry"], "计算机")
+        self.assertIn("策略信号", overlap["items"][0]["reason"])
 
 
 if __name__ == "__main__":

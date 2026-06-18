@@ -77,21 +77,33 @@ $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 日常更新 Web 看板数据（推荐）：
 
 ```bash
-python daily_web_update.py --end 20260616
+python daily_web_update.py --mode daily --end 20260616
 ```
 
-这条命令会依次完成：补行情缓存、导入 `stock_history.db`、运行 `main.py` 写入当天实盘信号、回填短线 v9 事后复盘、更新当前半年度长线 v18 历史池审计。
+日常同步只做高频经营所需步骤：补行情缓存、导入 `stock_history.db`、刷新市场上下文、运行 `main.py` 写入当天实盘信号，并为当天短线/长线 live 信号补齐 AI 解释缓存和首页“今日AI摘要”。短线历史复盘和长线历史审计比较慢，默认跳过。
+
+如果当天只想刷新数据、不调用大模型生成解释：
+
+```bash
+python daily_web_update.py --mode daily --end 20260616 --skip-ai-explanations
+```
 
 如果只想预览将要执行哪些步骤：
 
 ```bash
-python daily_web_update.py --end 20260616 --dry-run
+python daily_web_update.py --mode daily --end 20260616 --dry-run
+```
+
+如果需要补齐短线复盘和当前半年度长线审计：
+
+```bash
+python daily_web_update.py --mode full --end 20260616
 ```
 
 如果需要重刷 2024H1 至今的全部半年度长线历史池：
 
 ```bash
-python daily_web_update.py --end 20260616 --full-history
+python daily_web_update.py --mode full --end 20260616 --full-history
 ```
 
 下载离线数据：
@@ -137,6 +149,19 @@ python -m uvicorn web_app.app:app --host 127.0.0.1 --port 8000
 
 打开 `http://127.0.0.1:8000`。当前 Web 端只读展示本地 SQLite 数据，不包含任何交易执行功能。
 
+日常查看顺序建议：
+
+1. 盘后先跑 `python daily_web_update.py --mode daily --end 最新交易日`。
+2. 打开 Web 首页，看“数据同步提醒”和“今日决策”。
+3. 短线复盘页先看近 100 日，重点看“系统原因”“收益路径”“AI状态”。日常同步会自动补当天 AI 解释。
+4. 只有需要批量补历史解释时再跑：
+
+```bash
+python backfill_signal_explanations.py --start 20260501 --end 20260618 --mode short
+```
+
+5. 如果历史复盘或长线半年度审计缺数据，再使用 `--mode full`，不要每天都跑完整同步。
+
 运行当前短线基线回测：
 
 ```bash
@@ -161,7 +186,7 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 
 | 脚本 | 何时使用 | 常用命令 |
 |------|----------|----------|
-| `daily_web_update.py` | 日常唯一推荐入口：让行情库、今日实盘、短线复盘、长线审计保持同一最新口径 | `python daily_web_update.py --end 20260616` |
+| `daily_web_update.py` | 日常唯一推荐入口；默认轻量日更，完整补历史时用 `--mode full` | `python daily_web_update.py --mode daily --end 20260616` |
 | `data_downloader.py` | 单独补 Tushare/离线 Parquet 缓存 | `python data_downloader.py --start 20260616 --end 20260616 --skip-financial` |
 | `history_db_importer.py` | 把 `data/cache` 的 Parquet 导入 `data/stock_history.db`，供 Web/单股体检查询 | `python history_db_importer.py --cache-dir data/cache --db data/stock_history.db --start 20260616 --end 20260616 --tables daily daily_basic moneyflow index_daily stock_basic` |
 | `history_db_check.py` | 检查历史数据库覆盖范围和最新日期 | `python history_db_check.py --db data/stock_history.db` |
@@ -170,6 +195,8 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 | `market_context_snapshot.py` | 刷新 Web 行业页的概念热度和新闻板块缓存，供一键同步与市场雷达使用 | `python market_context_snapshot.py --date 20260616` |
 | `longterm_history_importer.py` | 把长线历史池审计 CSV 导入 Web 信号库 | `python longterm_history_importer.py --source reports/longterm_pool_quality_2026H1_v18_market_sync_full.csv` |
 | `signal_backfill.py` | 把短线回测生成的 `ic_short_*.csv` 回填到 Web 短线复盘 | `python signal_backfill.py --source backtest_results/ic_short_xxx.csv --profile short_v9_final --top 3` |
+| `backfill_signal_explanations.py` | 批量补齐 Web 中短线/长线信号的 AI 解释缓存；已有缓存默认不重复调用模型 | `python backfill_signal_explanations.py --start 20260501 --end 20260618 --mode short --profile short_v9_final` |
+| `daily_ai_brief.py` | 单独生成首页“今日AI摘要”；日常同步已自动调用，通常无需手动跑 | `python daily_ai_brief.py --date 20260618` |
 
 ### 策略回测与定板验证
 

@@ -85,6 +85,7 @@ def get_recent_signals(
         signals = _enrich_stock_identity([_row_to_signal(row) for row in rows], history_db)
         if query:
             signals = _filter_signals_by_query(signals, query)
+        _attach_explanation_status(signals, conn)
         return signals[:limit]
     finally:
         conn.close()
@@ -390,6 +391,7 @@ def get_stock_signals(
             (ts_code, limit),
         ).fetchall()
         signals = [_row_to_signal(row) for row in rows]
+        _attach_explanation_status(signals, conn)
         return _enrich_stock_identity(signals, history_db)
     finally:
         conn.close()
@@ -412,7 +414,7 @@ def split_longterm_pool(pool: list[dict]) -> dict[str, list[dict]]:
 def _decorate_longterm_run(item: dict) -> dict:
     signal_count = int(item.get("signal_count") or 0)
     item["status_label"] = "有入池标的" if signal_count else "无入池标的"
-    item["profile_label"] = "Elite强提醒" if "elite" in str(item.get("profile") or "") else "Watch观察"
+    item["profile_label"] = _longterm_profile_label(item.get("profile"))
     return item
 
 
@@ -442,6 +444,7 @@ def _decorate_longterm_event(item: dict) -> dict:
 
 def _decorate_longterm_audit_run(item: dict) -> dict:
     item["source_name"] = Path(str(item.get("source_file") or "")).name
+    item["profile_label"] = _longterm_profile_label(item.get("profile"))
     item["avg_ret_80d_text"] = _pct_text(item.get("avg_ret_80d"))
     item["win_rate_80d_text"] = _ratio_text(item.get("win_rate_80d"))
     item["outperform_rate_80d_text"] = _ratio_text(item.get("outperform_rate_80d"))
@@ -452,6 +455,7 @@ def _decorate_longterm_audit_sample(item: dict) -> dict:
     item["factors"] = _json_dict(item.pop("factor_json", None))
     item["display_name"] = item.get("name") or item.get("ts_code")
     item["display_code"] = item.get("ts_code")
+    item["profile_label"] = _longterm_profile_label(item.get("profile"))
     item["ret_80d_text"] = _maturity_pct_text(item.get("ret_80d"))
     item["ret_40d_text"] = _maturity_pct_text(item.get("ret_40d"))
     item["ret_10d_text"] = _maturity_pct_text(item.get("ret_10d"))
@@ -466,10 +470,23 @@ def _decorate_longterm_audit_sample(item: dict) -> dict:
     item["stage_return_text"] = "80日观察完成" if item.get("ret_80d") is not None else "未满"
     item["stage_return_tone"] = "muted" if item.get("ret_80d") is None else _pct_tone(item.get("ret_80d"))
     item["elapsed_days"] = None
-    item["lifecycle_label"] = "80日观察完成" if item.get("ret_80d") is not None else "观察中"
+    item["lifecycle_label"] = "80日观察完成" if item.get("ret_80d") is not None else "窗口未满"
     item["outperform_label"] = "跑赢" if item.get("outperform_80d") else "未跑赢"
     item["reason_text"] = _longterm_reason_text(item)
     return item
+
+
+def _longterm_profile_label(profile: str | None) -> str:
+    text = str(profile or "").lower()
+    if "elite" in text:
+        return "Elite强提醒"
+    if "v18" in text or "market_sync" in text:
+        return "v18市场同步池"
+    if "lifecycle" in text:
+        return "生命周期池"
+    if "watch" in text or "longterm" in text:
+        return "Watch观察池"
+    return str(profile or "-")
 
 
 def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path | None) -> None:
@@ -489,7 +506,7 @@ def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path |
             if item.get("ret_80d") is None:
                 item["stage_return_text"] = f"当前{path['current_ret']:+.2f}%(t+{path['elapsed_days']})"
                 item["stage_return_tone"] = _pct_tone(path["current_ret"])
-                item["lifecycle_label"] = f"观察中 t+{path['elapsed_days']}"
+                item["lifecycle_label"] = f"窗口未满 t+{path['elapsed_days']}"
             for days in (10, 40, 80):
                 key = f"ret_{days}d"
                 if item.get(key) is None:
@@ -630,10 +647,15 @@ def build_data_freshness(
     live_date = str((latest_live_short_run or {}).get("trade_date") or "") or None
     backtest_date = str(signal_summary.get("latest_backtest_date") or "") or None
     live_lag_days = _days_between(history_date, live_date)
+    history_lag_days = _days_between(live_date, history_date)
     backtest_lag_days = _days_between(history_date, backtest_date)
     warnings: list[str] = []
     notes: list[str] = []
-    if live_lag_days is not None and live_lag_days > 1:
+    if history_lag_days is not None and history_lag_days > 0:
+        warnings.append(
+            f"历史行情库最新到 {history_date}，实盘信号已到 {live_date}，请运行日常同步补齐行情库；否则复盘、市场雷达和体检可能滞后。"
+        )
+    elif live_lag_days is not None and live_lag_days > 1:
         warnings.append(f"实盘信号落后行情数据 {live_lag_days} 天，请确认是否已运行 main.py。")
     elif live_lag_days is not None:
         notes.append("今日实盘记录已更新；若无推荐，表示规则当天没有留下可入池标的。")
@@ -646,6 +668,7 @@ def build_data_freshness(
         "live_date": live_date,
         "backtest_date": backtest_date,
         "live_lag_days": live_lag_days,
+        "history_lag_days": history_lag_days,
         "backtest_lag_days": backtest_lag_days,
         "notes": notes,
         "warnings": warnings,
@@ -838,7 +861,7 @@ def build_dashboard_decision(
         tone = "caution"
 
     next_actions = [
-        {"label": "批量体检自选股", "href": "/stock/000001", "hint": "先用单股体检查已有关注票的风险和历史信号。"},
+        {"label": "单股体检", "href": "/stock/000001", "hint": "输入代码或中文名，先检查已有关注票的风险和历史信号。"},
         {"label": "查看短线复盘", "href": "/signals", "hint": "复盘近期 v9 信号，找出更适合人工跟踪的形态。"},
         {"label": "查看长线池验证", "href": "/longterm", "hint": "确认长线规则最近为什么没有 active 标的。"},
     ]
@@ -861,6 +884,10 @@ def _row_to_signal(row: sqlite3.Row) -> dict:
     item["factors"] = _json_dict(raw)
     item["display_name"] = item.get("name") or item.get("ts_code")
     item["display_code"] = item.get("ts_code")
+    item["score_explain"] = _score_explain(item)
+    item["score_tooltip"] = _score_tooltip(item)
+    item["recommend_reason"] = _recommend_reason(item)
+    item["risk_reason_text"] = _risk_reason_text(item)
     item["basis_text"] = _basis_text(item)
     item["basis_summary"] = _basis_summary(item)
     item["performance"] = _performance(item["factors"])
@@ -878,7 +905,21 @@ def _row_to_signal(row: sqlite3.Row) -> dict:
     item["mae_risk_tone"] = _mae_risk_tone(item["mae_risk_label"])
     item["result_tag"] = _result_tag(item)
     item["source_label"] = "历史回测" if item.get("source") == "backtest_ic_short" else "实盘记录"
+    item["profile_label"] = _signal_profile_label(item.get("profile"), item.get("mode"))
     return item
+
+
+def _signal_profile_label(profile: str | None, mode: str | None = None) -> str:
+    text = str(profile or "").lower()
+    if str(mode or "").lower() == "longterm":
+        return _longterm_profile_label(profile)
+    if "v9" in text or "sector_quality_guard" in text:
+        return "短线v9定板"
+    if "v6" in text:
+        return "短线v6基准"
+    if "short" in text:
+        return "短线策略"
+    return str(profile or "-")
 
 
 def _enrich_stock_identity(signals: list[dict], history_db: str | Path | None) -> list[dict]:
@@ -923,6 +964,45 @@ def _filter_signals_by_query(signals: list[dict], query: str) -> list[dict]:
     ]
 
 
+def _attach_explanation_status(signals: list[dict], conn: sqlite3.Connection) -> None:
+    if not signals:
+        return
+    for item in signals:
+        item["explanation_label"] = "生成AI解释"
+        item["explanation_tone"] = ""
+    exists = conn.execute(
+        "select name from sqlite_master where type='table' and name='ai_analysis_documents'"
+    ).fetchone()
+    if not exists:
+        legacy_exists = conn.execute(
+            "select name from sqlite_master where type='table' and name='ai_explanations'"
+        ).fetchone()
+        if not legacy_exists:
+            return
+        table_name = "ai_explanations"
+    else:
+        table_name = "ai_analysis_documents"
+    keys = [_signal_explanation_cache_key(item) for item in signals]
+    placeholders = ",".join(["?"] * len(keys))
+    rows = conn.execute(
+        f"select cache_key, source from {table_name} where cache_key in ({placeholders})",
+        keys,
+    ).fetchall()
+    source_by_key = {row["cache_key"]: row["source"] for row in rows}
+    for item in signals:
+        source = source_by_key.get(_signal_explanation_cache_key(item))
+        if source == "ai":
+            item["explanation_label"] = "AI已缓存"
+            item["explanation_tone"] = "ok"
+        elif source:
+            item["explanation_label"] = "规则解释"
+            item["explanation_tone"] = "warn"
+
+
+def _signal_explanation_cache_key(item: dict) -> str:
+    return f"signal:{item.get('trade_date')}:{item.get('ts_code')}"
+
+
 def _basis_text(item: dict) -> str:
     factors = item.get("factors") or {}
     parts = []
@@ -948,6 +1028,139 @@ def _basis_summary(item: dict) -> str:
     if score is not None:
         return f"v9分 {score:.1f}"
     return "v9分 -"
+
+
+def _score_explain(item: dict) -> dict:
+    factors = item.get("factors") or {}
+    score = _num(item.get("score"))
+    breakdown = []
+    if score is not None:
+        breakdown.append(f"v9分 {score:.1f}")
+    original = _num(factors.get("original_score") or factors.get("score_base"))
+    if original is not None:
+        breakdown.append(f"原始分 {original:.1f}")
+    for key, label in [
+        ("factor_inflow", "资金"),
+        ("factor_sector", "板块"),
+        ("factor_pattern", "形态"),
+        ("factor_volume_ratio", "量能"),
+        ("factor_drawdown", "回撤"),
+        ("factor_wyckoff", "结构"),
+    ]:
+        value = _num(factors.get(key))
+        if value is not None:
+            breakdown.append(f"{label}{value:.0f}")
+
+    rule_reasons = _string_list(factors.get("rule_reasons"))
+    risk_reasons = _string_list(factors.get("risk_reasons"))
+    if not rule_reasons:
+        rule_reasons = _derive_rule_reasons(item)
+    if not risk_reasons:
+        risk_reasons = _derive_risk_reasons(item)
+    action_hint = str(factors.get("action_hint") or "").strip()
+    if not action_hint:
+        score_value = score or 0
+        if score_value >= 55 and not risk_reasons:
+            action_hint = "重点跟踪，但仍需等待次日走势确认"
+        elif score_value >= 45:
+            action_hint = "轻仓观察，满足次日确认条件再考虑"
+        else:
+            action_hint = "轻仓观察，次日不能站稳关键位就放弃"
+
+    return {
+        "breakdown": breakdown,
+        "rule_reasons": rule_reasons[:5],
+        "risk_reasons": risk_reasons[:5],
+        "action_hint": action_hint,
+    }
+
+
+def _score_tooltip(item: dict) -> str:
+    score = _num(item.get("score"))
+    explain = item.get("score_explain") or {}
+    lines = [f"总分：{score:.1f}" if score is not None else "总分：-"]
+    breakdown = explain.get("breakdown") or []
+    if breakdown:
+        lines.append("拆解：" + " / ".join(breakdown))
+    else:
+        lines.append("拆解：暂无因子拆解，建议重新运行 main.py 或完整同步补齐。")
+    rule_reasons = explain.get("rule_reasons") or []
+    risk_reasons = explain.get("risk_reasons") or []
+    lines.append("支持：" + ("；".join(rule_reasons) if rule_reasons else "暂无明确支持项"))
+    lines.append("风险：" + ("；".join(risk_reasons) if risk_reasons else "无明显扣分项"))
+    if explain.get("action_hint"):
+        lines.append("处理：" + explain["action_hint"])
+    return "\n".join(lines)
+
+
+def _recommend_reason(item: dict) -> str:
+    explain = item.get("score_explain") or {}
+    rule_reasons = explain.get("rule_reasons") or []
+    risk_reasons = explain.get("risk_reasons") or []
+    if rule_reasons and risk_reasons:
+        return f"{'；'.join(rule_reasons[:3])}。注意：{'；'.join(risk_reasons[:2])}。"
+    if rule_reasons:
+        return "；".join(rule_reasons[:4])
+    if risk_reasons:
+        return f"支持项不突出，主要风险：{'；'.join(risk_reasons[:3])}"
+    reason = str(item.get("reason") or "").strip()
+    if reason and reason not in {"short_top", "watch", "top3", "longterm_watch", "longterm_elite"}:
+        return reason
+    score = _num(item.get("score")) or 0
+    if item.get("mode") == "short":
+        if score >= 55:
+            return "v9分较高，规则保留为重点跟踪；但历史因子拆解缺失，建议重新运行 main.py 或完整同步补齐。"
+        if score >= 40:
+            return "v9分处于观察区间；历史因子拆解缺失，先当作复盘样本看待。"
+        return "v9分偏低，结构化支持项缺失；更适合作为复盘样本，不宜当作强推荐。"
+    return "暂无结构化原因，建议重新运行 main.py 或完整同步补齐。"
+
+
+def _risk_reason_text(item: dict) -> str:
+    risk_reasons = (item.get("score_explain") or {}).get("risk_reasons") or []
+    return "；".join(risk_reasons) if risk_reasons else "无明显扣分项"
+
+
+def _derive_rule_reasons(item: dict) -> list[str]:
+    factors = item.get("factors") or {}
+    reasons = []
+    original = _num(factors.get("original_score") or factors.get("score_base"))
+    if original is not None:
+        reasons.append(f"原始短线分{original:.0f}分")
+    if (_num(factors.get("factor_inflow")) or 0) >= 70:
+        reasons.append("资金分较强")
+    if (_num(factors.get("factor_sector")) or 0) >= 60:
+        reasons.append("板块热度较好")
+    if (_num(factors.get("factor_pattern")) or 0) >= 60:
+        reasons.append("形态质量合格")
+    volume_ratio = _num(factors.get("volume_ratio"))
+    if volume_ratio is not None and 1.2 <= volume_ratio < 3.0:
+        reasons.append(f"量比{volume_ratio:.2f}活跃")
+    return reasons
+
+
+def _derive_risk_reasons(item: dict) -> list[str]:
+    factors = item.get("factors") or {}
+    reasons = []
+    score = _num(item.get("score")) or 0
+    sector = _num(factors.get("factor_sector"))
+    pattern = _num(factors.get("factor_pattern"))
+    volume_ratio = _num(factors.get("volume_ratio"))
+    drawdown = _num(factors.get("drawdown_from_high"))
+    if score < 40:
+        reasons.append("v9重排分低于40")
+    if drawdown is not None:
+        if drawdown >= 12:
+            reasons.append(f"回撤{drawdown:.1f}%偏深")
+        elif drawdown >= 8:
+            reasons.append(f"回撤{drawdown:.1f}%进入风险区")
+    if sector is not None and sector < 30:
+        reasons.append(f"板块{sector:.0f}分偏弱")
+    if pattern is not None and pattern < 45:
+        reasons.append(f"形态{pattern:.0f}分偏弱")
+    if volume_ratio is not None and volume_ratio >= 3.0:
+        reasons.append(f"量比{volume_ratio:.2f}偏热")
+    return reasons
 
 
 def _performance(factors: dict) -> dict:
@@ -1010,6 +1223,9 @@ def _performance_text(perf: dict) -> str:
 
 
 def _quality_label(item: dict) -> str:
+    perf = item.get("performance") or {}
+    if all(perf.get(key) is None for key in ("ret_5d", "window_end_pct", "mfe_pct", "mae_pct")):
+        return "待验证信号"
     score = _num(item.get("score")) or 0
     if score < 30:
         return "弱信号"
@@ -1085,6 +1301,15 @@ def _json_dict(raw) -> dict:
     except (TypeError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _string_list(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        parts = [part.strip() for part in value.replace("，", "；").replace(",", "；").split("；")]
+        return [part for part in parts if part]
+    return []
 
 
 def _longterm_reason_text(item: dict) -> str:

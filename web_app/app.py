@@ -14,8 +14,13 @@ from fastapi.templating import Jinja2Templates
 from history_store import DEFAULT_HISTORY_DB_PATH
 from signal_store import DEFAULT_DB_PATH as DEFAULT_SIGNAL_DB_PATH
 from web_app.services.history_service import get_db_status, get_stock_detail
-from web_app.services.explanation_service import get_or_create_signal_explanation
-from web_app.services.sector_service import build_concept_news_radar, build_sector_radar
+from web_app.services.explanation_service import get_daily_brief, get_or_create_signal_explanation
+from web_app.services.sector_service import (
+    build_concept_news_radar,
+    build_market_radar_decision,
+    build_sector_radar,
+    build_strategy_overlap,
+)
 from web_app.services.update_service import read_update_status, start_web_update
 from web_app.services.signal_service import (
     build_admission_diagnostics,
@@ -65,13 +70,13 @@ def dashboard(request: Request):
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=10,
-        source=["live", "live_report"],
+        source="live",
         mode="short",
     )
     live_short_runs = get_signal_runs(
         DEFAULT_SIGNAL_DB_PATH,
         mode="short",
-        source=["live", "live_report"],
+        source="live",
         limit=3,
     )
     latest_live_short_run = live_short_runs[0] if live_short_runs else None
@@ -100,6 +105,16 @@ def dashboard(request: Request):
     )
     freshness = build_data_freshness(status, latest_live_short_run, signal_summary)
     short_stats = summarize_short_signal_performance(backtest_signals)
+    brief_date = (
+        latest_live_short_run.get("trade_date")
+        if latest_live_short_run
+        else status.get("latest_trade_date")
+    )
+    daily_brief = get_daily_brief(
+        brief_date,
+        signal_db=DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+    ) if brief_date else None
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -115,6 +130,7 @@ def dashboard(request: Request):
             "admission_diagnostics": admission_diagnostics,
             "freshness": freshness,
             "short_stats": short_stats,
+            "daily_brief": daily_brief,
             "longterm_buckets": longterm_buckets,
             "longterm_pool_status": longterm_pool_status,
             "update_status": update_status,
@@ -124,8 +140,8 @@ def dashboard(request: Request):
 
 
 @app.post("/update/run")
-def run_update():
-    start_web_update()
+def run_update(mode: str = "daily"):
+    start_web_update(mode=mode)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -148,6 +164,8 @@ def db_status(request: Request):
 def sectors(request: Request, end: str = ""):
     radar = build_sector_radar(DEFAULT_HISTORY_DB_PATH, end_date=end or None)
     concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
+    decision = build_market_radar_decision(radar, concept_news)
+    strategy_overlap = build_strategy_overlap(DEFAULT_SIGNAL_DB_PATH, radar, concept_news)
     return templates.TemplateResponse(
         request,
         "sectors.html",
@@ -155,6 +173,8 @@ def sectors(request: Request, end: str = ""):
             "request": request,
             "radar": radar,
             "concept_news": concept_news,
+            "decision": decision,
+            "strategy_overlap": strategy_overlap,
             "filters": {"end": end},
             "active_nav": "sectors",
         },
@@ -194,12 +214,14 @@ def stock_detail(request: Request, code: str):
 @app.get("/signals")
 def signals(request: Request, q: str = "", start: str = "", end: str = "", industry: str = ""):
     default_window_days = 100
+    review_sources = ["backtest_ic_short", "live"]
+    review_profiles = ["short_v9_final", "profile_v9_sector_quality_guard"]
     probe = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=1,
-        source=["backtest_ic_short", "live", "live_report"],
-        profile=["short_v9_final", "profile_v9_sector_quality_guard", "short_v9"],
+        source=review_sources,
+        profile=review_profiles,
         mode="short",
     )
     latest_signal_date = probe[0]["trade_date"] if probe else None
@@ -208,8 +230,8 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=300,
-        source=["backtest_ic_short", "live", "live_report"],
-        profile=["short_v9_final", "profile_v9_sector_quality_guard", "short_v9"],
+        source=review_sources,
+        profile=review_profiles,
         mode="short",
         query=q or None,
         start=effective_start or None,

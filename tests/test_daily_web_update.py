@@ -37,7 +37,10 @@ class DailyWebUpdateTest(unittest.TestCase):
             skip_main=True,
             skip_short_review=True,
             skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
             skip_financial=True,
+            mode="daily",
             cache_dir=Path("data/cache"),
             history_db=Path("data/stock_history.db"),
             signal_db=Path("data/stock_signals.db"),
@@ -52,6 +55,111 @@ class DailyWebUpdateTest(unittest.TestCase):
             run_update(args)
 
         self.assertTrue(any("market_context_snapshot.py" in command for command in calls))
+
+    def test_daily_mode_skips_heavy_review_layers_by_default(self):
+        calls = []
+        args = Namespace(
+            end="20260616",
+            start="20260616",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=True,
+            skip_main=True,
+            skip_short_review=False,
+            skip_longterm_audit=False,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260616"
+        ):
+            run_update(args)
+
+        flat = " ".join(" ".join(command) for command in calls)
+        self.assertNotIn("test.py", flat)
+        self.assertNotIn("longterm_pool_quality_audit.py", flat)
+
+    def test_daily_mode_backfills_today_ai_explanations_after_main(self):
+        calls = []
+        args = Namespace(
+            end="20260616",
+            start="20260616",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=True,
+            skip_main=False,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260616"
+        ):
+            run_update(args)
+
+        command_texts = [" ".join(command) for command in calls]
+        main_index = next(i for i, text in enumerate(command_texts) if "main.py" in text)
+        explanation_indexes = [i for i, text in enumerate(command_texts) if "backfill_signal_explanations.py" in text]
+        brief_indexes = [i for i, text in enumerate(command_texts) if "daily_ai_brief.py" in text]
+        self.assertEqual(len(explanation_indexes), 2)
+        self.assertEqual(len(brief_indexes), 1)
+        self.assertTrue(all(index > main_index for index in explanation_indexes))
+        self.assertTrue(all(index > explanation_indexes[-1] for index in brief_indexes))
+        self.assertTrue(any("--mode short" in text and "--source live" in text for text in command_texts))
+        self.assertTrue(any("--mode longterm" in text and "--source live" in text for text in command_texts))
+        self.assertTrue(all("--start 20260616 --end 20260616" in text for text in command_texts if "backfill_signal_explanations.py" in text))
+        self.assertTrue(any("--date 20260616" in text for text in command_texts if "daily_ai_brief.py" in text))
+
+    def test_skip_ai_explanations_disables_daily_backfill(self):
+        calls = []
+        args = Namespace(
+            end="20260616",
+            start="20260616",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=True,
+            skip_main=False,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=True,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260616"
+        ):
+            run_update(args)
+
+        flat = " ".join(" ".join(command) for command in calls)
+        self.assertNotIn("backfill_signal_explanations.py", flat)
+        self.assertNotIn("daily_ai_brief.py", flat)
 
 
 if __name__ == "__main__":

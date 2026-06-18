@@ -15,20 +15,25 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("策略工作台", response.text)
         self.assertIn("今日决策", response.text)
+        self.assertIn("今日AI摘要", response.text)
         self.assertIn("最近实盘短线", response.text)
         self.assertIn("快速检测", response.text)
 
-        self.assertIn("更新全部数据", response.text)
-        self.assertIn("/update/run", response.text)
+        self.assertIn("日常同步", response.text)
+        self.assertIn("完整同步", response.text)
+        self.assertIn("单股体检", response.text)
+        self.assertNotIn("批量体检自选股", response.text)
+        self.assertIn("/update/run?mode=daily", response.text)
+        self.assertIn("/update/run?mode=full", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
 
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
             start_update.return_value = {"state": "running", "started": True}
-            response = self.client.post("/update/run", follow_redirects=False)
+            response = self.client.post("/update/run?mode=full", follow_redirects=False)
 
         self.assertEqual(response.status_code, 303)
-        start_update.assert_called_once()
+        start_update.assert_called_once_with(mode="full")
 
     def test_update_status_endpoint_returns_json(self):
         with patch("web_app.app.read_update_status") as read_status:
@@ -48,6 +53,7 @@ class WebAppTest(unittest.TestCase):
         response = self.client.get("/db")
         self.assertEqual(response.status_code, 200)
         self.assertIn("数据库状态", response.text)
+        self.assertIn("python daily_web_update.py --mode daily --end 最新交易日", response.text)
 
     def test_stock_page_renders_for_code(self):
         response = self.client.get("/stock/000001")
@@ -73,10 +79,13 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("短线复盘", response.text)
         self.assertIn("收益路径", response.text)
+        self.assertIn("系统原因", response.text)
         self.assertIn("复盘标签", response.text)
         self.assertIn("机会", response.text)
         self.assertIn("风险", response.text)
-        self.assertIn("AI解释", response.text)
+        self.assertIn("AI状态", response.text)
+        self.assertIn("待验证信号", response.text)
+        self.assertIn("short_v9_final", response.text)
 
     def test_signal_explanation_page_renders(self):
         response = self.client.get("/explain/signal/20260525/000012.SZ")

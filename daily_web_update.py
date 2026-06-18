@@ -124,6 +124,7 @@ def run_update(args: argparse.Namespace) -> None:
     target_end = normalize_date(args.end or today_text())
     target_start = normalize_date(args.start or target_end)
     py = sys.executable
+    update_mode = getattr(args, "mode", "daily")
 
     if not args.skip_download:
         download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
@@ -170,8 +171,14 @@ def run_update(args: argparse.Namespace) -> None:
 
     if not args.skip_main:
         run_command([py, "main.py"], args.dry_run)
+        if not args.skip_ai_explanations:
+            _backfill_today_ai_explanations(py, args, effective_end)
+            _generate_daily_ai_brief(py, args, effective_end)
 
-    if not args.skip_short_review:
+    if update_mode == "daily":
+        print("\n日常轻量同步：跳过短线复盘回测和长线历史审计。需要补历史时请使用 --mode full。")
+
+    if update_mode != "daily" and not args.skip_short_review:
         short_start = normalize_date(args.short_start) if args.short_start else _default_short_start(args.signal_db, effective_end)
         if short_start <= effective_end:
             before = datetime.now().timestamp()
@@ -219,7 +226,7 @@ def run_update(args: argparse.Namespace) -> None:
         else:
             print(f"短线复盘已到 {effective_end}，跳过回测回填。")
 
-    if not args.skip_longterm_audit:
+    if update_mode != "daily" and not args.skip_longterm_audit:
         for period, start, end in build_longterm_periods(effective_end, full_history=args.full_history):
             output = Path("reports") / f"longterm_pool_quality_{period}_v18_market_sync_full.md"
             csv_output = Path("reports") / f"longterm_pool_quality_{period}_v18_market_sync_full.csv"
@@ -268,6 +275,45 @@ def _default_short_start(signal_db: Path, effective_end: str) -> str:
     return f"{effective_end[:4]}0101"
 
 
+def _backfill_today_ai_explanations(py: str, args: argparse.Namespace, effective_end: str) -> None:
+    for mode in ("short", "longterm"):
+        command = [
+            py,
+            "backfill_signal_explanations.py",
+            "--signal-db",
+            str(args.signal_db),
+            "--history-db",
+            str(args.history_db),
+            "--start",
+            effective_end,
+            "--end",
+            effective_end,
+            "--mode",
+            mode,
+            "--source",
+            "live",
+        ]
+        if args.ai_explanation_limit and int(args.ai_explanation_limit) > 0:
+            command.extend(["--limit", str(args.ai_explanation_limit)])
+        run_command(command, args.dry_run)
+
+
+def _generate_daily_ai_brief(py: str, args: argparse.Namespace, effective_end: str) -> None:
+    run_command(
+        [
+            py,
+            "daily_ai_brief.py",
+            "--date",
+            effective_end,
+            "--signal-db",
+            str(args.signal_db),
+            "--history-db",
+            str(args.history_db),
+        ],
+        args.dry_run,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="一键同步 Web 前端所需的行情、实盘、短线复盘、长线审计数据")
     parser.add_argument("--start", default=None, help="行情补数起始日，默认等于 --end")
@@ -276,6 +322,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--history-db", type=Path, default=DEFAULT_HISTORY_DB)
     parser.add_argument("--signal-db", type=Path, default=DEFAULT_SIGNAL_DB)
+    parser.add_argument("--mode", choices=["daily", "full"], default="daily", help="daily=轻量日更；full=补齐短线复盘和长线审计")
     parser.add_argument("--full-history", action="store_true", help="重跑并导入 2024H1 起所有半年度长线审计")
     parser.add_argument("--skip-financial", action="store_true", default=True, help="日常更新默认跳过财务下载")
     parser.add_argument("--with-financial", dest="skip_financial", action="store_false", help="同时下载财务数据")
@@ -283,6 +330,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-history-import", action="store_true")
     parser.add_argument("--skip-market-context", action="store_true")
     parser.add_argument("--skip-main", action="store_true")
+    parser.add_argument("--skip-ai-explanations", action="store_true", help="跳过日常同步后的AI解释文档生成")
+    parser.add_argument("--ai-explanation-limit", type=int, default=0, help="每类信号最多生成多少条AI解释，0表示不限")
     parser.add_argument("--skip-short-review", action="store_true")
     parser.add_argument("--skip-longterm-audit", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")

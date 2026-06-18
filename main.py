@@ -13,6 +13,7 @@ from typing import Dict, List, Tuple, Optional
 
 import config
 import ai_prompts
+from concept_heat_provider import fetch_real_concept_heat
 import news_analyzer
 import market_analyzer
 from longterm_live_pipeline import build_live_watchlists
@@ -5279,7 +5280,9 @@ def run_daily_selection(
     if enable_news:
         # 6.5a 方案D：概念板块热度（akshare免费，失败静默）
         logger.info("📊 获取概念板块热度（方案D）...")
-        hot_concepts = news_analyzer.get_hot_concepts()
+        hot_concepts = fetch_real_concept_heat(top_n=config.NEWS_ANALYSIS_CONFIG.get("concept_top_n", 10))
+        if not hot_concepts:
+            hot_concepts = news_analyzer.get_hot_concepts()
         concept_industry_boosts = news_analyzer.build_concept_industry_boosts(hot_concepts)
 
         # 6.5b 方案A：AI解读新闻→板块映射
@@ -5878,11 +5881,26 @@ def _signal_records_from_df(df: pd.DataFrame, pool_type: str, score_col: str) ->
 def _signal_factor_payload(row: pd.Series) -> Dict:
     keep_cols = [
         "score",
+        "original_score",
+        "score_base",
         "longterm_score",
         "compression_score",
         "pool_rank_score",
+        "main_net_inflow",
+        "volume_ratio",
+        "factor_inflow",
+        "factor_sector",
+        "factor_pattern",
+        "factor_volume_ratio",
+        "factor_drawdown",
+        "factor_wyckoff",
+        "factor_counter_trend",
+        "factor_turnover",
         "industry_rs",
         "drawdown_from_high",
+        "stop_loss_price",
+        "target_price",
+        "close",
         "price_vs_ma60",
         "turnover",
         "pb",
@@ -5899,6 +5917,70 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
             value = row.get(col)
             if pd.notna(value):
                 payload[col] = value.item() if hasattr(value, "item") else value
+    rule_payload = _signal_rule_reason_payload(row)
+    payload.update(rule_payload)
+    return payload
+
+
+def _signal_rule_reason_payload(row: pd.Series) -> Dict:
+    """把入选逻辑保存为结构化原因，供Web端和AI解释复用。"""
+    if not any(col in row.index for col in ("factor_inflow", "factor_sector", "factor_pattern", "volume_ratio")):
+        return {}
+
+    score = _safe_float(row.get("score"))
+    original_score = _safe_float(row.get("original_score", row.get("score_base", score)))
+    inflow = _safe_float(row.get("factor_inflow"))
+    sector = _safe_float(row.get("factor_sector"), 50.0)
+    pattern = _safe_float(row.get("factor_pattern"), 50.0)
+    volume_ratio = _safe_float(row.get("volume_ratio"))
+    drawdown = _safe_float(row.get("drawdown_from_high"))
+    net_inflow = _safe_float(row.get("main_net_inflow"))
+
+    rule_reasons: List[str] = []
+    if original_score > 0:
+        rule_reasons.append(f"原始短线分{original_score:.0f}分")
+    if inflow >= 70:
+        rule_reasons.append("资金分较强")
+    elif net_inflow > 0:
+        rule_reasons.append("主力资金净流入")
+    if sector >= 60:
+        rule_reasons.append("板块热度较好")
+    elif sector >= 45:
+        rule_reasons.append("板块不弱")
+    if pattern >= 60:
+        rule_reasons.append("形态质量合格")
+    if 1.2 <= volume_ratio < 3.0:
+        rule_reasons.append(f"量比{volume_ratio:.2f}活跃")
+
+    risk_reasons: List[str] = []
+    if score < 40:
+        risk_reasons.append("v9重排分低于40")
+    if drawdown >= 12:
+        risk_reasons.append(f"回撤{drawdown:.1f}%偏深")
+    elif drawdown >= 8:
+        risk_reasons.append(f"回撤{drawdown:.1f}%进入风险区")
+    if sector < 30:
+        risk_reasons.append(f"板块{sector:.0f}分偏弱")
+    if pattern < 45:
+        risk_reasons.append(f"形态{pattern:.0f}分偏弱")
+    if volume_ratio >= 3.0:
+        risk_reasons.append(f"量比{volume_ratio:.2f}偏热")
+    if not risk_reasons and score < original_score:
+        risk_reasons.append("v9稳健排序压低了进攻分")
+
+    if score >= 55 and not risk_reasons:
+        action_hint = "重点跟踪，但仍需等待次日走势确认"
+    elif score >= 45:
+        action_hint = "轻仓观察，满足次日确认条件再考虑"
+    else:
+        action_hint = "轻仓观察，次日不能站稳关键位就放弃"
+
+    payload: Dict = {}
+    if rule_reasons:
+        payload["rule_reasons"] = rule_reasons[:5]
+    if risk_reasons:
+        payload["risk_reasons"] = risk_reasons[:5]
+    payload["action_hint"] = action_hint
     return payload
 
 

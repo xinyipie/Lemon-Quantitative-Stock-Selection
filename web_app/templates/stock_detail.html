@@ -137,7 +137,7 @@
       <dt>主力净流入</dt><dd>{{ moneyflow.net_mf_amount or '-' }} 万元</dd>
       <dt>换手率</dt><dd>{{ basic.turnover_rate or '-' }}%</dd>
       <dt>量比</dt><dd>{{ basic.volume_ratio or '-' }}</dd>
-      <dt>信号 Profile</dt><dd>{{ signal.profile if signal else '-' }}</dd>
+      <dt>最近策略</dt><dd>{{ signal.profile_label if signal else '-' }}</dd>
       <dt>入池状态</dt><dd>{{ signal.state if signal else '未入池' }}</dd>
     </dl>
   </div>
@@ -151,23 +151,23 @@
     </div>
   </div>
   <table class="dense-table">
-    <thead><tr><th>日期</th><th>来源</th><th>策略</th><th>排名</th><th>分数</th><th>入选依据</th><th>最终收益</th><th>盘中机会</th><th>盘中风险</th><th>信号质量</th><th>收益结果</th><th>过程标签</th><th>AI解释</th></tr></thead>
+    <thead><tr><th>日期</th><th>来源</th><th>策略</th><th>排名</th><th>分数</th><th>系统原因</th><th>收益路径</th><th>盘中机会</th><th>盘中风险</th><th>信号质量</th><th>收益结果</th><th>过程标签</th><th>AI状态</th></tr></thead>
     <tbody>
     {% for item in stock_signals %}
     <tr>
       <td>{{ item.trade_date|fmt_date }}</td>
       <td>{{ item.source_label }}</td>
-      <td>{{ item.profile }}</td>
+      <td title="{{ item.profile }}">{{ item.profile_label }}</td>
       <td>{{ item.rank or '-' }}</td>
-      <td><strong class="score-main" title="{{ item.basis_text }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
-      <td class="reason compact-reason"><span title="{{ item.basis_text }}">{{ item.basis_summary }}</span></td>
+      <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
+      <td class="reason compact-reason"><span title="{{ item.score_tooltip }}">{{ item.recommend_reason }}</span></td>
       <td class="{{ item.final_return_tone }}">{{ item.final_return_text }}</td>
       <td class="{% if item.performance.mfe_pct is none %}muted-cell{% endif %}">{{ item.mfe_text }}</td>
       <td><span class="tag {{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}soft-tag{% endif %}">{{ item.mae_text }}{% if item.performance.mae_pct is not none %} · {{ item.mae_risk_label }}{% endif %}</span></td>
       <td><span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span></td>
       <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span></td>
       <td><span class="tag {{ item.process_tone }}">{{ item.process_label }}</span></td>
-      <td><a class="mini-button" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">AI解释</a></td>
+      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
     </tr>
     {% else %}
     <tr><td colspan="13">这只股票暂无历史信号记录。</td></tr>

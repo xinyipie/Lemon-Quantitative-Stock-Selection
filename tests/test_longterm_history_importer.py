@@ -149,11 +149,11 @@ class LongtermHistoryImporterTest(unittest.TestCase):
             sample = get_longterm_audit_samples(db_path, history_db=history_db, limit=1)[0]
 
         self.assertEqual(sample["stage_return_text"], "当前+10.00%(t+2)")
-        self.assertEqual(sample["ret_40d_text"], "未满")
-        self.assertEqual(sample["ret_80d_text"], "未满")
+        self.assertEqual(sample["ret_40d_text"], "t+2/40")
+        self.assertEqual(sample["ret_80d_text"], "t+2/80")
         self.assertEqual(sample["mae_80d_text"], "-6.50%")
-        self.assertEqual(sample["excess_80d_text"], "未满 vs 沪深300")
-        self.assertEqual(sample["lifecycle_label"], "观察中 t+2")
+        self.assertEqual(sample["excess_80d_text"], "未满")
+        self.assertEqual(sample["lifecycle_label"], "窗口未满 t+2")
 
     def test_longterm_web_audit_defaults_to_half_year_periods(self):
         with tempfile.TemporaryDirectory() as tmpdir:
