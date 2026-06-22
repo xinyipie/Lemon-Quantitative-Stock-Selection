@@ -254,7 +254,7 @@ def _candidate_risk_note(row: pd.Series) -> str:
 
 def _candidate_reason(row: pd.Series) -> str:
     return (
-        f"强于板块{_fmt_pct(row.get('stock_vs_sector_10d'))}，"
+        f"相对板块{_fmt_pct(row.get('stock_vs_sector_10d'))}，"
         f"量能{row.get('amount_ratio_5d', 1):.2f}倍，"
         f"资金{row.get('net_mf_amount', 0):+.0f}万"
     )
@@ -288,12 +288,19 @@ def rank_sector_stocks(
     data.loc[data["ret_5d"] >= 60, "candidate_score"] -= 20
     data.loc[data["stock_vs_sector_10d"] >= 15, "candidate_score"] -= 25
     data.loc[data["position_20d"] >= 0.97, "candidate_score"] -= 15
+    data["candidate_priority"] = 0
+    data.loc[data["stock_vs_sector_10d"] < -3, "candidate_priority"] = 1
+    data.loc[data["stock_vs_sector_10d"] <= -8, "candidate_priority"] = 2
+    extreme_chase = data["ret_5d"] >= 60
+    data.loc[extreme_chase, "candidate_priority"] = data.loc[extreme_chase, "candidate_priority"].clip(lower=3)
+    data.loc[data["stock_vs_sector_10d"] < -3, "candidate_score"] -= 8
+    data.loc[data["stock_vs_sector_10d"] <= -8, "candidate_score"] -= 18
     data["candidate_score"] = data["candidate_score"].clip(0, 100).round(1)
     data["risk_note"] = data.apply(_candidate_risk_note, axis=1)
     data["candidate_reason"] = data.apply(_candidate_reason, axis=1)
     data = data.sort_values(
-        ["industry", "candidate_score", "chase_penalty", "ret_10d"],
-        ascending=[True, False, True, False],
+        ["industry", "candidate_priority", "candidate_score", "chase_penalty", "ret_10d"],
+        ascending=[True, True, False, True, False],
     ).copy()
     data["candidate_rank"] = data.groupby("industry").cumcount() + 1
     return data[data["candidate_rank"] <= int(top_stocks)].sort_values(

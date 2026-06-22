@@ -21,7 +21,7 @@ from web_app.services.sector_service import (
     build_sector_radar,
     build_strategy_overlap,
 )
-from web_app.services.update_service import read_update_status, start_web_update
+from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
 from web_app.services.signal_service import (
     build_admission_diagnostics,
     build_dashboard_decision,
@@ -104,6 +104,7 @@ def dashboard(request: Request):
         backtest_signals,
     )
     freshness = build_data_freshness(status, latest_live_short_run, signal_summary)
+    update_status = decorate_update_status_with_freshness(update_status, freshness)
     short_stats = summarize_short_signal_performance(backtest_signals)
     brief_date = (
         latest_live_short_run.get("trade_date")
@@ -147,7 +148,31 @@ def run_update(mode: str = "daily"):
 
 @app.get("/update/status")
 def update_status():
-    return read_update_status()
+    return _read_decorated_update_status()
+
+
+def _read_decorated_update_status() -> dict:
+    status = get_db_status(DEFAULT_HISTORY_DB_PATH)
+    update_status = read_update_status()
+    latest_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        mode="short",
+        source="live",
+        limit=1,
+    )
+    latest_live_short_run = latest_runs[0] if latest_runs else None
+    backtest_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=1,
+        source="backtest_ic_short",
+        profile="short_v9_final",
+        mode="short",
+    )
+    longterm_pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
+    signal_summary = build_signal_summary(backtest_signals, longterm_pool)
+    freshness = build_data_freshness(status, latest_live_short_run, signal_summary)
+    return decorate_update_status_with_freshness(update_status, freshness)
 
 
 @app.get("/db")

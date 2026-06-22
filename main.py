@@ -2320,7 +2320,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
             try:
                 df = pro.fina_indicator(
                     ts_code='',
-                    fields='ts_code,ann_date,end_date,roe,debt_to_assets'
+                    fields='ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy'
                 )
                 if not df.empty:
                     all_fina_dfs.append(df)
@@ -2335,7 +2335,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
                     # 新增 ann_date 字段，用于截面约束
                     df = pro.fina_indicator(
                         ts_code=",".join(batch),
-                        fields='ts_code,ann_date,end_date,roe,debt_to_assets'
+                        fields='ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy'
                     )
                     if not df.empty:
                         all_fina_dfs.append(df)
@@ -2419,8 +2419,10 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
                 if not fina_row.empty:
                     roe = fina_row.iloc[0]['roe']
                     debt = fina_row.iloc[0]['debt_to_assets']
+                    netprofit_yoy = fina_row.iloc[0].get('netprofit_yoy')
                     fin_data['roe'] = float(roe) if pd.notna(roe) else None
                     fin_data['debt_ratio'] = float(debt) if pd.notna(debt) else None
+                    fin_data['netprofit_yoy'] = float(netprofit_yoy) if pd.notna(netprofit_yoy) else None
 
             # 营收增长率（真正的同比：最新报告期 vs 上年同期）
             # end_date 格式 YYYYMMDD，同期 = 日期相同但年份-1
@@ -3094,6 +3096,57 @@ def _short_sector_gate_action(
     return True, 0.0
 
 
+def short_live_risk_guard(row: Dict, fin_data: Dict = None) -> Tuple[bool, List[str]]:
+    """短线实盘硬风控：拦截 ST/退市风险和严重财务恶化。"""
+    if not getattr(config, "ENABLE_SHORT_LIVE_RISK_GUARD", True):
+        return False, []
+
+    fin_data = fin_data or {}
+    name = str(row.get("name") or "")
+    reasons: List[str] = []
+
+    if re.search(r"ST|＊ST|\*ST|退市|暂停上市", name, flags=re.IGNORECASE):
+        reasons.append("名称含ST/退市风险")
+
+    roe = _risk_guard_float(fin_data.get("roe"))
+    debt_ratio = _risk_guard_float(fin_data.get("debt_ratio"))
+    revenue_growth = _risk_guard_float(fin_data.get("revenue_growth"))
+    netprofit_yoy = _risk_guard_float(fin_data.get("netprofit_yoy"))
+
+    min_roe = float(getattr(config, "SHORT_RISK_MIN_ROE", -20.0))
+    max_debt = float(getattr(config, "SHORT_RISK_MAX_DEBT_RATIO", 90.0))
+    min_revenue_growth = float(getattr(config, "SHORT_RISK_MIN_REVENUE_GROWTH", -50.0))
+    min_netprofit_yoy = float(getattr(config, "SHORT_RISK_MIN_NETPROFIT_YOY", -70.0))
+    weak_roe_for_profit_collapse = float(getattr(config, "SHORT_RISK_WEAK_ROE_FOR_PROFIT_COLLAPSE", 3.0))
+
+    if roe is not None and roe <= min_roe:
+        reasons.append(f"ROE严重为负({roe:.1f}%)")
+    if debt_ratio is not None and debt_ratio >= max_debt:
+        reasons.append(f"负债率过高({debt_ratio:.1f}%)")
+    if revenue_growth is not None and revenue_growth <= min_revenue_growth:
+        reasons.append(f"营收严重下滑({revenue_growth:.1f}%)")
+    if (
+        roe is not None
+        and netprofit_yoy is not None
+        and roe <= weak_roe_for_profit_collapse
+        and netprofit_yoy <= min_netprofit_yoy
+    ):
+        reasons.append(f"净利润同比断崖({netprofit_yoy:.1f}%)")
+
+    return bool(reasons), reasons
+
+
+def _risk_guard_float(value) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        if pd.isna(value):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, financial_dict: Dict = None, sector_ma10: Dict = None, hot_sectors: Dict = None, sector_news_boosts: Dict = None, hot_concepts: List = None, market_style: str = 'sideways', is_caution: bool = False, sector_accel: Dict = None, macro_mode: str = 'cautious', score_threshold: int = 45, atr_multiplier: float = 1.5, is_backtest: bool = False, sector_avg_change: Dict = None, short_filter_profile: str = 'baseline') -> pd.DataFrame:
     """
     短线选股 reconstructed v8 baseline。
@@ -3178,7 +3231,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
     # 有效补涨板块集合：hot_sectors中分数>0的行业（今日有强势股且大部分未动）
     catchup_sectors = {ind for ind, score in hot_sectors.items() if score > 0}
 
-    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_kline = cnt_sector = cnt_sector_penalty = cnt_score = cnt_financial = 0
+    cnt_no_ma = cnt_drawdown = cnt_ma = cnt_vol_weak = cnt_kline = cnt_sector = cnt_sector_penalty = cnt_score = cnt_financial = cnt_live_risk = 0
     score_rejects = []
     valid_stocks = []
     for _, row in st.iterrows():
@@ -3189,9 +3242,16 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             cnt_no_ma += 1
             continue
 
+        fin_data = financial_dict.get(code) or {}
+        if not is_backtest:
+            risk_blocked, risk_reasons = short_live_risk_guard(row, fin_data)
+            if risk_blocked:
+                cnt_live_risk += 1
+                logger.info(f"短线实盘风险过滤：{code} {row.get('name', '')} | {'；'.join(risk_reasons)}")
+                continue
+
         # ===== 财务过滤（方案B优化：短线不看基本面）=====
         if config.ENABLE_FINANCIAL_FILTER_SHORT and financial_dict:
-            fin_data = financial_dict.get(code) or {}
             roe = fin_data.get('roe')
             debt_ratio = fin_data.get('debt_ratio')
             revenue_growth = fin_data.get('revenue_growth')
@@ -3206,8 +3266,6 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             if revenue_growth is not None and revenue_growth < config.MIN_REVENUE_GROWTH:
                 cnt_financial += 1
                 continue
-        else:
-            fin_data = {}
 
         # ── 基础变量提取 ──
         industry = row.get("industry", "")
@@ -3567,7 +3625,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         f"📊 短线基准候选池过滤明细：基础候选{len(st)}只 | "
         f"无MA数据{cnt_no_ma} | 板块不符{cnt_sector} | 板块扣分{cnt_sector_penalty} | 回调位置不符{cnt_drawdown} | "
         f"均线破位{cnt_ma} | 量能不符{cnt_vol_weak} | K线不符{cnt_kline} | "
-        f"分数不足{cnt_score} | 财务不符{cnt_financial}"
+        f"分数不足{cnt_score} | 财务不符{cnt_financial} | 实盘风险过滤{cnt_live_risk}"
     )
     if score_rejects:
         top_rejects = [
@@ -5878,6 +5936,16 @@ def _signal_records_from_df(df: pd.DataFrame, pool_type: str, score_col: str) ->
     return records
 
 
+SHORT_SIGNAL_FACTOR_REQUIRED_COLUMNS = (
+    "factor_inflow",
+    "factor_sector",
+    "factor_pattern",
+    "factor_volume_ratio",
+    "factor_drawdown",
+    "factor_wyckoff",
+)
+
+
 def _signal_factor_payload(row: pd.Series) -> Dict:
     keep_cols = [
         "score",
@@ -5919,7 +5987,23 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
                 payload[col] = value.item() if hasattr(value, "item") else value
     rule_payload = _signal_rule_reason_payload(row)
     payload.update(rule_payload)
+    if _looks_like_short_signal_payload(row, payload):
+        missing = [
+            col
+            for col in SHORT_SIGNAL_FACTOR_REQUIRED_COLUMNS
+            if col not in row.index or pd.isna(row.get(col))
+        ]
+        payload["factor_payload_status"] = "incomplete" if missing else "complete"
+        if missing:
+            payload["factor_missing_columns"] = missing
     return payload
+
+
+def _looks_like_short_signal_payload(row: pd.Series, payload: Dict) -> bool:
+    profile = str(payload.get("factor_profile") or row.get("factor_profile", "") or "")
+    if profile.startswith("profile_") or "v9" in profile or "short" in profile:
+        return True
+    return any(col in row.index for col in SHORT_SIGNAL_FACTOR_REQUIRED_COLUMNS)
 
 
 def _signal_rule_reason_payload(row: pd.Series) -> Dict:

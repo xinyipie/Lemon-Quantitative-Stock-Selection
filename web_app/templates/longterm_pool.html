@@ -228,7 +228,7 @@
     <span>MAE越深，说明持有过程越痛苦</span>
   </div>
   <table class="dense-table">
-    <thead><tr><th>入池日</th><th>阶段</th><th>股票</th><th>行业</th><th>分数</th><th>当前/阶段收益</th><th>10日</th><th>40日</th><th>80日</th><th>最大回撤</th><th>超额收益<br><span class="muted">vs 沪深300</span></th><th>生命周期</th></tr></thead>
+    <thead><tr><th>入池日</th><th>阶段</th><th>股票</th><th>行业</th><th>分数</th><th>当前/阶段收益</th><th>观察风险</th><th>10日</th><th>40日</th><th>80日</th><th>最大回撤</th><th>超额收益<br><span class="muted">vs 沪深300</span></th><th>生命周期</th></tr></thead>
     <tbody>
     {% for item in audit_samples %}
     <tr>
@@ -238,6 +238,7 @@
       <td>{{ item.industry or '-' }}</td>
       <td>{{ "%.1f"|format(item.score or 0) }}</td>
       <td class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</td>
+      <td><span class="tag {{ item.watch_risk_tone }}" title="{{ item.watch_risk_reason }}">{{ item.watch_risk_label }}</span></td>
       <td class="{{ item.ret_10d_tone }}">{{ item.ret_10d_text }}</td>
       <td class="{{ item.ret_40d_tone }}">{{ item.ret_40d_text }}</td>
       <td class="{{ item.ret_80d_tone }}">{{ item.ret_80d_text }}</td>
@@ -246,7 +247,7 @@
       <td><span class="tag {{ 'bad' if '已移出' in item.lifecycle_label else 'ok' if '完成' in item.lifecycle_label else '' }}">{{ item.lifecycle_label }}</span></td>
     </tr>
     {% else %}
-    <tr><td colspan="12">暂无历史样本。</td></tr>
+    <tr><td colspan="13">暂无历史样本。</td></tr>
     {% endfor %}
     </tbody>
   </table>

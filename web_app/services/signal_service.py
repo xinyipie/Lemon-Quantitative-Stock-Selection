@@ -14,6 +14,16 @@ from history_store import DEFAULT_HISTORY_DB_PATH
 from signal_store import DEFAULT_DB_PATH
 
 
+SHORT_FACTOR_REQUIRED_COLUMNS = (
+    "factor_inflow",
+    "factor_sector",
+    "factor_pattern",
+    "factor_volume_ratio",
+    "factor_drawdown",
+    "factor_wyckoff",
+)
+
+
 def get_recent_signals(
     signal_db: str | Path = DEFAULT_DB_PATH,
     history_db: str | Path | None = DEFAULT_HISTORY_DB_PATH,
@@ -83,6 +93,8 @@ def get_recent_signals(
             params,
         ).fetchall()
         signals = _enrich_stock_identity([_row_to_signal(row) for row in rows], history_db)
+        _attach_current_risk_guard_status(signals, history_db)
+        _attach_confidence_status(signals)
         if query:
             signals = _filter_signals_by_query(signals, query)
         _attach_explanation_status(signals, conn)
@@ -390,9 +402,11 @@ def get_stock_signals(
             """,
             (ts_code, limit),
         ).fetchall()
-        signals = [_row_to_signal(row) for row in rows]
+        signals = _enrich_stock_identity([_row_to_signal(row) for row in rows], history_db)
+        _attach_current_risk_guard_status(signals, history_db)
+        _attach_confidence_status(signals)
         _attach_explanation_status(signals, conn)
-        return _enrich_stock_identity(signals, history_db)
+        return signals
     finally:
         conn.close()
 
@@ -471,6 +485,9 @@ def _decorate_longterm_audit_sample(item: dict) -> dict:
     item["stage_return_tone"] = "muted" if item.get("ret_80d") is None else _pct_tone(item.get("ret_80d"))
     item["elapsed_days"] = None
     item["lifecycle_label"] = "80日观察完成" if item.get("ret_80d") is not None else "窗口未满"
+    item["watch_risk_label"] = "正常观察"
+    item["watch_risk_tone"] = ""
+    item["watch_risk_reason"] = "未触发深回撤观察提示"
     item["outperform_label"] = "跑赢" if item.get("outperform_80d") else "未跑赢"
     item["reason_text"] = _longterm_reason_text(item)
     return item
@@ -489,6 +506,16 @@ def _longterm_profile_label(profile: str | None) -> str:
     return str(profile or "-")
 
 
+def _longterm_pool_label(pool_type: str | None) -> str:
+    text = str(pool_type or "").strip()
+    labels = {
+        "elastic_quality_lifecycle": "弹性质量生命周期池",
+        "defensive_quality_lifecycle": "防守质量生命周期池",
+        "observation_quality": "质量观察池",
+    }
+    return labels.get(text, text or "-")
+
+
 def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path | None) -> None:
     if not samples or not history_db or not Path(history_db).exists():
         return
@@ -503,6 +530,7 @@ def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path |
             item["current_ret"] = path["current_ret"]
             item["current_ret_text"] = f"{path['current_ret']:+.2f}%"
             item["current_ret_tone"] = _pct_tone(path["current_ret"])
+            _attach_longterm_watch_risk(item, path["current_ret"])
             if item.get("ret_80d") is None:
                 item["stage_return_text"] = f"当前{path['current_ret']:+.2f}%(t+{path['elapsed_days']})"
                 item["stage_return_tone"] = _pct_tone(path["current_ret"])
@@ -514,6 +542,27 @@ def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path |
                     item[f"{key}_tone"] = "muted"
     finally:
         conn.close()
+
+
+def _attach_longterm_watch_risk(item: dict, current_ret: float | None) -> None:
+    current = _num(current_ret)
+    mae = _num(item.get("mae_80d"))
+    if current is not None and current <= -20:
+        item["watch_risk_label"] = "深回撤"
+        item["watch_risk_tone"] = "bad"
+        item["watch_risk_reason"] = "当前回撤已超过20%，应重点复盘是否把趋势反转误判为健康回调。"
+    elif current is not None and current <= -10:
+        item["watch_risk_label"] = "风险升级"
+        item["watch_risk_tone"] = "bad"
+        item["watch_risk_reason"] = "当前回撤已超过10%，不建议继续按正常观察样本理解。"
+    elif mae is not None and mae <= -15:
+        item["watch_risk_label"] = "持有痛苦"
+        item["watch_risk_tone"] = "warn"
+        item["watch_risk_reason"] = "期间最大回撤超过15%，说明入池后的持有体验较差。"
+    else:
+        item["watch_risk_label"] = "正常观察"
+        item["watch_risk_tone"] = ""
+        item["watch_risk_reason"] = "未触发深回撤观察提示。"
 
 
 def _attach_longterm_lifecycle_labels(samples: list[dict], conn: sqlite3.Connection) -> None:
@@ -663,6 +712,22 @@ def build_data_freshness(
         notes.append(f"短线事后复盘样本最新到 {backtest_date}，比行情少 {backtest_lag_days} 天；这是未来收益未满期，不等同于今日实盘数据滞后。")
     if history_date is None:
         warnings.append("历史行情库暂无最新交易日，请先检查数据导入状态。")
+    if history_lag_days is not None and history_lag_days > 0:
+        tone = "warn"
+        status_label = "行情滞后"
+        headline = f"行情库最新到 {history_date}，实盘信号已到 {live_date}"
+    elif live_lag_days is not None and live_lag_days > 1:
+        tone = "warn"
+        status_label = "实盘未更新"
+        headline = f"实盘信号落后行情 {live_lag_days} 天"
+    elif history_date is None:
+        tone = "warn"
+        status_label = "缺少行情"
+        headline = "历史行情库暂无最新交易日"
+    else:
+        tone = "ok"
+        status_label = "日期同步"
+        headline = f"行情有效日 {history_date}"
     return {
         "history_date": history_date,
         "live_date": live_date,
@@ -670,6 +735,9 @@ def build_data_freshness(
         "live_lag_days": live_lag_days,
         "history_lag_days": history_lag_days,
         "backtest_lag_days": backtest_lag_days,
+        "tone": tone,
+        "status_label": status_label,
+        "headline": headline,
         "notes": notes,
         "warnings": warnings,
         "is_fresh": not warnings,
@@ -745,13 +813,14 @@ def build_longterm_run_funnel(runs: list[dict], pool: list[dict]) -> dict:
         {"label": "长线扫描已运行", "value": len(latest_runs), "hint": latest_date or "暂无运行记录", "tone": "ok" if latest_runs else "bad"},
         {"label": "本次入池候选", "value": entry_count, "hint": "Elite 与 Watch 合计", "tone": "ok" if entry_count else "warn"},
         {"label": "当前仍 active", "value": active_count, "hint": "生命周期池内仍保留的标的", "tone": "ok" if active_count else "warn"},
-        {"label": "逐层过滤明细", "value": "未采集", "hint": "需要 main.py 额外写入候选漏斗 telemetry", "tone": ""},
+        {"label": "逐层过滤明细", "value": "未采集", "hint": "候选漏斗未采集；运行摘要可用，仍需 main.py 写入 telemetry", "tone": "warn"},
     ]
     return {
         "trade_date": latest_date or None,
         "run_count": len(latest_runs),
         "entry_count": entry_count,
         "active_count": active_count,
+        "telemetry_status": "missing",
         "steps": steps,
     }
 
@@ -878,10 +947,45 @@ def build_dashboard_decision(
     }
 
 
+def _factor_payload_status(item: dict) -> str:
+    factors = item.get("factors") or {}
+    explicit = str(factors.get("factor_payload_status") or "").strip()
+    if explicit:
+        return explicit
+    if str(item.get("mode") or "").lower() != "short":
+        return ""
+    missing = _factor_missing_columns({"factors": factors, "mode": "short"})
+    if missing and _looks_like_short_factor_payload(item):
+        return "incomplete"
+    if not missing and all(col in factors for col in SHORT_FACTOR_REQUIRED_COLUMNS):
+        return "complete"
+    return ""
+
+
+def _factor_missing_columns(item: dict) -> list[str]:
+    factors = item.get("factors") or {}
+    explicit = factors.get("factor_missing_columns")
+    if isinstance(explicit, list):
+        return [str(col) for col in explicit if col]
+    if str(item.get("mode") or "").lower() != "short":
+        return []
+    return [col for col in SHORT_FACTOR_REQUIRED_COLUMNS if factors.get(col) is None]
+
+
+def _looks_like_short_factor_payload(item: dict) -> bool:
+    factors = item.get("factors") or {}
+    profile = str(factors.get("factor_profile") or item.get("profile") or "").lower()
+    if "v9" in profile or "short" in profile or profile.startswith("profile_"):
+        return True
+    return any(key in factors for key in ("score", "style_gate", "factor_profile"))
+
+
 def _row_to_signal(row: sqlite3.Row) -> dict:
     item = dict(row)
     raw = item.pop("factor_json", None)
     item["factors"] = _json_dict(raw)
+    item["factor_payload_status"] = _factor_payload_status(item)
+    item["factor_missing_columns"] = _factor_missing_columns(item)
     item["display_name"] = item.get("name") or item.get("ts_code")
     item["display_code"] = item.get("ts_code")
     item["score_explain"] = _score_explain(item)
@@ -948,6 +1052,194 @@ def _enrich_stock_identity(signals: list[dict], history_db: str | Path | None) -
         item["display_name"] = item.get("name") or item.get("ts_code")
         item["display_code"] = item.get("ts_code")
     return signals
+
+
+def _attach_current_risk_guard_status(signals: list[dict], history_db: str | Path | None) -> None:
+    """Mark historical signals that would be blocked by the current live risk guard."""
+    for item in signals or []:
+        item["current_risk_blocked"] = False
+        item["current_risk_label"] = ""
+        item["current_risk_reason"] = ""
+    if not signals or not history_db or not Path(history_db).exists():
+        return
+
+    risk_by_code = _load_current_risk_guard_reasons(history_db, [item.get("ts_code") for item in signals])
+    for item in signals:
+        name = str(item.get("display_name") or item.get("name") or "")
+        reasons: list[str] = []
+        if _risk_name_blocked(name):
+            reasons.append("名称包含ST、退市或暂停上市风险")
+        financial_reason = risk_by_code.get(str(item.get("ts_code") or ""))
+        if financial_reason:
+            reasons.append(financial_reason)
+        if reasons:
+            item["current_risk_blocked"] = True
+            item["current_risk_label"] = "现行风险规则已排除"
+            item["current_risk_reason"] = "；".join(reasons)
+
+
+def _load_current_risk_guard_reasons(history_db: str | Path, ts_codes: list[str | None]) -> dict[str, str]:
+    codes = sorted({str(code or "").strip() for code in ts_codes if str(code or "").strip()})
+    if not codes:
+        return {}
+    placeholders = ",".join(["?"] * len(codes))
+    conn = sqlite3.connect(history_db)
+    conn.row_factory = sqlite3.Row
+    try:
+        exists = conn.execute(
+            "select name from sqlite_master where type='table' and name='fina_indicator'"
+        ).fetchone()
+        if not exists:
+            return {}
+        rows = conn.execute(
+            f"""
+            select ts_code, ann_date, end_date, roe, debt_to_assets, netprofit_yoy, netprofit_margin
+            from fina_indicator
+            where ts_code in ({placeholders})
+            order by ts_code asc, ann_date desc, end_date desc
+            """,
+            codes,
+        ).fetchall()
+    finally:
+        conn.close()
+
+    latest: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        code = str(row["ts_code"] or "")
+        if code and code not in latest:
+            latest[code] = row
+    result = {}
+    for code, row in latest.items():
+        reason = _current_risk_guard_financial_reason(row)
+        if reason:
+            result[code] = reason
+    return result
+
+
+def _current_risk_guard_financial_reason(row: sqlite3.Row) -> str:
+    roe = _num(row["roe"])
+    debt = _num(row["debt_to_assets"])
+    yoy = _num(row["netprofit_yoy"])
+    margin = _num(row["netprofit_margin"])
+    if roe is not None and roe <= -20:
+        return f"ROE {roe:.1f}% 深度为负"
+    if debt is not None and debt >= 90 and roe is not None and roe <= 0:
+        return f"负债率 {debt:.1f}% 且ROE不佳"
+    if roe is not None and yoy is not None:
+        if roe <= 3 and yoy <= -70:
+            return f"净利润同比断崖 {yoy:.1f}% 且ROE偏弱"
+        if roe <= 0 and yoy <= -50:
+            return f"净利润同比大幅下滑 {yoy:.1f}% 且ROE为负"
+    if margin is not None and yoy is not None and margin <= 0 and yoy <= -50:
+        return f"净利率为负且净利润同比下滑 {yoy:.1f}%"
+    return ""
+
+
+def _risk_name_blocked(name: str) -> bool:
+    upper = str(name or "").upper()
+    return any(token in upper for token in ("ST", "*ST", "退市", "暂停上市"))
+
+
+def _attach_confidence_status(signals: list[dict]) -> None:
+    """Attach a user-facing confidence layer without changing strategy scores."""
+    for item in signals or []:
+        label, tone, reasons = _signal_confidence(item)
+        item["confidence_label"] = label
+        item["confidence_tone"] = tone
+        item["confidence_reasons"] = reasons
+        item["confidence_summary"] = "；".join(reasons)
+
+
+def _signal_confidence(item: dict) -> tuple[str, str, list[str]]:
+    if item.get("current_risk_blocked"):
+        reason = item.get("current_risk_reason") or "触发现行风险规则"
+        return "风险排除", "bad", [f"现行风险规则已排除：{reason}"]
+
+    score = _num(item.get("score")) or 0.0
+    mode = str(item.get("mode") or "").lower()
+    if mode == "longterm":
+        strong_line, watch_line = 75, 55
+    else:
+        strong_line, watch_line = 60, 45
+
+    if score >= strong_line:
+        label = "强信号"
+        reasons = [f"分数 {score:.1f} 达到强信号层"]
+    elif score >= watch_line:
+        label = "可观察"
+        reasons = [f"分数 {score:.1f} 达到观察层"]
+    else:
+        label = "弱信号"
+        reasons = [f"分数偏低（{score:.1f}）"]
+
+    if mode == "longterm":
+        pool_type = item.get("pool_type")
+        if pool_type:
+            reasons.append(f"池型：{_longterm_pool_label(pool_type)}")
+        return label, _confidence_tone(label), reasons[:4]
+
+    if item.get("factor_payload_status") == "incomplete":
+        missing = item.get("factor_missing_columns") or []
+        missing_text = "、".join(missing[:4])
+        suffix = f"（缺少 {missing_text}）" if missing_text else ""
+        reasons.append(f"因子拆解不完整{suffix}，可信度下调")
+        label = _downgrade_confidence(label)
+
+    pattern_score = _num((item.get("factors") or {}).get("factor_pattern"))
+    if pattern_score is not None and pattern_score < 30:
+        reasons.append(f"形态分低于30（{pattern_score:.0f}），不宜按强信号理解")
+        label = "弱信号"
+
+    perf = item.get("performance") or {}
+    pending = all(perf.get(key) is None for key in ("ret_5d", "window_end_pct", "mfe_pct", "mae_pct"))
+    outcome = item.get("outcome_label")
+    process = item.get("process_label")
+    mae_label = item.get("mae_risk_label")
+
+    if pending:
+        reasons.append("窗口未满，仍需后续复盘验证")
+    elif outcome == "短线盈利":
+        reasons.append("已满期样本短线盈利")
+    elif outcome == "短线亏损":
+        reasons.append("已满期样本短线亏损")
+        label = _downgrade_confidence(label)
+
+    if process == "盘中给过机会":
+        reasons.append("盘中曾给出较好兑现机会")
+    elif process == "曾冲高回落":
+        reasons.append("盘中冲高回落，追高体验较差")
+        if label == "强信号":
+            label = "可观察"
+    elif process == "回撤偏大":
+        reasons.append("盘中回撤偏大")
+        label = _downgrade_confidence(label)
+
+    if mae_label == "风险偏高":
+        reasons.append("MAE显示持有过程风险偏高")
+        label = _downgrade_confidence(label)
+    elif mae_label == "需警惕":
+        reasons.append("MAE已进入需警惕区间")
+        if label == "强信号":
+            label = "可观察"
+
+    return label, _confidence_tone(label), reasons[:5]
+
+
+def _downgrade_confidence(label: str) -> str:
+    if label == "强信号":
+        return "可观察"
+    if label == "可观察":
+        return "弱信号"
+    return label
+
+
+def _confidence_tone(label: str) -> str:
+    return {
+        "强信号": "ok",
+        "可观察": "warn",
+        "弱信号": "bad",
+        "风险排除": "bad",
+    }.get(label, "")
 
 
 def _filter_signals_by_query(signals: list[dict], query: str) -> list[dict]:
@@ -1067,11 +1359,19 @@ def _score_explain(item: dict) -> dict:
         else:
             action_hint = "轻仓观察，次日不能站稳关键位就放弃"
 
+    data_quality = ""
+    if item.get("factor_payload_status") == "incomplete":
+        missing = item.get("factor_missing_columns") or []
+        data_quality = "因子拆解不完整"
+        if missing:
+            data_quality = f"{data_quality}，缺少 {', '.join(missing[:6])}"
+
     return {
         "breakdown": breakdown,
         "rule_reasons": rule_reasons[:5],
         "risk_reasons": risk_reasons[:5],
         "action_hint": action_hint,
+        "data_quality": data_quality,
     }
 
 
@@ -1083,7 +1383,9 @@ def _score_tooltip(item: dict) -> str:
     if breakdown:
         lines.append("拆解：" + " / ".join(breakdown))
     else:
-        lines.append("拆解：暂无因子拆解，建议重新运行 main.py 或完整同步补齐。")
+        lines.append("拆解：暂无因子拆解，只能看总分和事后表现。")
+    if explain.get("data_quality"):
+        lines.append("数据质量：" + explain["data_quality"])
     rule_reasons = explain.get("rule_reasons") or []
     risk_reasons = explain.get("risk_reasons") or []
     lines.append("支持：" + ("；".join(rule_reasons) if rule_reasons else "暂无明确支持项"))
@@ -1108,6 +1410,10 @@ def _recommend_reason(item: dict) -> str:
         return reason
     score = _num(item.get("score")) or 0
     if item.get("mode") == "short":
+        if item.get("factor_payload_status") == "incomplete":
+            missing = item.get("factor_missing_columns") or []
+            missing_text = f"（缺少 {', '.join(missing[:4])}）" if missing else ""
+            return f"v9分 {score:.1f} 可用于排序参考，但因子拆解不完整{missing_text}，不能当作完整推荐理由。"
         if score >= 55:
             return "v9分较高，规则保留为重点跟踪；但历史因子拆解缺失，建议重新运行 main.py 或完整同步补齐。"
         if score >= 40:
@@ -1156,7 +1462,9 @@ def _derive_risk_reasons(item: dict) -> list[str]:
             reasons.append(f"回撤{drawdown:.1f}%进入风险区")
     if sector is not None and sector < 30:
         reasons.append(f"板块{sector:.0f}分偏弱")
-    if pattern is not None and pattern < 45:
+    if pattern is not None and pattern < 30:
+        reasons.append(f"形态分低于30（{pattern:.0f}），结构不支持追买")
+    elif pattern is not None and pattern < 45:
         reasons.append(f"形态{pattern:.0f}分偏弱")
     if volume_ratio is not None and volume_ratio >= 3.0:
         reasons.append(f"量比{volume_ratio:.2f}偏热")

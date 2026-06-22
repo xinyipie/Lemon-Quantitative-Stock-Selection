@@ -88,6 +88,70 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertNotIn("test.py", flat)
         self.assertNotIn("longterm_pool_quality_audit.py", flat)
 
+    def test_missing_start_backfills_from_next_history_day(self):
+        calls = []
+        args = Namespace(
+            end="20260622",
+            start=None,
+            skip_download=False,
+            skip_history_import=False,
+            skip_market_context=True,
+            skip_main=True,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", side_effect=["20260615", "20260617"]
+        ):
+            run_update(args)
+
+        command_texts = [" ".join(command) for command in calls]
+        self.assertTrue(any("data_downloader.py --start 20260616 --end 20260622" in text for text in command_texts))
+        self.assertTrue(any("history_db_importer.py" in text and "--start 20260616 --end 20260622" in text for text in command_texts))
+
+    def test_market_context_uses_effective_history_date_when_history_lags(self):
+        calls = []
+        args = Namespace(
+            end="20260622",
+            start=None,
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=False,
+            skip_main=True,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260617"
+        ):
+            run_update(args)
+
+        command_texts = [" ".join(command) for command in calls]
+        self.assertTrue(any("market_context_snapshot.py --date 20260617" in text for text in command_texts))
+        self.assertFalse(any("market_context_snapshot.py --date 20260622" in text for text in command_texts))
+
     def test_daily_mode_backfills_today_ai_explanations_after_main(self):
         calls = []
         args = Namespace(

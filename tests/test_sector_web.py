@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,12 +10,14 @@ from fastapi.testclient import TestClient
 
 from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
+from sector_heat_diagnostics import rank_sector_stocks
 from web_app.app import app
 from web_app.services.sector_service import (
     build_concept_news_radar,
     build_market_radar_decision,
     build_sector_radar,
     build_strategy_overlap,
+    decorate_sector_candidate_for_display,
 )
 
 
@@ -722,6 +725,360 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(overlap["source_date"], "20260616")
         self.assertEqual(overlap["items"][0]["industry"], "计算机")
         self.assertIn("策略信号", overlap["items"][0]["reason"])
+
+
+    def test_strategy_overlap_filters_st_risk_names(self):
+        radar = {
+            "end_date": "20260616",
+            "healthy": [{"industry": "components", "stage": "trend", "heat_score": 82, "action": "watch"}],
+        }
+        concept_news = {"news": {"positive": [], "negative": []}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run(
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    run_id,
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(ts_code="002217.SZ", name="ST risk sample", industry="components", score=70, rank=1, reason="short"),
+                        SignalRecord(ts_code="000001.SZ", name="normal sample", industry="components", score=65, rank=2, reason="short"),
+                    ],
+                )
+            finally:
+                store.close()
+
+            overlap = build_strategy_overlap(signal_db, radar, concept_news, limit=5)
+
+        codes = [item["ts_code"] for item in overlap["items"]]
+        self.assertEqual(codes, ["000001.SZ"])
+
+    def test_strategy_overlap_filters_profit_collapse_risk(self):
+        radar = {
+            "end_date": "20260616",
+            "healthy": [{"industry": "components", "stage": "trend", "heat_score": 82, "action": "watch"}],
+        }
+        concept_news = {"news": {"positive": [], "negative": []}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            history_db = Path(tmpdir) / "history.db"
+            conn = sqlite3.connect(history_db)
+            conn.execute(
+                """
+                create table fina_indicator (
+                    ts_code text,
+                    ann_date text,
+                    end_date text,
+                    roe real,
+                    debt_to_assets real,
+                    netprofit_yoy real,
+                    grossprofit_margin real,
+                    netprofit_margin real
+                )
+                """
+            )
+            conn.executemany(
+                "insert into fina_indicator values (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    ("002217.SZ", "20260423", "20260331", 0.04, 26.3, -79.7, 17.8, 0.48),
+                    ("000001.SZ", "20260423", "20260331", 9.0, 45.0, 8.0, 30.0, 12.0),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run(
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    run_id,
+                    "20260616",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(ts_code="002217.SZ", name="profit collapse sample", industry="components", score=70, rank=1, reason="short"),
+                        SignalRecord(ts_code="000001.SZ", name="normal sample", industry="components", score=65, rank=2, reason="short"),
+                    ],
+                )
+            finally:
+                store.close()
+
+            overlap = build_strategy_overlap(signal_db, radar, concept_news, limit=5, history_db=history_db)
+
+        codes = [item["ts_code"] for item in overlap["items"]]
+        self.assertEqual(codes, ["000001.SZ"])
+
+    def test_strategy_overlap_separates_resonant_orphan_and_conflict_signals(self):
+        radar = {
+            "end_date": "20260616",
+            "healthy": [{"industry": "AI", "stage": "trend", "heat_score": 82, "action": "watch"}],
+            "risky": [{"industry": "Bank", "stage": "fade", "heat_score": 30, "action": "avoid"}],
+        }
+        concept_news = {"news": {"positive": [], "negative": [{"industry": "Bank", "impact_score": -12}]}}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260616", mode="short", profile="profile", source="live", label="daily")
+                store.update_pool(
+                    run_id,
+                    "20260616",
+                    mode="short",
+                    profile="profile",
+                    records=[
+                        SignalRecord(ts_code="000001.SZ", name="resonant", industry="AI", score=70, rank=1, reason="short"),
+                        SignalRecord(ts_code="000002.SZ", name="orphan", industry="Retail", score=80, rank=2, reason="short"),
+                        SignalRecord(ts_code="000003.SZ", name="conflict", industry="Bank", score=90, rank=3, reason="short"),
+                    ],
+                )
+            finally:
+                store.close()
+
+            overlap = build_strategy_overlap(signal_db, radar, concept_news, limit=5)
+
+        self.assertEqual([item["ts_code"] for item in overlap["items"]], ["000001.SZ"])
+        self.assertEqual([item["ts_code"] for item in overlap["orphan_items"]], ["000002.SZ"])
+        self.assertEqual([item["ts_code"] for item in overlap["conflict_items"]], ["000003.SZ"])
+
+    def test_sector_candidate_relative_copy_uses_neutral_wording(self):
+        lagging = decorate_sector_candidate_for_display(
+            {
+                "candidate_score": 55.0,
+                "ret_5d": 12.5,
+                "ret_10d": 9.8,
+                "stock_vs_sector_10d": -14.01,
+                "risk_note": "节奏相对健康，继续跟踪承接",
+                "candidate_reason": "强于板块-14.01%，量能2.36倍，资金+4129万",
+                "industry": "玻璃",
+            }
+        )
+        leading = decorate_sector_candidate_for_display(
+            {
+                "candidate_score": 55.0,
+                "ret_5d": 12.5,
+                "ret_10d": 9.8,
+                "stock_vs_sector_10d": 6.5,
+                "risk_note": "节奏相对健康，继续跟踪承接",
+                "candidate_reason": "强于板块+6.50%，量能2.36倍，资金+4129万",
+                "industry": "玻璃",
+            }
+        )
+
+        self.assertEqual(lagging["sector_relative_label"], "落后板块")
+        self.assertIn("相对板块-14.01%", lagging["candidate_reason"])
+        self.assertNotIn("强于板块", lagging["candidate_reason"])
+        self.assertEqual(leading["sector_relative_label"], "领先板块")
+        self.assertIn("相对板块+6.50%", leading["candidate_reason"])
+
+    def test_sector_candidate_ranking_demotes_severe_sector_laggard(self):
+        stocks = pd.DataFrame(
+            [
+                {
+                    "industry": "Glass",
+                    "ts_code": "000001.SZ",
+                    "name": "laggard",
+                    "ret_5d": 4.0,
+                    "ret_10d": 11.0,
+                    "sector_ret_10d": 25.0,
+                    "above_ma20": True,
+                    "amount_ratio_5d": 2.0,
+                    "net_mf_amount": 5000.0,
+                    "turnover_rate": 8.0,
+                    "position_20d": 0.60,
+                },
+                {
+                    "industry": "Glass",
+                    "ts_code": "000002.SZ",
+                    "name": "leader",
+                    "ret_5d": 3.0,
+                    "ret_10d": 27.0,
+                    "sector_ret_10d": 25.0,
+                    "above_ma20": True,
+                    "amount_ratio_5d": 1.0,
+                    "net_mf_amount": 0.0,
+                    "turnover_rate": 2.0,
+                    "position_20d": 0.65,
+                },
+            ]
+        )
+        sectors = pd.DataFrame([{"industry": "Glass", "stage": "trend", "heat_score": 85.0}])
+
+        ranked = rank_sector_stocks(stocks, sectors, top_sectors=1, top_stocks=2)
+
+        self.assertEqual(ranked.iloc[0]["ts_code"], "000002.SZ")
+        self.assertGreater(ranked.iloc[1]["candidate_priority"], ranked.iloc[0]["candidate_priority"])
+
+    def test_market_radar_decision_flags_misaligned_sector_and_news_dates(self):
+        radar = {
+            "end_date": "20260617",
+            "summary": {"market_line": "ok", "healthy_count": 1, "risky_count": 0},
+            "healthy": [{"industry": "AI", "stage": "trend", "heat_score": 82}],
+            "risky": [],
+        }
+        concept_news = {
+            "news": {"source_date": "20260622", "positive": [{"industry": "AI", "impact_score": 21}], "negative": []},
+            "concepts": {"source_date": "20260622", "items": []},
+            "theme_filter": {"source_date": "20260622", "items": []},
+        }
+
+        decision = build_market_radar_decision(radar, concept_news)
+
+        self.assertFalse(decision["data_alignment"]["aligned"])
+        self.assertEqual(decision["data_alignment"]["sector_date"], "20260617")
+        self.assertEqual(decision["data_alignment"]["news_date"], "20260622")
+        self.assertEqual(decision["data_alignment"]["tone"], "warn")
+        self.assertNotEqual(decision["confidence"], "高")
+
+    def test_broad_news_sector_mapping_is_marked_as_low_confidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260622.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260622",
+                        "titles": ["AI export improves"],
+                        "items": [
+                            {
+                                "news": "AI export improves",
+                                "type": "industry trend",
+                                "sectors": ["electronics", "computer", "telecom", "media"],
+                                "impact": "positive",
+                                "strength": 7,
+                                "duration": "1w",
+                                "reason": "generic AI chain benefit",
+                            }
+                        ],
+                        "boosts": {"electronics": 21, "computer": 21, "telecom": 21, "media": 12},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(signal_db=Path(tmpdir) / "missing.db", cache_dir=cache_dir, today="20260622")
+
+        item = radar["news"]["items"][0]
+        self.assertEqual(item["mapping_confidence"], "broad")
+        self.assertEqual(item["mapping_confidence_text"], "泛化映射")
+        self.assertIn("broad", item["mapping_note"])
+
+    def test_strategy_overlap_empty_db_returns_stable_bucket_schema(self):
+        overlap = build_strategy_overlap(
+            signal_db=Path("missing_signal_pool_for_test.db"),
+            radar={"healthy": [], "risky": []},
+            concept_news={"news": {"positive": [], "negative": []}},
+        )
+
+        self.assertEqual(overlap["items"], [])
+        self.assertEqual(overlap["orphan_items"], [])
+        self.assertEqual(overlap["conflict_items"], [])
+        self.assertEqual(overlap["orphan_count"], 0)
+        self.assertEqual(overlap["conflict_count"], 0)
+
+    def test_sector_page_renders_alignment_and_strategy_signal_buckets(self):
+        client = TestClient(app)
+        fake_radar = {
+            "end_date": "20260617",
+            "summary": {
+                "tone": "watch",
+                "headline": "market test",
+                "stance": "watch",
+                "top_sector": "AI",
+                "top_stage": "trend",
+                "top_score": 80,
+                "healthy_count": 1,
+                "healthy_display_count": 1,
+                "risky_count": 1,
+                "risky_display_count": 1,
+            },
+            "message": "",
+            "healthy": [],
+            "risky": [],
+            "candidate_groups": [],
+        }
+        fake_news = {
+            "concepts": {"items": [], "source_date": "20260622", "source_kind": "empty", "message": ""},
+            "theme_filter": {"items": [], "source_date": "20260622"},
+            "news": {
+                "source_date": "20260622",
+                "selection": {},
+                "positive": [],
+                "negative": [],
+                "message": "",
+                "items": [
+                    {
+                        "tone": "ok",
+                        "grade": "B",
+                        "title": "AI export improves",
+                        "impact": "positive",
+                        "impact_text": "good",
+                        "boost_text": "+21.0",
+                        "quality": "industry trend",
+                        "strength_text": "7/10",
+                        "duration": "1w",
+                        "sectors_text": "electronics, computer, telecom, media",
+                        "reason": "generic",
+                        "why_selected": "selected",
+                        "mapping_confidence": "broad",
+                        "mapping_note": "broad mapping: test",
+                        "verification_points": [],
+                    }
+                ],
+            },
+        }
+        fake_decision = {
+            "tone": "watch",
+            "confidence": "medium",
+            "alignment": "split",
+            "primary_action": "watch",
+            "explanation": "test",
+            "focus_industries": [],
+            "avoid_industries": [],
+            "source_note": "source",
+            "data_alignment": {
+                "aligned": False,
+                "tone": "warn",
+                "sector_date": "20260617",
+                "news_date": "20260622",
+                "concept_date": "20260622",
+                "message": "dates mismatch",
+            },
+        }
+        fake_overlap = {
+            "source_date": "20260617",
+            "items": [],
+            "orphan_items": [{"ts_code": "000001.SZ", "name": "orphan", "score_text": "80.0", "industry": "Retail", "mode_text": "short", "action": "watch", "reason": "no sector"}],
+            "conflict_items": [{"ts_code": "000002.SZ", "name": "conflict", "score_text": "70.0", "industry": "Bank", "mode_text": "short", "action": "review", "reason": "risk"}],
+            "message": "no overlap",
+        }
+        with patch("web_app.app.build_sector_radar", return_value=fake_radar), patch(
+            "web_app.app.build_concept_news_radar", return_value=fake_news
+        ), patch("web_app.app.build_market_radar_decision", return_value=fake_decision), patch(
+            "web_app.app.build_strategy_overlap", return_value=fake_overlap
+        ):
+            response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("dates mismatch", response.text)
+        self.assertIn("orphan", response.text)
+        self.assertIn("conflict", response.text)
+        self.assertIn("broad mapping: test", response.text)
 
 
 if __name__ == "__main__":

@@ -90,8 +90,6 @@ def _static_path(name: str) -> str:
 
 def _save(df: pd.DataFrame, path: str):
     """保存 DataFrame 为 Parquet，所有字符串列强制 str 类型"""
-    if df.empty:
-        df = pd.DataFrame()  # 存空文件也要保存，代表"已下载过，只是无数据"
     df.to_parquet(path, index=False, engine='pyarrow', compression='snappy')
 
 
@@ -112,14 +110,65 @@ def _retry(fn, retries: int = 3, wait: float = 5.0):
 
 def _get_trade_dates(pro, start_date: str, end_date: str) -> List[str]:
     """获取区间内所有交易日（升序）"""
-    cal = pro.trade_cal(exchange='SSE', start_date=start_date, end_date=end_date,
-                        is_open=1, fields='cal_date,is_open')
-    # 中转站可能忽略参数返回全量，本地二次过滤
-    if 'cal_date' in cal.columns:
-        cal = cal[(cal['cal_date'] >= start_date) & (cal['cal_date'] <= end_date)]
-    if 'is_open' in cal.columns:
-        cal = cal[cal['is_open'].astype(int) == 1]
-    return sorted(cal['cal_date'].tolist())
+    try:
+        cal = pro.trade_cal(exchange='SSE', start_date=start_date, end_date=end_date,
+                            is_open=1, fields='cal_date,is_open')
+    except Exception as e:
+        logger.warning(f"  trade_cal 接口调用失败，尝试使用本地缓存：{e}")
+        cal = None
+
+    dates = _extract_trade_dates(cal, start_date, end_date)
+    if dates:
+        return dates
+
+    path = _static_path("trade_cal")
+    if os.path.exists(path):
+        try:
+            cached = pd.read_parquet(path)
+            cached_dates = _extract_trade_dates(cached, start_date, end_date)
+            if cached_dates is not None:
+                if not dates:
+                    logger.warning("  trade_cal 接口返回为空，已回退使用本地交易日历缓存")
+                return cached_dates
+        except Exception as e:
+            logger.warning(f"  本地 trade_cal 缓存读取失败：{e}")
+
+    if dates is None:
+        fallback_dates = _weekday_dates(start_date, end_date)
+        if fallback_dates:
+            logger.warning("  trade_cal 返回缺少 cal_date 字段，且无可用缓存，临时按工作日兜底")
+            return fallback_dates
+        logger.warning("  trade_cal 返回缺少 cal_date 字段，且无可用缓存，本次交易日列表为空")
+    return dates or []
+
+
+def _extract_trade_dates(cal: Optional[pd.DataFrame], start_date: str, end_date: str) -> Optional[List[str]]:
+    if cal is None or 'cal_date' not in cal.columns:
+        return None
+    if cal.empty:
+        return []
+
+    work = cal.copy()
+    work['cal_date'] = work['cal_date'].astype(str)
+    work = work[(work['cal_date'] >= start_date) & (work['cal_date'] <= end_date)]
+    if 'is_open' in work.columns:
+        work = work[pd.to_numeric(work['is_open'], errors='coerce').fillna(0).astype(int) == 1]
+    return sorted(work['cal_date'].tolist())
+
+
+def _weekday_dates(start_date: str, end_date: str) -> List[str]:
+    start = datetime.strptime(start_date, '%Y%m%d')
+    end = datetime.strptime(end_date, '%Y%m%d')
+    if start > end:
+        return []
+
+    dates = []
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            dates.append(current.strftime('%Y%m%d'))
+        current += timedelta(days=1)
+    return dates
 
 
 # ==================== 各接口下载函数 ====================
@@ -147,6 +196,9 @@ def download_trade_cal(pro, start_date: str, end_date: str, force: bool = False)
         fields='cal_date,is_open'
     ))
     if df is not None:
+        if 'cal_date' not in df.columns:
+            logger.warning("  trade_cal 返回缺少 cal_date 字段，跳过保存，避免覆盖本地有效缓存")
+            return
         _save(df, path)
         logger.info(f"  ✓ trade_cal：{len(df)} 条")
 

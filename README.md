@@ -3,6 +3,7 @@
 基于 Tushare、A 股离线行情数据和本地回测引擎的量化选股研究工具。项目当前重点是短线选股质量优化，支持日常选股、离线回测、交易归因、IC 分析和多版本实验记录。
 
 > 当前定板短线版本：`profile_v4_adaptive_quality_v9_sector_quality_guard + baseline exit + fixed Top3`。长线当前为 v18 market-sync 观察池 + elite 提醒层，实盘已开启状态记录，但不包含任何交易执行。
+> 短线 live 推送前额外启用硬风控：过滤 ST/退市名称和严重财务恶化样本；这不改变短线回测定板评分。
 
 ## 项目定位
 
@@ -77,7 +78,7 @@ $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 日常更新 Web 看板数据（推荐）：
 
 ```bash
-python daily_web_update.py --mode daily --end 20260616
+python daily_web_update.py --mode full --end 20260616
 ```
 
 日常同步只做高频经营所需步骤：补行情缓存、导入 `stock_history.db`、刷新市场上下文、运行 `main.py` 写入当天实盘信号，并为当天短线/长线 live 信号补齐 AI 解释缓存和首页“今日AI摘要”。短线历史复盘和长线历史审计比较慢，默认跳过。
@@ -151,7 +152,7 @@ python -m uvicorn web_app.app:app --host 127.0.0.1 --port 8000
 
 日常查看顺序建议：
 
-1. 盘后先跑 `python daily_web_update.py --mode daily --end 最新交易日`。
+1. 盘后先跑 `python daily_web_update.py --mode full --end 最新交易日`，把行情、实盘、短线复盘、长线审计和市场上下文一次补齐。
 2. 打开 Web 首页，看“数据同步提醒”和“今日决策”。
 3. 短线复盘页先看近 100 日，重点看“系统原因”“收益路径”“AI状态”。日常同步会自动补当天 AI 解释。
 4. 只有需要批量补历史解释时再跑：
@@ -186,7 +187,7 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 
 | 脚本 | 何时使用 | 常用命令 |
 |------|----------|----------|
-| `daily_web_update.py` | 日常唯一推荐入口；默认轻量日更，完整补历史时用 `--mode full` | `python daily_web_update.py --mode daily --end 20260616` |
+| `daily_web_update.py` | Web 日常推荐入口；默认建议用 `--mode full` 补齐行情、实盘、短线复盘、长线审计和市场上下文；只想快速刷新当日信号时用 `--mode daily` | `python daily_web_update.py --mode full --end 20260616` |
 | `data_downloader.py` | 单独补 Tushare/离线 Parquet 缓存 | `python data_downloader.py --start 20260616 --end 20260616 --skip-financial` |
 | `history_db_importer.py` | 把 `data/cache` 的 Parquet 导入 `data/stock_history.db`，供 Web/单股体检查询 | `python history_db_importer.py --cache-dir data/cache --db data/stock_history.db --start 20260616 --end 20260616 --tables daily daily_basic moneyflow index_daily stock_basic` |
 | `history_db_check.py` | 检查历史数据库覆盖范围和最新日期 | `python history_db_check.py --db data/stock_history.db` |
@@ -225,6 +226,11 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 | `longterm_pool_state_audit.py` | 分析长线池每日新入、延续、降级、移出状态 | `python longterm_pool_state_audit.py --help` |
 | `longterm_pool_alert_audit.py` | 评估 Elite 强提醒层条件 | `python longterm_pool_alert_audit.py --help` |
 | `longterm_factor_stability_audit.py` | 对比多个长线版本因子稳定性 | `python longterm_factor_stability_audit.py --inputs reports/longterm_pool_quality_*_v18_market_sync_full.csv --output reports/longterm_factor_stability.md` |
+| `research/strategy_research_overview.py` | 端午策略研究总览：汇总短线 v9、长线 v18 现有证据，不改变上线策略 | `python research/strategy_research_overview.py --output reports/research/dragon_boat_research_overview.md` |
+| `research/strategy_factor_stability.py` | 端午因子稳定性研究：按短线 v9 与长线 v18 口径识别稳定/不稳定因子，不改变上线策略 | `python research/strategy_factor_stability.py --output reports/research/dragon_boat_factor_stability.md` |
+| `research/strategy_layer_quality.py` | 端午分层质量诊断：比较短线 v9、长线 v18 的 TopN 与全样本收益差异，判断分数是否只在头部有效 | `python research/strategy_layer_quality.py --output reports/research/dragon_boat_layer_quality.md` |
+| `research/strategy_candidate_simulator.py` | 端午候选策略离线模拟：对短线 v9、长线 v18 的保守 research rule 做跨区间验证，不直接上线 | `python research/strategy_candidate_simulator.py --output reports/research/dragon_boat_candidate_simulation.md` |
+| `research/official_strategy_health_check.py` | 定板策略健康检查：汇总 research 结论，判断哪些只做监控、哪些进入下一轮验证，不改变上线默认策略 | `python research/official_strategy_health_check.py --output reports/research/official_strategy_health_check.md` |
 
 ## 常用实验命令
 

@@ -81,6 +81,17 @@ def latest_history_trade_date(history_db: Path = DEFAULT_HISTORY_DB) -> str | No
         conn.close()
 
 
+def resolve_update_window(end_date: str, start_date: str | None, history_db: Path = DEFAULT_HISTORY_DB) -> tuple[str, str]:
+    target_end = normalize_date(end_date)
+    if start_date:
+        return normalize_date(start_date), target_end
+
+    latest = latest_history_trade_date(history_db)
+    if latest and normalize_date(latest) < target_end:
+        return next_calendar_day(latest), target_end
+    return target_end, target_end
+
+
 def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | None:
     if not signal_db.exists():
         return None
@@ -122,7 +133,7 @@ def latest_ic_short_file(since_mtime: float | None = None) -> Path | None:
 
 def run_update(args: argparse.Namespace) -> None:
     target_end = normalize_date(args.end or today_text())
-    target_start = normalize_date(args.start or target_end)
+    target_start, target_end = resolve_update_window(target_end, args.start, args.history_db)
     py = sys.executable
     update_mode = getattr(args, "mode", "daily")
 
@@ -157,6 +168,9 @@ def run_update(args: argparse.Namespace) -> None:
 
     effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
     print(f"\n有效最新交易日：{effective_end}")
+
+    if effective_end != target_end:
+        print(f"\n提示：目标日期 {target_end} 的行情未完整落库，市场上下文按有效行情日 {effective_end} 生成。")
 
     if not args.skip_market_context:
         run_command(

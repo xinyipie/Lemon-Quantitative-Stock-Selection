@@ -14,8 +14,10 @@ class WebAppTest(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("策略工作台", response.text)
-        self.assertIn("今日决策", response.text)
-        self.assertIn("今日AI摘要", response.text)
+        self.assertIn("最近运行决策", response.text)
+        self.assertIn("行情有效日", response.text)
+        self.assertIn("数据状态", response.text)
+        self.assertIn("最近AI摘要", response.text)
         self.assertIn("最近实盘短线", response.text)
         self.assertIn("快速检测", response.text)
 
@@ -25,6 +27,7 @@ class WebAppTest(unittest.TestCase):
         self.assertNotIn("批量体检自选股", response.text)
         self.assertIn("/update/run?mode=daily", response.text)
         self.assertIn("/update/run?mode=full", response.text)
+        self.assertLess(response.text.find("/update/run?mode=full"), response.text.find("/update/run?mode=daily"))
         self.assertIn('data-update-status-url="/update/status"', response.text)
 
     def test_dashboard_update_button_starts_background_update(self):
@@ -53,7 +56,7 @@ class WebAppTest(unittest.TestCase):
         response = self.client.get("/db")
         self.assertEqual(response.status_code, 200)
         self.assertIn("数据库状态", response.text)
-        self.assertIn("python daily_web_update.py --mode daily --end 最新交易日", response.text)
+        self.assertIn("python daily_web_update.py --mode full --end 最新交易日", response.text)
 
     def test_stock_page_renders_for_code(self):
         response = self.client.get("/stock/000001")
@@ -80,11 +83,12 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("短线复盘", response.text)
         self.assertIn("收益路径", response.text)
         self.assertIn("系统原因", response.text)
-        self.assertIn("复盘标签", response.text)
+        self.assertIn("可信度 / 复盘", response.text)
         self.assertIn("机会", response.text)
         self.assertIn("风险", response.text)
         self.assertIn("AI状态", response.text)
         self.assertIn("待验证信号", response.text)
+        self.assertIn("可信度", response.text)
         self.assertIn("short_v9_final", response.text)
 
     def test_signal_explanation_page_renders(self):

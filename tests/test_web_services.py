@@ -52,7 +52,37 @@ class WebServicesTest(unittest.TestCase):
 
         self.assertEqual(status["latest_trade_date"], "20250102")
         self.assertEqual(status["tables"]["stock_daily"]["rows"], 2)
+        self.assertEqual(status["tables"]["stock_daily"]["status_label"], "OK")
         self.assertEqual(detail["stock"]["name"], "平安银行")
+
+    def test_history_status_marks_lagging_market_tables(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            history_db = Path(tmpdir) / "history.db"
+            store = HistoryStore(history_db)
+            try:
+                store.upsert_dataframe(
+                    "stock_daily",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20250102", "ts_code": "000001.SZ", "close": 10.0},
+                        ]
+                    ),
+                )
+                store.upsert_dataframe(
+                    "stock_daily_basic",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20250101", "ts_code": "000001.SZ", "turnover_rate": 1.0},
+                        ]
+                    ),
+                )
+            finally:
+                store.close()
+
+            status = get_db_status(history_db)
+
+        self.assertEqual(status["tables"]["stock_daily_basic"]["status_label"], "滞后")
+        self.assertEqual(status["tables"]["stock_daily_basic"]["status_tone"], "warn")
 
     def test_signal_service_returns_recent_and_active_longterm_pool(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -224,6 +254,9 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(freshness["history_lag_days"], 2)
         self.assertTrue(any("历史行情库" in item and "20260615" in item and "20260617" in item for item in freshness["warnings"]))
         self.assertFalse(freshness["is_fresh"])
+        self.assertEqual(freshness["tone"], "warn")
+        self.assertEqual(freshness["status_label"], "行情滞后")
+        self.assertIn("实盘信号已到 20260617", freshness["headline"])
 
     def test_dashboard_decision_explains_empty_signal_day(self):
         decision = build_dashboard_decision(
@@ -275,6 +308,9 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(funnel["entry_count"], 3)
         self.assertEqual(funnel["active_count"], 2)
         self.assertEqual(len(funnel["steps"]), 4)
+        self.assertEqual(funnel["steps"][-1]["value"], "未采集")
+        self.assertIn("运行摘要可用", funnel["steps"][-1]["hint"])
+        self.assertEqual(funnel["telemetry_status"], "missing")
 
     def test_longterm_pool_status_explains_empty_but_recently_scanned_pool(self):
         status = build_longterm_pool_status(
@@ -380,6 +416,9 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(samples[0]["excess_80d_text"], "未满")
         self.assertEqual(samples[0]["mae_pain_tone"], "risk-high")
         self.assertEqual(samples[0]["lifecycle_label"], "窗口未满 t+2")
+        self.assertEqual(samples[0]["watch_risk_label"], "风险升级")
+        self.assertEqual(samples[0]["watch_risk_tone"], "bad")
+        self.assertIn("当前回撤已超过10%", samples[0]["watch_risk_reason"])
 
     def test_dashboard_decision_promotes_live_signals_when_present(self):
         decision = build_dashboard_decision(
@@ -534,8 +573,83 @@ class WebServicesTest(unittest.TestCase):
             signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
 
         self.assertNotEqual(signal["recommend_reason"], "short_top")
-        self.assertIn("v9分较高", signal["recommend_reason"])
-        self.assertIn("因子拆解缺失", signal["recommend_reason"])
+        self.assertIn("v9分 75.0", signal["recommend_reason"])
+        self.assertIn("因子拆解不完整", signal["recommend_reason"])
+
+    def test_incomplete_short_factor_breakdown_lowers_confidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260617", mode="short", profile="profile_v9_sector_quality_guard", source="live")
+                store.update_pool(
+                    run_id,
+                    "20260617",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            score=76,
+                            factors={
+                                "score": 76,
+                                "factor_profile": "profile_v9_sector_quality_guard",
+                                "style_gate": "swing",
+                            },
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertEqual(signal["factor_payload_status"], "incomplete")
+        self.assertEqual(signal["confidence_label"], "\u53ef\u89c2\u5bdf")
+        self.assertIn("\u56e0\u5b50\u62c6\u89e3\u4e0d\u5b8c\u6574", signal["confidence_summary"])
+        self.assertIn("\u56e0\u5b50\u62c6\u89e3\u4e0d\u5b8c\u6574", signal["recommend_reason"])
+        self.assertIn("factor_inflow", signal["score_tooltip"])
+
+    def test_very_weak_pattern_turns_high_score_short_signal_into_weak_signal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260618", mode="short", profile="profile_v9_sector_quality_guard", source="live")
+                store.update_pool(
+                    run_id,
+                    "20260618",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            score=76,
+                            factors={
+                                "score": 76,
+                                "original_score": 88,
+                                "factor_profile": "profile_v9_sector_quality_guard",
+                                "factor_inflow": 95,
+                                "factor_sector": 70,
+                                "factor_pattern": 25,
+                                "factor_volume_ratio": 60,
+                                "factor_drawdown": 55,
+                                "factor_wyckoff": 50,
+                            },
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertEqual(signal["factor_payload_status"], "complete")
+        self.assertEqual(signal["confidence_label"], "弱信号")
+        self.assertEqual(signal["confidence_tone"], "bad")
+        self.assertIn("形态分低于30", signal["confidence_summary"])
+        self.assertIn("形态分低于30", signal["risk_reason_text"])
+        self.assertIn("形态分低于30", signal["recommend_reason"])
 
     def test_short_signal_marks_cached_ai_explanation_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -663,6 +777,98 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(signal["mae_text"], "待观察")
         self.assertEqual(signal["quality_label"], "待验证信号")
         self.assertEqual(signal["result_tag"], "待验证信号/窗口未满")
+        self.assertEqual(signal["confidence_label"], "可观察")
+        self.assertEqual(signal["confidence_tone"], "warn")
+        self.assertIn("窗口未满", signal["confidence_summary"])
+        self.assertIn("因子拆解不完整", signal["confidence_summary"])
+
+    def test_short_signal_confidence_downgrades_weak_matured_signal(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260610", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20260610",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[
+                        SignalRecord(
+                            ts_code="000002.SZ",
+                            score=24,
+                            factors={"ret_5d": -6.2, "mfe_pct": 1.1, "mae_pct": -9.5},
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertEqual(signal["confidence_label"], "弱信号")
+        self.assertEqual(signal["confidence_tone"], "bad")
+        self.assertIn("分数偏低", signal["confidence_summary"])
+        self.assertIn("短线亏损", signal["confidence_summary"])
+
+    def test_short_signal_marks_current_risk_guard_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            history_db = Path(tmpdir) / "history.db"
+            conn = __import__("sqlite3").connect(history_db)
+            try:
+                conn.executescript(
+                    """
+                    create table stock_basic (
+                        ts_code text primary key,
+                        symbol text,
+                        name text,
+                        industry text
+                    );
+                    create table fina_indicator (
+                        ts_code text,
+                        ann_date text,
+                        end_date text,
+                        roe real,
+                        debt_to_assets real,
+                        netprofit_yoy real,
+                        netprofit_margin real
+                    );
+                    """
+                )
+                conn.execute(
+                    "insert into stock_basic values (?, ?, ?, ?)",
+                    ("002217.SZ", "002217", "合力泰", "元器件"),
+                )
+                conn.execute(
+                    "insert into fina_indicator values (?, ?, ?, ?, ?, ?, ?)",
+                    ("002217.SZ", "20260423", "20260331", 0.04, 26.3, -79.7, 0.48),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260617", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20260617",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[SignalRecord(ts_code="002217.SZ", name="合力泰", industry="元器件", score=53)],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=history_db, limit=1)[0]
+
+        self.assertTrue(signal["current_risk_blocked"])
+        self.assertEqual(signal["current_risk_label"], "现行风险规则已排除")
+        self.assertIn("净利润同比断崖", signal["current_risk_reason"])
+        self.assertEqual(signal["confidence_label"], "风险排除")
+        self.assertEqual(signal["confidence_tone"], "bad")
+        self.assertIn("现行风险规则", signal["confidence_summary"])
 
 
 if __name__ == "__main__":

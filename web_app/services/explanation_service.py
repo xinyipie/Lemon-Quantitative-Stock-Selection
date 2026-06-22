@@ -246,6 +246,8 @@ def build_fallback_explanation(signal: dict) -> dict:
     quality = signal.get("quality_label") or "观察信号"
     basis = signal.get("basis_text") or "-"
     performance = signal.get("performance_text") or "-"
+    confidence_label = str(signal.get("confidence_label") or "").strip()
+    confidence_summary = str(signal.get("confidence_summary") or "").strip()
     score_explain = signal.get("score_explain") or {}
     rule_reasons = [str(item) for item in (score_explain.get("rule_reasons") or []) if str(item).strip()]
     risk_reasons = [str(item) for item in (score_explain.get("risk_reasons") or []) if str(item).strip()]
@@ -262,6 +264,19 @@ def build_fallback_explanation(signal: dict) -> dict:
     else:
         risks.append("系统评分偏低，更适合作为复盘样本，而不是重点关注对象。")
 
+    if confidence_label:
+        confidence_text = f"可信度：{confidence_label}"
+        if confidence_label in {"强信号"}:
+            positives.append(confidence_text)
+        else:
+            risks.append(confidence_text)
+    if confidence_summary:
+        for part in [item.strip() for item in confidence_summary.split("；") if item.strip()]:
+            if any(token in part for token in ("风险", "亏损", "回撤", "窗口未满", "排除", "偏低")):
+                risks.append(part)
+            else:
+                positives.append(part)
+
     if "资金" in basis:
         positives.append("入选依据中包含资金线索，可作为短线活跃度参考。")
     if outcome == "短线亏损":
@@ -272,8 +287,9 @@ def build_fallback_explanation(signal: dict) -> dict:
         risks.append("即使信号有效，也需要等待次日走势确认，不能把历史入选等同于确定收益。")
 
     rule_summary = signal.get("recommend_reason") or "系统保留了这条信号，但结构化推荐原因不足。"
+    confidence_clause = f"可信度：{confidence_label}（{confidence_summary}）。" if confidence_label else ""
     summary = (
-        f"{name}这条记录属于{quality}，规则原因是：{rule_summary}。事后结果为{outcome}，过程表现是{process}。"
+        f"{name}这条记录属于{quality}，{confidence_clause}规则原因是：{rule_summary}。事后结果为{outcome}，过程表现是{process}。"
         f"它更适合用于理解系统当时为什么关注，而不是直接复制为买入指令。"
     )
     return {
@@ -323,6 +339,8 @@ def _facts_from_signal(signal: dict) -> dict:
         "quality_label": signal.get("quality_label"),
         "outcome_label": signal.get("outcome_label"),
         "process_label": signal.get("process_label"),
+        "confidence_label": signal.get("confidence_label"),
+        "confidence_summary": signal.get("confidence_summary"),
         "factors": signal.get("factors") or {},
     }
 
@@ -337,6 +355,8 @@ def _brief_signal_item(item: dict) -> dict:
         "rank": item.get("rank"),
         "score": item.get("score"),
         "quality_label": item.get("quality_label"),
+        "confidence_label": item.get("confidence_label"),
+        "confidence_summary": item.get("confidence_summary"),
         "recommend_reason": item.get("recommend_reason"),
         "risk_reason_text": item.get("risk_reason_text"),
     }

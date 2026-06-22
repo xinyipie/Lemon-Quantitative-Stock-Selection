@@ -39,6 +39,31 @@ def read_update_status(status_path: str | Path = DEFAULT_STATUS_PATH) -> dict:
     return status
 
 
+def decorate_update_status_with_freshness(status: dict | None, freshness: dict | None) -> dict:
+    """Combine task execution status with actual data freshness for display."""
+    decorated = dict(status or {})
+    decorated.setdefault("state", "idle")
+    decorated.setdefault("running", decorated.get("state") == "running")
+
+    warnings = list((freshness or {}).get("warnings") or [])
+    status_label = str((freshness or {}).get("status_label") or "").strip()
+    if decorated.get("state") == "finished":
+        if warnings:
+            decorated["aligned"] = False
+            decorated["alignment_state"] = "warn"
+            suffix = f"：{status_label}" if status_label else ""
+            decorated["display_message"] = f"同步任务已完成，但数据未对齐{suffix}。"
+        else:
+            decorated["aligned"] = True
+            decorated["alignment_state"] = "ok"
+            decorated["display_message"] = "同步完成，数据已对齐。"
+    else:
+        decorated["aligned"] = not warnings
+        decorated["alignment_state"] = "warn" if warnings else "unknown"
+        decorated["display_message"] = decorated.get("message") or "尚未运行一键更新。"
+    return decorated
+
+
 def start_web_update(
     end: str | None = None,
     mode: str = "daily",
@@ -107,7 +132,7 @@ def run_update_job(
                 "message": "同步完成。" if state == "finished" else "同步失败，请查看错误摘要。",
             },
         )
-    except Exception as exc:  # pragma: no cover - 兜底状态由状态文件展示
+    except Exception as exc:  # pragma: no cover - fallback status for unexpected runner errors
         _write_status(
             path,
             {

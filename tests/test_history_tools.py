@@ -43,6 +43,34 @@ class HistoryToolsTest(unittest.TestCase):
         self.assertIn("stock_daily", report)
         self.assertIn("20250102 → 20250103", report)
 
+    def test_check_history_db_warns_when_latest_daily_coverage_is_partial(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "history.db"
+            store = HistoryStore(db_path)
+            try:
+                store.upsert_dataframe(
+                    "stock_daily",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20250102", "ts_code": "000001.SZ", "close": 10.0},
+                            {"trade_date": "20250102", "ts_code": "000002.SZ", "close": 10.0},
+                            {"trade_date": "20250102", "ts_code": "000003.SZ", "close": 10.0},
+                            {"trade_date": "20250103", "ts_code": "000001.SZ", "close": 11.0},
+                            {"trade_date": "20250103", "ts_code": "000002.SZ", "close": 11.0},
+                            {"trade_date": "20250103", "ts_code": "000003.SZ", "close": 11.0},
+                            {"trade_date": "20250104", "ts_code": "000001.SZ", "close": 12.0},
+                        ]
+                    ),
+                )
+            finally:
+                store.close()
+
+            result = check_history_db(db_path)
+
+        self.assertEqual(result["tables"]["stock_daily"]["status_label"], "覆盖不足")
+        self.assertEqual(result["tables"]["stock_daily"]["status_tone"], "warn")
+        self.assertLess(result["daily_coverage"]["coverage_ratio"], 0.7)
+
     def test_query_stock_history_returns_returns_latest_facts_and_signal_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             history_db = Path(tmpdir) / "history.db"

@@ -177,6 +177,25 @@ class ExplanationServiceTest(unittest.TestCase):
         self.assertTrue(any("量比3.20偏热" in item for item in doc["risks"]))
         self.assertIn("轻仓观察", doc["watch_plan"])
 
+    def test_fallback_explanation_includes_signal_confidence(self):
+        signal = {
+            "trade_date": "20260618",
+            "ts_code": "002326.SZ",
+            "display_name": "永太科技",
+            "display_code": "002326.SZ",
+            "quality_label": "待验证信号",
+            "outcome_label": "窗口未满",
+            "process_label": "待观察",
+            "recommend_reason": "v9分较高，规则保留为重点跟踪",
+            "confidence_label": "强信号",
+            "confidence_summary": "分数 72.6 达到强信号层；窗口未满，仍需后续复盘验证",
+        }
+
+        doc = build_fallback_explanation(signal)
+
+        self.assertIn("可信度：强信号", doc["summary"])
+        self.assertTrue(any("窗口未满" in item for item in doc["risks"]))
+
     def test_get_or_create_signal_explanation_calls_ai_once_and_caches(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

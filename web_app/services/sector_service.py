@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 from difflib import SequenceMatcher
 import sqlite3
 from pathlib import Path
@@ -102,6 +103,7 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
     news = concept_news.get("news") or {}
     positive = list(news.get("positive") or [])
     negative = list(news.get("negative") or [])
+    data_alignment = _market_data_alignment(radar, concept_news)
 
     healthy_names = [str(item.get("industry") or "") for item in healthy if item.get("industry")]
     positive_names = [str(item.get("industry") or "") for item in positive if item.get("industry")]
@@ -153,6 +155,11 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
     else:
         avoid_text = "暂无明确风险板块，但仍需控制追高。"
 
+    if not data_alignment["aligned"] and tone == "ok":
+        tone = "watch"
+    if not data_alignment["aligned"] and confidence == "高":
+        confidence = "中"
+
     return {
         "alignment": alignment,
         "confidence": confidence,
@@ -162,7 +169,29 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
         "primary_action": primary_action,
         "avoid_action": avoid_text,
         "explanation": explanation,
+        "data_alignment": data_alignment,
         "source_note": "以本地行业热度、入库信号新闻/概念因子和概念缓存综合判断；外部概念接口缺失时不参与决策。",
+    }
+
+
+def _market_data_alignment(radar: dict, concept_news: dict) -> dict:
+    sector_date = _date_key(radar.get("end_date"))
+    news = concept_news.get("news") or {}
+    concepts = concept_news.get("concepts") or {}
+    theme_filter = concept_news.get("theme_filter") or {}
+    news_date = _date_key(news.get("source_date"))
+    concept_date = _date_key(concepts.get("source_date"))
+    theme_date = _date_key(theme_filter.get("source_date"))
+    dates = [date for date in [sector_date, news_date, concept_date, theme_date] if date]
+    aligned = len(set(dates)) <= 1
+    return {
+        "aligned": aligned,
+        "tone": "ok" if aligned else "warn",
+        "sector_date": sector_date,
+        "news_date": news_date,
+        "concept_date": concept_date,
+        "theme_date": theme_date,
+        "message": "数据日期已对齐。" if aligned else "行业热度与消息/概念日期不一致，共振结论只作参考。",
     }
 
 
@@ -171,17 +200,18 @@ def build_strategy_overlap(
     radar: dict,
     concept_news: dict,
     limit: int = 8,
+    history_db: str | Path = DEFAULT_HISTORY_DB_PATH,
 ) -> dict:
     """Find real strategy signals that overlap with healthy sectors or news-positive sectors."""
     path = Path(signal_db)
     if not path.exists():
-        return {"items": [], "source_date": None, "message": "信号数据库不存在，暂无策略共振候选。"}
+        return _empty_strategy_overlap("信号数据库不存在，暂无策略共振候选。")
 
     healthy_by_industry = _industry_map(radar.get("healthy") or [])
     positive_by_industry = _industry_map((concept_news.get("news") or {}).get("positive") or [])
+    risky_by_industry = _industry_map(radar.get("risky") or [])
+    negative_by_industry = _industry_map((concept_news.get("news") or {}).get("negative") or [])
     qualified_industries = set(healthy_by_industry) | set(positive_by_industry)
-    if not qualified_industries:
-        return {"items": [], "source_date": None, "message": "当前没有健康主线或正向消息行业，暂不生成共振候选。"}
 
     radar_date = str(radar.get("end_date") or "").replace("-", "")[:8]
     conn = sqlite3.connect(path)
@@ -203,7 +233,7 @@ def build_strategy_overlap(
             ).fetchone()
         source_date = str(source_row["trade_date"] or "") if source_row else ""
         if not source_date:
-            return {"items": [], "source_date": None, "message": "暂无可用于共振判断的策略信号。"}
+            return _empty_strategy_overlap("暂无可用于共振判断的策略信号。")
         rows = conn.execute(
             """
             select p.trade_date, p.mode, p.profile, p.ts_code, p.name, p.industry,
@@ -221,25 +251,125 @@ def build_strategy_overlap(
     finally:
         conn.close()
 
+    risk_codes = _load_signal_display_risk_codes(
+        history_db=history_db,
+        ts_codes=[str(row["ts_code"] or "") for row in rows],
+        asof_date=radar_date or source_date,
+    )
     items = []
+    orphan_items = []
+    conflict_items = []
     seen_codes = set()
     for row in rows:
         item = dict(row)
         industry = str(item.get("industry") or "")
-        if industry not in qualified_industries:
-            continue
         code = str(item.get("ts_code") or "")
+        if code in risk_codes:
+            continue
+        if _is_signal_display_risky(item):
+            continue
         if code in seen_codes:
             continue
         seen_codes.add(code)
-        items.append(_decorate_strategy_overlap(item, healthy_by_industry, positive_by_industry))
+        decorated = _decorate_strategy_overlap(
+            item,
+            healthy_by_industry,
+            positive_by_industry,
+            risky_by_industry,
+            negative_by_industry,
+        )
+        if industry in qualified_industries:
+            items.append(decorated)
+        elif industry in risky_by_industry or industry in negative_by_industry:
+            conflict_items.append(decorated)
+        else:
+            orphan_items.append(decorated)
 
     items.sort(key=lambda item: item["overlap_score"], reverse=True)
+    orphan_items.sort(key=lambda item: item["score"], reverse=True)
+    conflict_items.sort(key=lambda item: item["score"], reverse=True)
     return {
         "items": items[:limit],
+        "orphan_items": orphan_items[:limit],
+        "conflict_items": conflict_items[:limit],
+        "orphan_count": len(orphan_items),
+        "conflict_count": len(conflict_items),
         "source_date": source_date,
         "message": "" if items else "最近策略信号没有落在健康主线或正向消息行业里。",
     }
+
+
+def _empty_strategy_overlap(message: str, source_date: str | None = None) -> dict:
+    return {
+        "items": [],
+        "orphan_items": [],
+        "conflict_items": [],
+        "orphan_count": 0,
+        "conflict_count": 0,
+        "source_date": source_date,
+        "message": message,
+    }
+
+
+def _is_signal_display_risky(item: dict) -> bool:
+    name = str(item.get("name") or "")
+    return bool(re.search(r"ST|＊ST|\*ST|退市|暂停上市", name, flags=re.IGNORECASE))
+
+
+def _load_signal_display_risk_codes(history_db: str | Path, ts_codes: list[str], asof_date: str) -> set[str]:
+    codes = sorted({str(code or "").strip() for code in ts_codes if str(code or "").strip()})
+    if not codes:
+        return set()
+    path = Path(history_db)
+    if not path.exists():
+        return set()
+    placeholders = ",".join("?" for _ in codes)
+    date_text = str(asof_date or "99999999").replace("-", "")[:8] or "99999999"
+    try:
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            select ts_code, ann_date, end_date, roe, debt_to_assets, netprofit_yoy, netprofit_margin
+            from fina_indicator
+            where ts_code in ({placeholders})
+              and (ann_date is null or ann_date <= ?)
+            order by ts_code asc, ann_date desc, end_date desc
+            """,
+            [*codes, date_text],
+        ).fetchall()
+    except sqlite3.Error:
+        return set()
+    finally:
+        try:
+            conn.close()
+        except UnboundLocalError:
+            pass
+
+    latest_by_code = {}
+    for row in rows:
+        code = str(row["ts_code"] or "")
+        if code and code not in latest_by_code:
+            latest_by_code[code] = row
+    return {code for code, row in latest_by_code.items() if _financial_signal_display_risky(row)}
+
+
+def _financial_signal_display_risky(row: sqlite3.Row) -> bool:
+    roe = _num(row["roe"])
+    debt = _num(row["debt_to_assets"])
+    yoy = _num(row["netprofit_yoy"])
+    margin = _num(row["netprofit_margin"])
+
+    if debt is not None and debt >= 90 and roe is not None and roe <= 0:
+        return True
+    if roe is not None and yoy is not None:
+        if roe <= 3 and yoy <= -70:
+            return True
+        if roe <= 0 and yoy <= -50:
+            return True
+    if margin is not None and yoy is not None and margin <= 0 and yoy <= -50:
+        return True
+    return False
 
 
 def _empty_radar(end_date: str | None = None, message: str = "") -> dict:
@@ -622,6 +752,7 @@ def _decorate_news_items(payload: dict, limit: int = 8) -> list[dict]:
         sectors_text = "、".join(sectors)
         reason = item["reasons"][0] if item["reasons"] else ""
         raw_source = _primary_raw_news(item["raw_sources"], item["title"])
+        mapping_confidence, mapping_note = _news_mapping_confidence(sectors, quality, reason)
         decorated.append(
             {
                 "title": item["title"],
@@ -634,6 +765,9 @@ def _decorate_news_items(payload: dict, limit: int = 8) -> list[dict]:
                 "duration": item["duration"],
                 "sectors": sectors,
                 "sectors_text": sectors_text,
+                "mapping_confidence": mapping_confidence,
+                "mapping_confidence_text": _news_mapping_confidence_text(mapping_confidence),
+                "mapping_note": mapping_note,
                 "reason": reason,
                 "grade": grade,
                 "boost_total": boost_total,
@@ -655,8 +789,41 @@ def _decorate_news_items(payload: dict, limit: int = 8) -> list[dict]:
                 "value_reason_text": raw_source.get("value_reason_text") or "",
             }
         )
-    decorated.sort(key=lambda item: (_news_grade_rank(item["grade"]), item["strength"], abs(item["boost_total"])), reverse=True)
+    decorated.sort(
+        key=lambda item: (
+            _news_grade_rank(item["grade"]),
+            _news_mapping_rank(item["mapping_confidence"]),
+            item["strength"],
+            abs(item["boost_total"]),
+        ),
+        reverse=True,
+    )
     return decorated[:limit]
+
+
+def _news_mapping_confidence(sectors: list[str], quality: str, reason: str) -> tuple[str, str]:
+    sector_count = len([sector for sector in sectors if sector])
+    text = f"{quality} {reason}".lower()
+    generic_terms = ["ai", "算力", "人工智能", "科技", "出口", "产业链", "基建"]
+    if sector_count >= 4:
+        return "broad", "broad mapping: 映射到4个以上行业，适合作为背景信息，不宜单独当成强催化。"
+    if sector_count >= 3 and any(term in text for term in generic_terms):
+        return "broad", "broad mapping: 题材较宽，需继续验证真实受益细分方向。"
+    if sector_count == 1:
+        return "precise", "precise mapping: 映射行业较集中，仍需结合板块承接验证。"
+    return "medium", "medium mapping: 映射到多个相邻行业，适合作为辅助线索。"
+
+
+def _news_mapping_confidence_text(confidence: str) -> str:
+    return {
+        "precise": "精准映射",
+        "medium": "中等映射",
+        "broad": "泛化映射",
+    }.get(str(confidence), "映射待核验")
+
+
+def _news_mapping_rank(confidence: str) -> int:
+    return {"precise": 3, "medium": 2, "broad": 1}.get(str(confidence), 0)
 
 
 def _normalize_news_title(title: str) -> str:
@@ -897,13 +1064,22 @@ def _decorate_impact_stock(item: dict) -> dict:
     }
 
 
-def _decorate_strategy_overlap(item: dict, healthy_by_industry: dict[str, dict], positive_by_industry: dict[str, dict]) -> dict:
+def _decorate_strategy_overlap(
+    item: dict,
+    healthy_by_industry: dict[str, dict],
+    positive_by_industry: dict[str, dict],
+    risky_by_industry: dict[str, dict] | None = None,
+    negative_by_industry: dict[str, dict] | None = None,
+) -> dict:
     industry = str(item.get("industry") or "")
     signal_score = _num(item.get("score")) or 0.0
     healthy = healthy_by_industry.get(industry)
     positive = positive_by_industry.get(industry)
+    risky = (risky_by_industry or {}).get(industry)
+    negative = (negative_by_industry or {}).get(industry)
     heat_score = _num((healthy or {}).get("heat_score")) or 0.0
     news_score = _num((positive or {}).get("impact_score")) or 0.0
+    negative_score = _num((negative or {}).get("impact_score")) or 0.0
     overlap_score = signal_score + heat_score * 0.2 + max(news_score, 0.0) * 0.5
     if healthy and positive:
         overlap_score += 5.0
@@ -913,9 +1089,25 @@ def _decorate_strategy_overlap(item: dict, healthy_by_industry: dict[str, dict],
         parts.append(f"{healthy.get('stage') or '健康主线'}，热度 {float(heat_score):.1f}")
     if positive:
         parts.append(f"消息面 {float(news_score):+.1f}")
+    if risky:
+        parts.append("风险板块")
+    if negative:
+        parts.append(f"负向消息 {float(negative_score):+.1f}")
     reason = " / ".join(parts)
     mode = str(item.get("mode") or "")
     mode_text = "短线" if mode == "short" else "长线" if mode == "longterm" else mode or "-"
+    if healthy or positive:
+        overlap_type = "resonant"
+        overlap_type_text = "共振信号"
+        tone = "ok"
+    elif risky or negative:
+        overlap_type = "conflict"
+        overlap_type_text = "冲突信号"
+        tone = "bad"
+    else:
+        overlap_type = "orphan"
+        overlap_type_text = "孤儿信号"
+        tone = "watch"
     return {
         "trade_date": item.get("trade_date"),
         "mode": mode,
@@ -935,12 +1127,25 @@ def _decorate_strategy_overlap(item: dict, healthy_by_industry: dict[str, dict],
         "news_score_text": f"{news_score:+.1f}" if positive else "-",
         "overlap_score": overlap_score,
         "overlap_score_text": f"{overlap_score:.1f}",
+        "overlap_type": overlap_type,
+        "overlap_type_text": overlap_type_text,
+        "tone": tone,
         "reason": reason,
-        "action": _overlap_action(signal_score, heat_score, news_score, bool(healthy), bool(positive)),
+        "action": _overlap_action(signal_score, heat_score, news_score, bool(healthy), bool(positive), bool(risky), bool(negative)),
     }
 
 
-def _overlap_action(signal_score: float, heat_score: float, news_score: float, has_healthy: bool, has_news: bool) -> str:
+def _overlap_action(
+    signal_score: float,
+    heat_score: float,
+    news_score: float,
+    has_healthy: bool,
+    has_news: bool,
+    has_risky: bool = False,
+    has_negative: bool = False,
+) -> str:
+    if has_risky or has_negative:
+        return "只复盘"
     if has_healthy and has_news and signal_score >= 55:
         return "重点体检"
     if has_healthy and signal_score >= 50:
@@ -1018,12 +1223,19 @@ def _decorate_sector(item: dict) -> dict:
     return item
 
 
+def decorate_sector_candidate_for_display(item: dict) -> dict:
+    """Decorate one sector candidate for Web display."""
+    return _decorate_candidate(item)
+
+
 def _decorate_candidate(item: dict) -> dict:
     item = dict(item)
     item["candidate_score_text"] = f"{float(item.get('candidate_score') or 0):.1f}"
     item["ret_5d_text"] = _pct_text(item.get("ret_5d"))
     item["ret_10d_text"] = _pct_text(item.get("ret_10d"))
     item["stock_vs_sector_10d_text"] = _pct_text(item.get("stock_vs_sector_10d"))
+    item["sector_relative_label"] = _sector_relative_label(item.get("stock_vs_sector_10d"))
+    item["candidate_reason"] = _candidate_display_reason(item)
     item["action_tag"] = _candidate_action(item)
     item["tone"] = _candidate_tone(item["action_tag"])
     item["anchor_id"] = _sector_anchor(item.get("industry"))
@@ -1100,6 +1312,9 @@ def _candidate_action(item: dict) -> str:
         return "等分歧"
     if "退潮" in note:
         return "仅复盘"
+    relative = _num(item.get("stock_vs_sector_10d"))
+    if relative is not None and relative <= -8:
+        return "先观察"
     score = float(item.get("candidate_score") or 0)
     if score >= 70:
         return "可跟踪"
@@ -1110,9 +1325,39 @@ def _candidate_tone(action: str) -> str:
     return {
         "可跟踪": "ok",
         "继续观察": "watch",
+        "先观察": "watch",
         "等分歧": "warn",
         "仅复盘": "bad",
     }.get(action, "neutral")
+
+
+def _sector_relative_label(value) -> str:
+    number = _num(value)
+    if number is None:
+        return "相对板块"
+    if number > 0:
+        return "领先板块"
+    if number < 0:
+        return "落后板块"
+    return "贴近板块"
+
+
+def _candidate_display_reason(item: dict) -> str:
+    raw = str(item.get("candidate_reason") or "").strip()
+    relative_text = f"相对板块{_pct_text(item.get('stock_vs_sector_10d'))}"
+    if raw:
+        text = re.sub(r"强于板块[+-]?\d+(?:\.\d+)?%", relative_text, raw)
+        text = text.replace("强于板块", "相对板块")
+        if text != raw:
+            return text
+    amount = _num(item.get("amount_ratio_5d"))
+    flow = _num(item.get("net_mf_amount"))
+    parts = [relative_text]
+    if amount is not None:
+        parts.append(f"量能{amount:.2f}倍")
+    if flow is not None:
+        parts.append(f"资金{flow:+.0f}万")
+    return "，".join(parts)
 
 
 def _pct_text(value) -> str:
@@ -1129,6 +1374,10 @@ def _ratio_text(value) -> str:
     except (TypeError, ValueError):
         return "-"
     return f"{number * 100:.0f}%"
+
+
+def _date_key(value) -> str:
+    return str(value or "").replace("-", "")[:8]
 
 
 def _json_dict(raw) -> dict:

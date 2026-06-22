@@ -25,33 +25,34 @@
 </header>
 
 <section class="status-strip">
-  <div class="status-cell"><span>历史数据日</span><strong>{{ status.latest_trade_date|fmt_date }}</strong></div>
-  <div class="status-cell"><span>最近实盘运行日</span><strong>{{ latest_live_short_run.trade_date|fmt_date if latest_live_short_run else 'NA' }}</strong></div>
-  <div class="status-cell"><span>历史回测最新日</span><strong>{{ signal_summary.latest_backtest_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>行情有效日</span><strong>{{ status.latest_trade_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>最近实盘信号日</span><strong>{{ latest_live_short_run.trade_date|fmt_date if latest_live_short_run else 'NA' }}</strong></div>
+  <div class="status-cell"><span>复盘满期日</span><strong>{{ signal_summary.latest_backtest_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>数据状态</span><strong class="{{ freshness.tone if freshness else '' }}">{{ freshness.status_label if freshness else 'NA' }}</strong></div>
   <div class="status-cell"><span>长线 Elite / Watch</span><strong>{{ signal_summary.longterm_elite }} / {{ signal_summary.longterm_watch }}</strong></div>
-  <div class="status-cell"><span>最新日线 / 基础池</span><strong>{{ status.latest_daily_stock_count }} / {{ status.stock_count }}</strong></div>
+  <div class="status-cell"><span>日线 / 基础池</span><strong>{{ status.latest_daily_stock_count }} / {{ status.stock_count }}</strong></div>
 </section>
 
 <section class="panel update-panel" data-update-status-url="/update/status">
   <div>
     <h2>一键同步</h2>
-    <p>默认只做日常轻量同步：更新行情、市场上下文并运行 main.py。需要补历史复盘时再点完整同步。</p>
+    <p>优先使用完整同步：更新行情、实盘信号、短线复盘、长线审计和市场上下文；只想快速刷新当日信号时再用快速同步。</p>
     {% if update_status and update_status.message %}
-      <div class="filter-summary" data-update-message>当前状态：{{ update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
+      <div class="filter-summary {{ 'warn' if update_status.alignment_state == 'warn' else '' }}" data-update-message>当前状态：{{ update_status.display_message or update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
     {% else %}
       <div class="filter-summary" data-update-message>当前状态：尚未运行一键更新。</div>
     {% endif %}
     <pre class="update-error" data-update-error hidden></pre>
   </div>
   <div class="update-actions">
-    <form method="post" action="/update/run?mode=daily">
+    <form method="post" action="/update/run?mode=full">
       <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
-        {% if update_status and update_status.running %}正在同步{% else %}日常同步{% endif %}
+        {% if update_status and update_status.running %}正在同步{% else %}完整同步{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=full">
+    <form method="post" action="/update/run?mode=daily">
       <button class="ghost-button" type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
-        完整同步
+        快速同步
       </button>
     </form>
   </div>
@@ -85,8 +86,8 @@
 
 <section class="decision-panel {{ decision.tone }}">
   <div>
-    <div class="eyebrow">Daily Decision</div>
-    <h2>今日决策：{{ decision.level }}</h2>
+    <div class="eyebrow">Latest Decision</div>
+    <h2>最近运行决策：{{ decision.level }}</h2>
     <p>{{ decision.stance }}</p>
     <div class="hint-list compact">
       {% for item in decision.reasons %}
@@ -108,8 +109,8 @@
 <section class="panel ai-brief-panel">
   <div class="panel-head">
     <div>
-      <h2>今日AI摘要</h2>
-      <p>基于当天已入库的短线、长线和数据状态生成；AI只解释事实，不替代交易纪律。</p>
+      <h2>最近AI摘要</h2>
+      <p>基于最近已入库的短线、长线和数据状态生成；AI只解释事实，不替代交易纪律。</p>
     </div>
     <span class="tag {{ 'ok' if daily_brief.source == 'cache' else 'warn' }}">{{ 'AI已缓存' if daily_brief.source == 'cache' else '规则摘要' }}</span>
   </div>
@@ -140,7 +141,7 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>今日信号解释</h2>
+      <h2>最近信号解释</h2>
       <p>这里使用数据库中已经落地的运行事实，不用历史回测冒充今日推荐。</p>
     </div>
   </div>
@@ -166,7 +167,7 @@
     </div>
     {% if live_signals %}
     <table class="dense-table">
-      <thead><tr><th>日期</th><th>排名</th><th>股票</th><th>行业</th><th>分数</th><th>系统原因</th></tr></thead>
+      <thead><tr><th>日期</th><th>排名</th><th>股票</th><th>行业</th><th>分数</th><th>可信度</th><th>系统原因</th></tr></thead>
       <tbody>
       {% for item in live_signals[:8] %}
       <tr>
@@ -175,7 +176,13 @@
         <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
         <td>{{ item.industry or '-' }}</td>
         <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
-        <td class="reason">{{ item.recommend_reason }}</td>
+        <td><span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">{{ item.confidence_label }}</span></td>
+        <td class="reason">
+          {% if item.current_risk_blocked %}
+            <span class="tag bad" title="{{ item.current_risk_reason }}">{{ item.current_risk_label }}</span><br>
+          {% endif %}
+          {{ item.recommend_reason }}
+        </td>
       </tr>
       {% endfor %}
       </tbody>
@@ -220,7 +227,7 @@
     <a href="/signals">查看复盘表</a>
   </div>
   <table class="dense-table">
-    <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>系统原因</th><th>收益路径</th><th>盘中机会</th><th>盘中风险</th><th>复盘标签</th><th>AI状态</th></tr></thead>
+      <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>系统原因</th><th>收益路径</th><th>盘中机会</th><th>盘中风险</th><th>可信度 / 复盘</th><th>AI状态</th></tr></thead>
     <tbody>
     {% for item in backtest_signals[:8] %}
     <tr>
@@ -231,7 +238,13 @@
       <td class="{{ item.final_return_tone }}">{{ item.final_return_text }}</td>
       <td class="opportunity-cell">{% if item.performance.mfe_pct is not none %}{{ "%+.2f"|format(item.performance.mfe_pct) }}%{% else %}<span class="muted">待观察</span>{% endif %}</td>
       <td><span class="risk-pill {{ item.mae_risk_tone }}">{% if item.performance.mae_pct is not none %}{{ "%+.2f"|format(item.performance.mae_pct) }}%{% else %}待观察{% endif %}</span></td>
-      <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else item.process_tone }}">{{ item.outcome_label }} · {{ item.process_label }}</span></td>
+      <td>
+        {% if item.current_risk_blocked %}
+          <span class="tag bad" title="{{ item.current_risk_reason }}">{{ item.current_risk_label }}</span>
+        {% endif %}
+        <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">可信度：{{ item.confidence_label }}</span>
+        <span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else item.process_tone }}">{{ item.outcome_label }} · {{ item.process_label }}</span>
+      </td>
       <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
     </tr>
     {% else %}
@@ -284,7 +297,8 @@
 
   function renderStatus(status) {
     if (!status || !message || !buttons.length) return;
-    let text = `当前状态：${status.message || "状态读取中"}`;
+    const displayMessage = status.display_message || status.message || "状态读取中";
+    let text = `当前状态：${displayMessage}`;
     if (status.started_at && status.running) {
       const eta = status.mode === "full" ? "通常需要 5-30 分钟" : "通常需要 1-5 分钟";
       text += `（开始于 ${status.started_at}，${eta}）`;

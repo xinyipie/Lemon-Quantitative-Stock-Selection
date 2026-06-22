@@ -22,7 +22,7 @@
     </div>
   </div>
   <div class="hint-list compact">
-    <span><code>python daily_web_update.py --mode daily --end 最新交易日</code></span>
+    <span><code>python daily_web_update.py --mode full --end 最新交易日</code></span>
     <span><code>python main.py</code> 会写入当日实盘信号</span>
     <span>跑完后重启或刷新 Web 服务</span>
   </div>
@@ -38,7 +38,7 @@
       <td>{{ name }}</td>
       <td>{{ info.rows }}</td>
       <td>{% if info.min_date or info.max_date %}{{ info.min_date or 'NA' }} → {{ info.max_date or 'NA' }}{% else %}-{% endif %}</td>
-      <td><span class="tag {{ 'ok' if info.exists else 'bad' }}">{{ 'OK' if info.exists else '缺失' }}</span></td>
+      <td><span class="tag {{ info.status_tone or ('ok' if info.exists else 'bad') }}">{{ info.status_label or ('OK' if info.exists else '缺失') }}</span></td>
     </tr>
     {% endfor %}
     </tbody>

@@ -79,6 +79,38 @@ class LiveSignalPersistenceTest(unittest.TestCase):
         self.assertIn("回撤9.5%进入风险区", payload["risk_reasons"])
         self.assertIn("轻仓观察", payload["action_hint"])
 
+    def test_short_signal_payload_marks_factor_breakdown_completeness(self):
+        complete = pd.Series(
+            {
+                "code": "000001",
+                "score": 56.0,
+                "factor_profile": "profile_v9_sector_quality_guard",
+                "factor_inflow": 82.0,
+                "factor_sector": 61.0,
+                "factor_pattern": 38.0,
+                "factor_volume_ratio": 64.0,
+                "factor_drawdown": 52.0,
+                "factor_wyckoff": 44.0,
+            }
+        )
+        incomplete = pd.Series(
+            {
+                "code": "000002",
+                "score": 72.0,
+                "factor_profile": "profile_v9_sector_quality_guard",
+                "style_gate": "swing",
+            }
+        )
+
+        complete_payload = main._signal_factor_payload(complete)
+        incomplete_payload = main._signal_factor_payload(incomplete)
+
+        self.assertEqual(complete_payload["factor_payload_status"], "complete")
+        self.assertNotIn("factor_missing_columns", complete_payload)
+        self.assertEqual(incomplete_payload["factor_payload_status"], "incomplete")
+        self.assertIn("factor_inflow", incomplete_payload["factor_missing_columns"])
+        self.assertIn("factor_wyckoff", incomplete_payload["factor_missing_columns"])
+
     def test_elite_cooldown_suppresses_recent_repeated_alerts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "signals.db"

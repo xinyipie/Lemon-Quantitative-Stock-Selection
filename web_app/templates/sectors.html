@@ -15,7 +15,7 @@
 
 <section class="sector-hero {{ radar.summary.tone }}">
   <div>
-    <span>今日行业状态</span>
+    <span>行业状态</span>
     <h2>{{ radar.summary.headline }}</h2>
     <p>{{ radar.summary.stance }}</p>
     {% if radar.message %}
@@ -40,7 +40,7 @@
   <section class="panel radar-decision-card {{ decision.tone }}">
     <div class="panel-head">
       <div>
-        <h2>今日主线判断</h2>
+        <h2>当前主线判断</h2>
         <p>先判断市场有没有可做方向，再看个股。概念和新闻只作辅助，不单独触发买入。</p>
       </div>
       <span class="tag {{ decision.tone }}">置信度 {{ decision.confidence }}</span>
@@ -72,6 +72,14 @@
         {% endif %}
       </div>
     </div>
+    {% if decision.data_alignment %}
+      <div class="filter-summary {{ decision.data_alignment.tone }}">
+        {{ decision.data_alignment.message }}
+        行业 {{ decision.data_alignment.sector_date|fmt_date if decision.data_alignment.sector_date else "-" }}；
+        新闻 {{ decision.data_alignment.news_date|fmt_date if decision.data_alignment.news_date else "-" }}；
+        概念 {{ decision.data_alignment.concept_date|fmt_date if decision.data_alignment.concept_date else "-" }}
+      </div>
+    {% endif %}
     <div class="filter-summary">{{ decision.source_note }}</div>
   </section>
 
@@ -103,6 +111,36 @@
       </div>
     {% else %}
       <div class="empty-state soft">{{ strategy_overlap.message }}</div>
+    {% endif %}
+    {% if strategy_overlap.orphan_items or strategy_overlap.conflict_items %}
+      <div class="strategy-overlap-secondary">
+        {% if strategy_overlap.orphan_items %}
+          <div>
+            <strong>孤儿信号</strong>
+            <small>策略有分数，但暂时没有健康主线或正向消息支撑。</small>
+            {% for item in strategy_overlap.orphan_items[:3] %}
+              <a class="strategy-overlap-item muted-card" href="/stock/{{ item.ts_code }}">
+                <div><strong>{{ item.name }}</strong><span>{{ item.ts_code }} · {{ item.industry }}</span></div>
+                <div><b>{{ item.score_text }}</b><small>{{ item.action }}</small></div>
+                <p>{{ item.reason }}</p>
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if strategy_overlap.conflict_items %}
+          <div>
+            <strong>冲突信号</strong>
+            <small>策略有分数，但落在风险板块或负向消息行业，只适合复盘。</small>
+            {% for item in strategy_overlap.conflict_items[:3] %}
+              <a class="strategy-overlap-item risk-card" href="/stock/{{ item.ts_code }}">
+                <div><strong>{{ item.name }}</strong><span>{{ item.ts_code }} · {{ item.industry }}</span></div>
+                <div><b>{{ item.score_text }}</b><small>{{ item.action }}</small></div>
+                <p>{{ item.reason }}</p>
+              </a>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
     {% endif %}
   </section>
 </section>
@@ -149,6 +187,9 @@
             <span>强度 {{ item.strength_text }}</span>
             <span>{{ item.duration }}</span>
             <span>{{ item.sectors_text }}</span>
+            {% if item.mapping_confidence_text %}
+              <span>{{ item.mapping_confidence_text }}</span>
+            {% endif %}
           </div>
           <p>{{ item.reason or item.why_selected }}</p>
           <small>{{ item.why_selected }}</small>
@@ -193,6 +234,12 @@
                 <span>影响路径</span>
                 <strong>{{ item.impact_path }}</strong>
               </div>
+              {% if item.mapping_note %}
+              <div>
+                <span>映射可信度</span>
+                <strong>{{ item.mapping_note }}</strong>
+              </div>
+              {% endif %}
               <div>
                 <span>交易含义</span>
                 <strong>{{ item.trading_hint }}</strong>
@@ -349,7 +396,7 @@
             <th>分数</th>
             <th>5日</th>
             <th>10日</th>
-            <th>强于板块</th>
+            <th>相对板块</th>
             <th>动作</th>
             <th>风险提示</th>
           </tr>
@@ -362,7 +409,10 @@
             <td><strong>{{ item.candidate_score_text }}</strong></td>
             <td class="{{ 'market-up' if item.ret_5d >= 0 else 'market-down' }}">{{ item.ret_5d_text }}</td>
             <td class="{{ 'market-up' if item.ret_10d >= 0 else 'market-down' }}">{{ item.ret_10d_text }}</td>
-            <td class="{{ 'market-up' if item.stock_vs_sector_10d >= 0 else 'market-down' }}">{{ item.stock_vs_sector_10d_text }}</td>
+            <td class="{{ 'market-up' if item.stock_vs_sector_10d >= 0 else 'market-down' }}">
+              <strong>{{ item.stock_vs_sector_10d_text }}</strong>
+              <div class="muted">{{ item.sector_relative_label }}</div>
+            </td>
             <td><span class="tag {{ item.tone }}">{{ item.action_tag }}</span></td>
             <td class="reason">{{ item.risk_note }}<br><span class="muted">{{ item.candidate_reason }}</span></td>
           </tr>
