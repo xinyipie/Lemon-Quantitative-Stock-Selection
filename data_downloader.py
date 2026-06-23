@@ -88,6 +88,21 @@ def _static_path(name: str) -> str:
     return os.path.join(CACHE_DIR, f"{name}.parquet")
 
 
+def _cache_has_rows(path: str, min_rows: int = 1) -> bool:
+    """检查核心行情缓存是否真实有数据，避免空 parquet 卡住同步。"""
+    if not os.path.exists(path):
+        return False
+    try:
+        return len(pd.read_parquet(path)) >= min_rows
+    except Exception as e:
+        logger.warning(f"  缓存读取失败，将重新下载：{path} ({e})")
+        return False
+
+
+def _index_cache_min_rows() -> int:
+    return min(20, len(INDEX_CODES))
+
+
 def _save(df: pd.DataFrame, path: str):
     """保存 DataFrame 为 Parquet，所有字符串列强制 str 类型"""
     df.to_parquet(path, index=False, engine='pyarrow', compression='snappy')
@@ -223,7 +238,7 @@ def download_stock_basic(pro, force: bool = False):
 def download_daily_one_date(pro, date: str, force: bool = False) -> bool:
     """下载单个交易日的全市场日线数据"""
     path = _daily_path("daily", date)
-    if not force and os.path.exists(path):
+    if not force and _cache_has_rows(path):
         return True  # 跳过
 
     # 分批拉取：先拿全部 ts_code，再批量请求
@@ -244,7 +259,7 @@ def download_daily_one_date(pro, date: str, force: bool = False) -> bool:
 def download_daily_basic_one_date(pro, date: str, force: bool = False) -> bool:
     """下载单个交易日的换手率/量比"""
     path = _daily_path("daily_basic", date)
-    if not force and os.path.exists(path):
+    if not force and _cache_has_rows(path):
         return True
 
     df = _retry(lambda: pro.daily_basic(
@@ -261,7 +276,7 @@ def download_daily_basic_one_date(pro, date: str, force: bool = False) -> bool:
 def download_moneyflow_one_date(pro, date: str, force: bool = False) -> bool:
     """下载单个交易日的主力资金流"""
     path = _daily_path("moneyflow", date)
-    if not force and os.path.exists(path):
+    if not force and _cache_has_rows(path):
         return True
 
     df = _retry(lambda: pro.moneyflow(
@@ -280,7 +295,7 @@ def download_index_daily_one_date(pro, date: str, force: bool = False) -> bool:
     注意：Tushare index_daily 接口不支持多 ts_code 批量查询，须逐个请求再合并。
     """
     path = _daily_path("index_daily", date)
-    if not force and os.path.exists(path):
+    if not force and _cache_has_rows(path, min_rows=_index_cache_min_rows()):
         return True
 
     all_dfs = []
@@ -523,7 +538,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
 
         if not only_new:
             # daily
-            need_daily = force or not os.path.exists(_daily_path("daily", date))
+            need_daily = force or not _cache_has_rows(_daily_path("daily", date))
             if need_daily:
                 if download_daily_one_date(pro, date, force):
                     daily_ok += 1
@@ -532,7 +547,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                 daily_ok += 1
 
             # daily_basic
-            need_basic = force or not os.path.exists(_daily_path("daily_basic", date))
+            need_basic = force or not _cache_has_rows(_daily_path("daily_basic", date))
             if need_basic:
                 if download_daily_basic_one_date(pro, date, force):
                     daily_basic_ok += 1
@@ -541,7 +556,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                 daily_basic_ok += 1
 
             # moneyflow
-            need_mf = force or not os.path.exists(_daily_path("moneyflow", date))
+            need_mf = force or not _cache_has_rows(_daily_path("moneyflow", date))
             if need_mf:
                 if download_moneyflow_one_date(pro, date, force):
                     moneyflow_ok += 1
@@ -550,7 +565,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                 moneyflow_ok += 1
 
             # index_daily
-            need_idx = force or not os.path.exists(_daily_path("index_daily", date))
+            need_idx = force or not _cache_has_rows(_daily_path("index_daily", date), min_rows=_index_cache_min_rows())
             if need_idx:
                 if download_index_daily_one_date(pro, date, force):
                     index_ok += 1

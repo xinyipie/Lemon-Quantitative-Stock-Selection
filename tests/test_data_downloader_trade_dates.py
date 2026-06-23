@@ -12,6 +12,50 @@ class EmptyTradeCalPro:
         return pd.DataFrame()
 
 
+class DailyPro:
+    def __init__(self):
+        self.calls = 0
+
+    def daily(self, **kwargs):
+        self.calls += 1
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "000001.SZ",
+                    "trade_date": kwargs["trade_date"],
+                    "open": 10.0,
+                    "high": 10.5,
+                    "low": 9.8,
+                    "close": 10.2,
+                    "pct_chg": 1.0,
+                    "vol": 1000,
+                    "amount": 10000,
+                }
+            ]
+        )
+
+
+class IndexPro:
+    def __init__(self):
+        self.calls = []
+
+    def index_daily(self, **kwargs):
+        self.calls.append(kwargs["ts_code"])
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "trade_date": kwargs["trade_date"],
+                    "open": 10.0,
+                    "high": 10.5,
+                    "low": 9.8,
+                    "close": 10.2,
+                    "pct_chg": 1.0,
+                }
+            ]
+        )
+
+
 class DataDownloaderTradeDatesTest(unittest.TestCase):
     def test_get_trade_dates_falls_back_to_cached_trade_calendar_when_api_is_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,6 +132,57 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
                 self.assertEqual(dates, ["20260619", "20260622"])
             finally:
                 data_downloader.CACHE_DIR = old_cache_dir
+
+    def test_download_daily_redownloads_empty_cache_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            data_downloader.CACHE_DIR = tmp
+            try:
+                data_downloader._ensure_dirs()
+                path = Path(tmp) / "daily" / "20260618.parquet"
+                pd.DataFrame().to_parquet(path, index=False)
+                pro = DailyPro()
+
+                ok = data_downloader.download_daily_one_date(pro, "20260618")
+
+                saved = pd.read_parquet(path)
+                self.assertTrue(ok)
+                self.assertEqual(pro.calls, 1)
+                self.assertEqual(len(saved), 1)
+                self.assertEqual(saved["trade_date"].astype(str).tolist(), ["20260618"])
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+
+    def test_download_index_redownloads_incomplete_cache_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            old_index_codes = data_downloader.INDEX_CODES
+            old_sleep = data_downloader.time.sleep
+            data_downloader.CACHE_DIR = tmp
+            data_downloader.INDEX_CODES = ["000001.SH", "000300.SH", "801010.SI"]
+            data_downloader.time.sleep = lambda _seconds: None
+            try:
+                data_downloader._ensure_dirs()
+                path = Path(tmp) / "index_daily" / "20260622.parquet"
+                pd.DataFrame(
+                    [
+                        {"ts_code": "000001.SH", "trade_date": "20260622", "close": 4163.0},
+                        {"ts_code": "000300.SH", "trade_date": "20260622", "close": 5059.0},
+                    ]
+                ).to_parquet(path, index=False)
+                pro = IndexPro()
+
+                ok = data_downloader.download_index_daily_one_date(pro, "20260622")
+
+                saved = pd.read_parquet(path)
+                self.assertTrue(ok)
+                self.assertEqual(pro.calls, data_downloader.INDEX_CODES)
+                self.assertEqual(len(saved), 3)
+                self.assertEqual(set(saved["ts_code"].astype(str)), set(data_downloader.INDEX_CODES))
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+                data_downloader.INDEX_CODES = old_index_codes
+                data_downloader.time.sleep = old_sleep
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from history_store import DEFAULT_HISTORY_DB_PATH
+from market_radar.store import get_latest_market_radar_snapshot, save_market_radar_snapshot
 from signal_store import DEFAULT_DB_PATH as DEFAULT_SIGNAL_DB_PATH
 from web_app.services.history_service import get_db_status, get_stock_detail
 from web_app.services.explanation_service import get_daily_brief, get_or_create_signal_explanation
@@ -191,6 +192,15 @@ def sectors(request: Request, end: str = ""):
     concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
     decision = build_market_radar_decision(radar, concept_news)
     strategy_overlap = build_strategy_overlap(DEFAULT_SIGNAL_DB_PATH, radar, concept_news)
+    latest_radar_snapshot = None
+    brief = decision.get("research_brief") if isinstance(decision, dict) else None
+    if isinstance(brief, dict) and brief:
+        radar_date = str(radar.get("end_date") or end or "").replace("-", "")[:8]
+        try:
+            save_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH, radar_date, brief, decision)
+            latest_radar_snapshot = get_latest_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH)
+        except Exception:
+            latest_radar_snapshot = None
     return templates.TemplateResponse(
         request,
         "sectors.html",
@@ -200,6 +210,7 @@ def sectors(request: Request, end: str = ""):
             "concept_news": concept_news,
             "decision": decision,
             "strategy_overlap": strategy_overlap,
+            "latest_radar_snapshot": latest_radar_snapshot,
             "filters": {"end": end},
             "active_nav": "sectors",
         },

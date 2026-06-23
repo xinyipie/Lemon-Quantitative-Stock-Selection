@@ -17,6 +17,7 @@ from web_app.services.signal_service import (
     get_active_longterm_pool,
     get_longterm_audit_samples,
     get_signal_runs,
+    get_stock_signals,
     get_longterm_events,
     get_longterm_runs,
     get_recent_signals,
@@ -83,6 +84,53 @@ class WebServicesTest(unittest.TestCase):
 
         self.assertEqual(status["tables"]["stock_daily_basic"]["status_label"], "滞后")
         self.assertEqual(status["tables"]["stock_daily_basic"]["status_tone"], "warn")
+
+    def test_history_status_warns_when_index_daily_has_only_broad_indices(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            history_db = Path(tmpdir) / "history.db"
+            store = HistoryStore(history_db)
+            try:
+                store.upsert_dataframe(
+                    "stock_daily",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20260622", "ts_code": "000001.SZ", "close": 10.0},
+                        ]
+                    ),
+                )
+                store.upsert_dataframe(
+                    "stock_daily_basic",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20260622", "ts_code": "000001.SZ", "turnover_rate": 1.0},
+                        ]
+                    ),
+                )
+                store.upsert_dataframe(
+                    "stock_moneyflow",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20260622", "ts_code": "000001.SZ", "net_mf_amount": 10.0},
+                        ]
+                    ),
+                )
+                store.upsert_dataframe(
+                    "index_daily",
+                    pd.DataFrame(
+                        [
+                            {"trade_date": "20260622", "ts_code": "000001.SH", "close": 4163.0},
+                            {"trade_date": "20260622", "ts_code": "000300.SH", "close": 5059.0},
+                        ]
+                    ),
+                )
+            finally:
+                store.close()
+
+            status = get_db_status(history_db)
+
+        self.assertEqual(status["tables"]["index_daily"]["status_label"], "覆盖不足")
+        self.assertEqual(status["tables"]["index_daily"]["status_tone"], "warn")
+        self.assertEqual(status["tables"]["index_daily"]["latest_count"], 2)
 
     def test_signal_service_returns_recent_and_active_longterm_pool(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -212,7 +260,7 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual([item["source"] for item in live_recent], ["live", "live_report"])
         self.assertEqual(backtest_recent[0]["source_label"], "历史回测")
         self.assertEqual(backtest_recent[0]["display_name"], "平安银行")
-        self.assertEqual(backtest_recent[0]["quality_label"], "有效信号")
+        self.assertEqual(backtest_recent[0]["quality_label"], "初筛通过")
         self.assertEqual(backtest_recent[0]["outcome_label"], "短线亏损")
         self.assertEqual(backtest_recent[0]["process_label"], "曾冲高回落")
         self.assertEqual(named_recent[0]["ts_code"], "000001.SZ")
@@ -228,6 +276,68 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(short_runs[0]["signal_count"], 1)
         self.assertEqual(short_runs[0]["status_label"], "有入池标的")
         self.assertEqual([item["trade_date"] for item in mixed_short_recent[:2]], ["20250105", "20250104"])
+
+    def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                live_run = store.record_run("20260618", mode="short", profile="profile_v9_sector_quality_guard", source="live")
+                store.update_pool(
+                    live_run,
+                    "20260618",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="002326.SZ",
+                            name="永太科技",
+                            industry="化工原料",
+                            score=72.6,
+                            rank=1,
+                            factors={"factor_profile": "profile_v9_sector_quality_guard", "score": 72.6},
+                        )
+                    ],
+                )
+                review_run = store.record_run("20260618", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    review_run,
+                    "20260618",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[
+                        SignalRecord(
+                            ts_code="002326.SZ",
+                            name="永太科技",
+                            industry="化工原料",
+                            score=71.2,
+                            rank=1,
+                            factors={"signal_window_days": 1, "window_end_pct": 5.56, "mfe_pct": 7.13, "mae_pct": -2.04},
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            recent = get_recent_signals(
+                signal_db,
+                history_db=None,
+                source=["backtest_ic_short", "live"],
+                profile=["short_v9_final", "profile_v9_sector_quality_guard"],
+                mode="short",
+                limit=10,
+            )
+            stock_rows = get_stock_signals("002326.SZ", signal_db=signal_db, history_db=None, limit=10)
+
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["source"], "live")
+        self.assertEqual(recent[0]["score"], 72.6)
+        self.assertEqual(recent[0]["source_label"], "实盘记录 + 复盘表现")
+        self.assertEqual(recent[0]["final_return_text"], "待满5日")
+        self.assertEqual(recent[0]["mfe_text"], "+7.13%")
+        self.assertEqual(recent[0]["mae_text"], "-2.04%")
+        self.assertEqual(len(stock_rows), 1)
+        self.assertEqual(stock_rows[0]["source_label"], "实盘记录 + 复盘表现")
 
     def test_data_freshness_treats_backtest_lag_as_review_lag_when_live_is_current(self):
         freshness = build_data_freshness(
@@ -605,7 +715,7 @@ class WebServicesTest(unittest.TestCase):
             signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
 
         self.assertEqual(signal["factor_payload_status"], "incomplete")
-        self.assertEqual(signal["confidence_label"], "\u53ef\u89c2\u5bdf")
+        self.assertEqual(signal["confidence_label"], "\u53ea\u89c2\u5bdf")
         self.assertIn("\u56e0\u5b50\u62c6\u89e3\u4e0d\u5b8c\u6574", signal["confidence_summary"])
         self.assertIn("\u56e0\u5b50\u62c6\u89e3\u4e0d\u5b8c\u6574", signal["recommend_reason"])
         self.assertIn("factor_inflow", signal["score_tooltip"])
@@ -645,7 +755,7 @@ class WebServicesTest(unittest.TestCase):
             signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
 
         self.assertEqual(signal["factor_payload_status"], "complete")
-        self.assertEqual(signal["confidence_label"], "弱信号")
+        self.assertEqual(signal["confidence_label"], "暂不跟")
         self.assertEqual(signal["confidence_tone"], "bad")
         self.assertIn("形态分低于30", signal["confidence_summary"])
         self.assertIn("形态分低于30", signal["risk_reason_text"])
@@ -753,6 +863,56 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(signal["mae_risk_label"], "风险偏高")
         self.assertEqual(signal["mae_risk_tone"], "risk-high")
 
+    def test_short_signal_labels_are_actionable_for_review_page(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                pending_run = store.record_run("20260618", mode="short", profile="profile_v9_sector_quality_guard", source="live")
+                store.update_pool(
+                    pending_run,
+                    "20260618",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            score=52,
+                            factors={
+                                "factor_inflow": 55,
+                                "factor_sector": 52,
+                                "factor_pattern": 50,
+                                "factor_volume_ratio": 50,
+                                "factor_drawdown": 50,
+                                "factor_wyckoff": 50,
+                            },
+                        )
+                    ],
+                )
+                weak_run = store.record_run("20260610", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    weak_run,
+                    "20260610",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[SignalRecord(ts_code="000002.SZ", score=24, factors={"ret_5d": 1.0, "mfe_pct": 2.0, "mae_pct": -2.0})],
+                )
+            finally:
+                store.close()
+
+            rows = get_recent_signals(signal_db, history_db=None, limit=5)
+
+        pending = rows[0]
+        weak = rows[1]
+        self.assertEqual(pending["confidence_label"], "只观察")
+        self.assertEqual(pending["quality_label"], "线索不足")
+        self.assertEqual(pending["outcome_label"], "未满5日")
+        self.assertEqual(pending["process_label"], "等走势确认")
+        self.assertEqual(weak["confidence_label"], "暂不跟")
+        self.assertEqual(weak["quality_label"], "质量偏弱")
+        self.assertEqual(weak["outcome_label"], "未走出方向")
+        self.assertEqual(weak["process_label"], "回撤可控")
+
     def test_unmatured_short_signal_uses_soft_pending_display(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_db = Path(tmpdir) / "signals.db"
@@ -775,12 +935,49 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(signal["final_return_tone"], "muted")
         self.assertEqual(signal["mfe_text"], "待观察")
         self.assertEqual(signal["mae_text"], "待观察")
-        self.assertEqual(signal["quality_label"], "待验证信号")
-        self.assertEqual(signal["result_tag"], "待验证信号/窗口未满")
-        self.assertEqual(signal["confidence_label"], "可观察")
+        self.assertEqual(signal["quality_label"], "初筛通过")
+        self.assertEqual(signal["result_tag"], "初筛通过/未满5日")
+        self.assertEqual(signal["confidence_label"], "只观察")
         self.assertEqual(signal["confidence_tone"], "warn")
-        self.assertIn("窗口未满", signal["confidence_summary"])
+        self.assertIn("未满5日", signal["confidence_summary"])
         self.assertIn("因子拆解不完整", signal["confidence_summary"])
+
+    def test_partial_backtest_short_window_stays_pending_until_five_days(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20260618", mode="short", profile="short_v9_final", source="backtest_ic_short")
+                store.update_pool(
+                    run_id,
+                    "20260618",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[
+                        SignalRecord(
+                            ts_code="002326.SZ",
+                            score=72.56,
+                            factors={
+                                "signal_window_days": 1,
+                                "window_end_pct": 5.56,
+                                "mfe_pct": 7.13,
+                                "mae_pct": -2.04,
+                            },
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
+
+        self.assertEqual(signal["final_return_text"], "待满5日")
+        self.assertEqual(signal["final_return_tone"], "muted")
+        self.assertEqual(signal["outcome_label"], "未满5日")
+        self.assertEqual(signal["quality_label"], "初筛通过")
+        self.assertIn("MFE+7.13%", signal["process_text"])
+        self.assertIn("未满5日", signal["confidence_summary"])
+        self.assertNotIn("已满期样本短线盈利", signal["confidence_summary"])
 
     def test_short_signal_confidence_downgrades_weak_matured_signal(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -806,7 +1003,7 @@ class WebServicesTest(unittest.TestCase):
 
             signal = get_recent_signals(signal_db, history_db=None, limit=1)[0]
 
-        self.assertEqual(signal["confidence_label"], "弱信号")
+        self.assertEqual(signal["confidence_label"], "暂不跟")
         self.assertEqual(signal["confidence_tone"], "bad")
         self.assertIn("分数偏低", signal["confidence_summary"])
         self.assertIn("短线亏损", signal["confidence_summary"])

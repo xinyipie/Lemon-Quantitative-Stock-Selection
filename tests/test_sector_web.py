@@ -113,6 +113,30 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("消息筛选链路", response.text)
         self.assertIn("消息评级", response.text)
 
+    def test_sector_page_renders_market_radar_v2_sections(self):
+        client = TestClient(app)
+
+        response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("market-radar-v2-brief", response.text)
+        self.assertIn("radar-summary-bar", response.text)
+        self.assertIn("radar-workbench", response.text)
+        self.assertIn("event-workbench-main", response.text)
+        self.assertIn("event-impact-columns", response.text)
+        self.assertIn("risk-column", response.text)
+        self.assertIn("positive-column", response.text)
+        self.assertIn("radar-side-rail", response.text)
+        self.assertIn("event-watchlist-panel", response.text)
+        self.assertIn("sector-thesis-panel", response.text)
+        self.assertIn("stock-evidence-panel", response.text)
+        self.assertIn("research-grid", response.text)
+        self.assertIn("stock-evidence-table", response.text)
+        self.assertIn("review-loop-panel", response.text)
+        self.assertIn("event-verify", response.text)
+        self.assertIn("stock-evidence-reasons", response.text)
+        self.assertLess(response.text.find("market-radar-v2-brief"), response.text.find("sector-hero"))
+
     def test_concept_news_radar_reads_cache_and_signal_boosts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_db = Path(tmpdir) / "signals.db"
@@ -313,6 +337,11 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(radar["news"]["items"][0]["quality"], "产业政策")
         self.assertIn("入选依据", radar["news"]["items"][0]["why_selected"])
         self.assertEqual(radar["news"]["items"][1]["grade"], "B级")
+        self.assertEqual(radar["event_summary"]["event_count"], 2)
+        self.assertEqual(radar["event_summary"]["positive_count"], 1)
+        self.assertEqual(radar["events"][0]["materiality"], "A")
+        self.assertEqual(radar["events"][0]["event_type"], "产业政策")
+        self.assertTrue(radar["events"][0]["verification_points"])
 
     def test_news_cache_merges_duplicate_news_and_adds_trade_details(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -596,6 +625,148 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("https://example.com/news/1", response.text)
         self.assertIn("2000亿设备更新", response.text)
 
+    def test_sector_page_persists_market_radar_snapshot_when_brief_exists(self):
+        client = TestClient(app)
+        fake_radar = {
+            "end_date": "20260622",
+            "summary": {
+                "tone": "neutral",
+                "headline": "行业热度测试",
+                "stance": "仅测试",
+                "top_sector": "-",
+                "top_stage": "-",
+                "top_score": 0,
+                "healthy_count": 0,
+                "healthy_display_count": 0,
+                "risky_count": 0,
+                "risky_display_count": 0,
+            },
+            "message": "",
+            "healthy": [],
+            "risky": [],
+            "candidate_groups": [],
+        }
+        fake_news = {
+            "concepts": {"items": [], "message": "", "source_kind": "empty"},
+            "theme_filter": {"items": []},
+            "news": {"source_date": "20260622", "selection": {}, "positive": [], "negative": [], "message": "", "items": []},
+            "events": [],
+            "event_summary": {"event_count": 0},
+        }
+        fake_brief = {
+            "headline": "仍待验证：无清晰主线。",
+            "snapshot_summary": {"event_count": 1, "thesis_count": 0, "stock_count": 1, "risk_count": 0},
+            "risk_blocker": {
+                "level": "暂停新关注",
+                "tone": "danger",
+                "reason": "计算机 命中A级负面事件：美国限制外国获取AI模型",
+                "research_guardrail": "先记录风险释放和承接修复。",
+            },
+            "event_groups": {
+                "risk": [
+                    {
+                        "title": "美国限制外国获取AI模型",
+                        "impact_label": "利空",
+                        "impact_tone": "bad",
+                        "materiality": "A",
+                        "impact_degree_text": "A级利空：可能改变板块风险偏好",
+                        "effect_summary": "压制计算机风险偏好，先看风险是否释放。",
+                        "event_type": "监管",
+                        "source_quality": "主流财经",
+                        "mapping_confidence": "medium",
+                        "mapped_industries": ["计算机"],
+                        "original_source": "财联社",
+                        "collection_source": "本地新闻缓存",
+                        "publish_time": "2026-06-22 09:15:00",
+                        "collected_at": "2026-06-22 20:00:00",
+                        "catalyst_clock": "D0 新催化",
+                        "verification_points": ["观察计算机是否继续释放风险"],
+                        "industry_anchor": "thesis-计算机",
+                        "stock_anchor": "stocks-计算机",
+                        "source_url": "https://example.com/ai",
+                    }
+                ],
+                "positive": [],
+                "unverified": [],
+                "all": [],
+            },
+            "mainlines": [],
+            "event_watchlist": [
+                {
+                    "title": "美国限制外国获取AI模型",
+                    "materiality": "A",
+                    "event_type": "监管",
+                    "source_quality": "主流财经",
+                    "mapping_confidence": "medium",
+                    "mapped_industries": ["计算机"],
+                    "source_name": "财联社",
+                    "publish_time": "2026-06-22 09:15:00",
+                    "collected_at": "2026-06-22 20:00:00",
+                    "catalyst_clock": "D0 新催化",
+                    "verification_points": ["观察计算机是否继续释放风险"],
+                }
+            ],
+            "sector_theses": [],
+            "stock_watchlist": [
+                {
+                    "ts_code": "688721.SH",
+                    "name": "龙图光罩",
+                    "industry": "半导体",
+                    "stock_role": "领涨",
+                    "event_relevance": "行业主线受益",
+                    "market_behavior": "放量承接",
+                    "research_action": "可重点跟踪",
+                    "resonance_level": "★★★",
+                    "resonance_label": "策略+主线+事件共振",
+                    "reason_cards": [{"type": "量价", "label": "放量承接"}],
+                    "validation_conditions": ["盘中观察：半导体前60分钟成交额是否高于近5日同段均值。"],
+                }
+            ],
+            "risk_board": [],
+            "verification_checklist": [],
+            "data_quality": {"tone": "ok"},
+        }
+        fake_decision = {
+            "tone": "neutral",
+            "confidence": "低",
+            "alignment": "无清晰主线",
+            "primary_action": "观察",
+            "explanation": "",
+            "focus_industries": [],
+            "avoid_industries": [],
+            "source_note": "",
+            "research_brief": fake_brief,
+        }
+        with patch("web_app.app.build_sector_radar", return_value=fake_radar), patch(
+            "web_app.app.build_concept_news_radar", return_value=fake_news
+        ), patch("web_app.app.build_market_radar_decision", return_value=fake_decision), patch(
+            "web_app.app.build_strategy_overlap", return_value={"items": [], "message": "无"}
+        ), patch("web_app.app.save_market_radar_snapshot", return_value=1) as save_snapshot, patch(
+            "web_app.app.get_latest_market_radar_snapshot",
+            return_value={"radar_date": "20260622", "headline": fake_brief["headline"]},
+        ):
+            response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        save_snapshot.assert_called_once()
+        self.assertEqual(save_snapshot.call_args.args[1], "20260622")
+        self.assertIn("风险阻断", response.text)
+        self.assertIn("暂停新关注", response.text)
+        self.assertIn("风险优先", response.text)
+        self.assertIn("利好催化", response.text)
+        self.assertIn("待核验", response.text)
+        self.assertIn("利空 A级", response.text)
+        self.assertIn("A级利空：可能改变板块风险偏好", response.text)
+        self.assertIn("原始来源：财联社", response.text)
+        self.assertIn("采集来源：本地新闻缓存", response.text)
+        self.assertIn('href="#thesis-计算机"', response.text)
+        self.assertIn('href="https://example.com/ai"', response.text)
+        self.assertIn('class="event-title-link"', response.text)
+        self.assertIn("来源：财联社", response.text)
+        self.assertIn("发布：2026-06-22 09:15:00", response.text)
+        self.assertIn("★★★ 策略+主线+事件共振", response.text)
+        self.assertIn("前60分钟成交额", response.text)
+
     def test_risky_sector_actions_are_nuanced(self):
         heat_rows = [
             {
@@ -652,6 +823,24 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("暂不参与", actions)
         self.assertIn("等待企稳", actions)
 
+    def test_sector_candidate_action_labels_are_actionable(self):
+        strong = decorate_sector_candidate_for_display(
+            {"candidate_score": 82, "stock_vs_sector_10d": 3.0, "risk_note": ""}
+        )
+        normal = decorate_sector_candidate_for_display(
+            {"candidate_score": 55, "stock_vs_sector_10d": 1.0, "risk_note": ""}
+        )
+        overheated = decorate_sector_candidate_for_display(
+            {"candidate_score": 88, "stock_vs_sector_10d": 12.0, "risk_note": "位置偏高，不追高"}
+        )
+
+        self.assertEqual(strong["action_tag"], "可重点跟踪")
+        self.assertEqual(strong["tone"], "ok")
+        self.assertEqual(normal["action_tag"], "先放观察池")
+        self.assertEqual(normal["tone"], "watch")
+        self.assertEqual(overheated["action_tag"], "等回踩确认")
+        self.assertEqual(overheated["tone"], "warn")
+
     def test_market_radar_decision_identifies_mainline_alignment(self):
         radar = {
             "end_date": "20260616",
@@ -678,6 +867,136 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(decision["focus_industries"], ["计算机"])
         self.assertIn("优先", decision["primary_action"])
         self.assertIn("银行", decision["avoid_industries"])
+        self.assertEqual(decision["top_thesis"]["industry"], "计算机")
+        self.assertEqual(decision["top_thesis"]["thesis_label"], "主线共振")
+        self.assertTrue(decision["sector_theses"])
+
+    def test_market_radar_decision_uses_event_thesis_when_news_group_is_missing(self):
+        radar = {
+            "end_date": "20260616",
+            "summary": {"market_line": "有主线", "healthy_count": 1, "risky_count": 0},
+            "healthy": [
+                {"industry": "机械设备", "stage": "趋势延续", "heat_score": 84, "volume_ratio": 1.4},
+            ],
+            "risky": [],
+        }
+        concept_news = {
+            "news": {"positive": [], "negative": []},
+            "events": [
+                {
+                    "title": "设备更新项目清单下达",
+                    "event_type": "产业政策",
+                    "impact": "positive",
+                    "materiality": "A",
+                    "mapped_industries": ["机械设备"],
+                    "mapping_confidence": "medium",
+                    "source_quality": "官方/监管",
+                    "verification_points": ["观察机械设备是否放量承接"],
+                }
+            ],
+            "concepts": {"items": []},
+            "theme_filter": {"items": []},
+        }
+
+        decision = build_market_radar_decision(radar, concept_news)
+
+        self.assertEqual(decision["alignment"], "主线共振")
+        self.assertEqual(decision["focus_industries"], ["机械设备"])
+        self.assertEqual(decision["top_thesis"]["research_action"], "可重点跟踪")
+
+    def test_market_radar_decision_outputs_stock_watchlist_evidence_cards(self):
+        radar = {
+            "end_date": "20260616",
+            "summary": {"market_line": "有主线", "healthy_count": 1, "risky_count": 0},
+            "healthy": [
+                {"industry": "机械设备", "stage": "趋势延续", "heat_score": 84, "volume_ratio": 1.4},
+            ],
+            "risky": [],
+            "candidates": [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "设备龙头",
+                    "industry": "机械设备",
+                    "candidate_score": 82,
+                    "ret_5d": 4.2,
+                    "ret_10d": 9.5,
+                    "stock_vs_sector_10d": 5.6,
+                    "volume_ratio": 1.8,
+                    "risk_note": "",
+                }
+            ],
+        }
+        concept_news = {
+            "news": {"positive": [], "negative": []},
+            "events": [
+                {
+                    "title": "设备更新项目清单下达",
+                    "event_type": "产业政策",
+                    "impact": "positive",
+                    "materiality": "A",
+                    "mapped_industries": ["机械设备"],
+                    "mapping_confidence": "medium",
+                    "source_quality": "官方/监管",
+                    "verification_points": ["观察机械设备是否放量承接"],
+                }
+            ],
+            "concepts": {"items": []},
+            "theme_filter": {"items": []},
+        }
+
+        decision = build_market_radar_decision(radar, concept_news)
+
+        self.assertEqual(decision["stock_watchlist"][0]["ts_code"], "000001.SZ")
+        self.assertEqual(decision["stock_watchlist"][0]["event_relevance"], "行业主线受益")
+        self.assertEqual(decision["stock_watchlist"][0]["research_action"], "可重点跟踪")
+        self.assertTrue(decision["stock_watchlist"][0]["reason_cards"])
+
+    def test_market_radar_decision_outputs_review_loop(self):
+        radar = {
+            "end_date": "20260616",
+            "summary": {"market_line": "有主线", "healthy_count": 1, "risky_count": 0},
+            "healthy": [
+                {"industry": "机械设备", "stage": "趋势延续", "heat_score": 84, "volume_ratio": 1.4},
+            ],
+            "risky": [],
+            "candidates": [
+                {
+                    "ts_code": "000001.SZ",
+                    "name": "设备龙头",
+                    "industry": "机械设备",
+                    "candidate_score": 82,
+                    "ret_10d": 9.5,
+                    "stock_vs_sector_10d": 5.6,
+                    "volume_ratio": 1.8,
+                }
+            ],
+        }
+        concept_news = {
+            "news": {"positive": [], "negative": []},
+            "events": [
+                {
+                    "title": "设备更新项目清单下达",
+                    "event_type": "产业政策",
+                    "impact": "positive",
+                    "materiality": "A",
+                    "mapped_industries": ["机械设备"],
+                    "mapping_confidence": "medium",
+                    "source_quality": "官方/监管",
+                    "verification_points": ["观察机械设备是否放量承接"],
+                }
+            ],
+            "concepts": {"items": []},
+            "theme_filter": {"items": []},
+        }
+
+        decision = build_market_radar_decision(radar, concept_news)
+
+        self.assertEqual(decision["review_loop"]["closing_judgement"], "主线已验证")
+        self.assertEqual(decision["review_loop"]["validated_mainlines"][0]["industry"], "机械设备")
+        self.assertTrue(decision["review_loop"]["next_day_watch_points"])
+        self.assertEqual(decision["research_brief"]["mainlines"][0]["industry"], "机械设备")
+        self.assertEqual(decision["research_brief"]["event_watchlist"][0]["title"], "设备更新项目清单下达")
+        self.assertTrue(decision["research_brief"]["verification_checklist"])
 
     def test_strategy_overlap_uses_real_signals_inside_healthy_or_news_sectors(self):
         radar = {

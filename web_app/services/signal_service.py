@@ -77,7 +77,7 @@ def get_recent_signals(
             filters.append("p.industry = ?")
             params.append(industry)
         where_sql = "where " + " and ".join(filters) if filters else ""
-        fetch_limit = max(limit * 10, 500) if query else limit
+        fetch_limit = max(limit * 10, 500) if query else max(limit * 4, limit)
         params.append(fetch_limit)
         rows = conn.execute(
             f"""
@@ -93,6 +93,7 @@ def get_recent_signals(
             params,
         ).fetchall()
         signals = _enrich_stock_identity([_row_to_signal(row) for row in rows], history_db)
+        signals = _merge_duplicate_short_review_signals(signals)
         _attach_current_risk_guard_status(signals, history_db)
         _attach_confidence_status(signals)
         if query:
@@ -400,13 +401,14 @@ def get_stock_signals(
             order by p.trade_date desc, p.rank asc, p.id desc
             limit ?
             """,
-            (ts_code, limit),
+            (ts_code, max(limit * 4, limit)),
         ).fetchall()
         signals = _enrich_stock_identity([_row_to_signal(row) for row in rows], history_db)
+        signals = _merge_duplicate_short_review_signals(signals)
         _attach_current_risk_guard_status(signals, history_db)
         _attach_confidence_status(signals)
         _attach_explanation_status(signals, conn)
-        return signals
+        return signals[:limit]
     finally:
         conn.close()
 
@@ -926,7 +928,7 @@ def build_dashboard_decision(
         tone = "watch"
     else:
         level = "今日不宜开新仓"
-        stance = "强信号为空时，系统的价值是提醒你别硬做；可以把精力放到自选股体检和历史复盘。"
+        stance = "重点信号为空时，系统的价值是提醒你别硬做；可以把精力放到自选股体检和历史复盘。"
         tone = "caution"
 
     next_actions = [
@@ -1011,6 +1013,75 @@ def _row_to_signal(row: sqlite3.Row) -> dict:
     item["source_label"] = "历史回测" if item.get("source") == "backtest_ic_short" else "实盘记录"
     item["profile_label"] = _signal_profile_label(item.get("profile"), item.get("mode"))
     return item
+
+
+def _merge_duplicate_short_review_signals(signals: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    by_key: dict[tuple[str, str, str], dict] = {}
+    for item in signals:
+        if str(item.get("mode") or "").lower() != "short":
+            merged.append(item)
+            continue
+        key = (str(item.get("trade_date") or ""), str(item.get("ts_code") or ""), "short")
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = item
+            merged.append(item)
+            continue
+        primary, secondary = _pick_short_review_primary(existing, item)
+        if primary is not existing:
+            index = merged.index(existing)
+            merged[index] = primary
+            by_key[key] = primary
+        _merge_short_review_performance(primary, secondary)
+    return merged
+
+
+def _pick_short_review_primary(left: dict, right: dict) -> tuple[dict, dict]:
+    left_rank = _short_review_source_priority(left)
+    right_rank = _short_review_source_priority(right)
+    if right_rank < left_rank:
+        return right, left
+    return left, right
+
+
+def _short_review_source_priority(item: dict) -> int:
+    source = str(item.get("source") or "")
+    return {
+        "live": 0,
+        "live_report": 1,
+        "backtest_ic_short": 2,
+    }.get(source, 3)
+
+
+def _merge_short_review_performance(primary: dict, secondary: dict) -> None:
+    performance = dict(primary.get("performance") or {})
+    secondary_perf = secondary.get("performance") or {}
+    for key in ("ret_5d", "ret_10d", "ret_20d", "mfe_pct", "mae_pct", "window_end_pct", "signal_window_days"):
+        if performance.get(key) is None and secondary_perf.get(key) is not None:
+            performance[key] = secondary_perf.get(key)
+    primary["performance"] = performance
+    sources = {str(primary.get("source") or ""), str(secondary.get("source") or "")}
+    if "live" in sources and "backtest_ic_short" in sources:
+        primary["source_label"] = "实盘记录 + 复盘表现"
+    _refresh_short_performance_fields(primary)
+
+
+def _refresh_short_performance_fields(item: dict) -> None:
+    performance = item.get("performance") or {}
+    item["final_return_text"] = _final_return_text(performance)
+    item["final_return_tone"] = _final_return_tone(performance)
+    item["mfe_text"] = _short_path_text(performance.get("mfe_pct"), pending="待观察")
+    item["mae_text"] = _short_path_text(performance.get("mae_pct"), pending="待观察")
+    item["process_text"] = _process_text(performance)
+    item["performance_text"] = _performance_text(performance)
+    item["quality_label"] = _quality_label(item)
+    item["outcome_label"] = _outcome_label(item)
+    item["process_label"] = _process_label(item)
+    item["process_tone"] = _process_tone(item["process_label"])
+    item["mae_risk_label"] = _mae_risk_label(item)
+    item["mae_risk_tone"] = _mae_risk_tone(item["mae_risk_label"])
+    item["result_tag"] = _result_tag(item)
 
 
 def _signal_profile_label(profile: str | None, mode: str | None = None) -> str:
@@ -1163,13 +1234,13 @@ def _signal_confidence(item: dict) -> tuple[str, str, list[str]]:
         strong_line, watch_line = 60, 45
 
     if score >= strong_line:
-        label = "强信号"
-        reasons = [f"分数 {score:.1f} 达到强信号层"]
+        label = "重点看"
+        reasons = [f"分数 {score:.1f} 达到重点跟踪层"]
     elif score >= watch_line:
-        label = "可观察"
+        label = "只观察"
         reasons = [f"分数 {score:.1f} 达到观察层"]
     else:
-        label = "弱信号"
+        label = "暂不跟"
         reasons = [f"分数偏低（{score:.1f}）"]
 
     if mode == "longterm":
@@ -1187,17 +1258,17 @@ def _signal_confidence(item: dict) -> tuple[str, str, list[str]]:
 
     pattern_score = _num((item.get("factors") or {}).get("factor_pattern"))
     if pattern_score is not None and pattern_score < 30:
-        reasons.append(f"形态分低于30（{pattern_score:.0f}），不宜按强信号理解")
-        label = "弱信号"
+        reasons.append(f"形态分低于30（{pattern_score:.0f}），不宜按重点跟踪理解")
+        label = "暂不跟"
 
     perf = item.get("performance") or {}
-    pending = all(perf.get(key) is None for key in ("ret_5d", "window_end_pct", "mfe_pct", "mae_pct"))
+    pending = _is_short_window_pending(perf)
     outcome = item.get("outcome_label")
     process = item.get("process_label")
     mae_label = item.get("mae_risk_label")
 
     if pending:
-        reasons.append("窗口未满，仍需后续复盘验证")
+        reasons.append("未满5日，仍需后续复盘验证")
     elif outcome == "短线盈利":
         reasons.append("已满期样本短线盈利")
     elif outcome == "短线亏损":
@@ -1208,8 +1279,8 @@ def _signal_confidence(item: dict) -> tuple[str, str, list[str]]:
         reasons.append("盘中曾给出较好兑现机会")
     elif process == "曾冲高回落":
         reasons.append("盘中冲高回落，追高体验较差")
-        if label == "强信号":
-            label = "可观察"
+        if label == "重点看":
+            label = "只观察"
     elif process == "回撤偏大":
         reasons.append("盘中回撤偏大")
         label = _downgrade_confidence(label)
@@ -1219,25 +1290,25 @@ def _signal_confidence(item: dict) -> tuple[str, str, list[str]]:
         label = _downgrade_confidence(label)
     elif mae_label == "需警惕":
         reasons.append("MAE已进入需警惕区间")
-        if label == "强信号":
-            label = "可观察"
+        if label == "重点看":
+            label = "只观察"
 
     return label, _confidence_tone(label), reasons[:5]
 
 
 def _downgrade_confidence(label: str) -> str:
-    if label == "强信号":
-        return "可观察"
-    if label == "可观察":
-        return "弱信号"
+    if label == "重点看":
+        return "只观察"
+    if label == "只观察":
+        return "暂不跟"
     return label
 
 
 def _confidence_tone(label: str) -> str:
     return {
-        "强信号": "ok",
-        "可观察": "warn",
-        "弱信号": "bad",
+        "重点看": "ok",
+        "只观察": "warn",
+        "暂不跟": "bad",
         "风险排除": "bad",
     }.get(label, "")
 
@@ -1472,11 +1543,22 @@ def _derive_risk_reasons(item: dict) -> list[str]:
 
 
 def _performance(factors: dict) -> dict:
-    keys = ["ret_5d", "ret_10d", "ret_20d", "mfe_pct", "mae_pct", "window_end_pct"]
+    keys = ["ret_5d", "ret_10d", "ret_20d", "mfe_pct", "mae_pct", "window_end_pct", "signal_window_days"]
     return {key: _num(factors.get(key)) for key in keys}
 
 
+def _is_short_window_pending(perf: dict) -> bool:
+    if perf.get("ret_5d") is not None:
+        return False
+    window_days = perf.get("signal_window_days")
+    if window_days is not None:
+        return window_days < 5
+    return all(perf.get(key) is None for key in ("window_end_pct", "mfe_pct", "mae_pct"))
+
+
 def _final_return_text(perf: dict) -> str:
+    if _is_short_window_pending(perf):
+        return "待满5日"
     for key, label in [
         ("ret_5d", "5日"),
         ("ret_10d", "10日"),
@@ -1490,6 +1572,8 @@ def _final_return_text(perf: dict) -> str:
 
 
 def _final_return_tone(perf: dict) -> str:
+    if _is_short_window_pending(perf):
+        return "muted"
     for key in ["ret_5d", "ret_10d", "ret_20d", "window_end_pct"]:
         value = perf.get(key)
         if value is not None:
@@ -1531,29 +1615,28 @@ def _performance_text(perf: dict) -> str:
 
 
 def _quality_label(item: dict) -> str:
-    perf = item.get("performance") or {}
-    if all(perf.get(key) is None for key in ("ret_5d", "window_end_pct", "mfe_pct", "mae_pct")):
-        return "待验证信号"
     score = _num(item.get("score")) or 0
     if score < 30:
-        return "弱信号"
-    if score < 45:
-        return "观察信号"
-    return "有效信号"
+        return "质量偏弱"
+    if score < 60:
+        return "线索不足"
+    return "初筛通过"
 
 
 def _outcome_label(item: dict) -> str:
     perf = item.get("performance") or {}
+    if _is_short_window_pending(perf):
+        return "未满5日"
     ret5 = perf.get("ret_5d")
     window_end = perf.get("window_end_pct")
     primary = ret5 if ret5 is not None else window_end
     if primary is None:
-        return "窗口未满"
+        return "未满5日"
     if primary >= 3:
         return "短线盈利"
     if primary <= -5:
         return "短线亏损"
-    return "震荡"
+    return "未走出方向"
 
 
 def _process_label(item: dict) -> str:
@@ -1568,8 +1651,8 @@ def _process_label(item: dict) -> str:
     if mae is not None and mae <= -8:
         return "回撤偏大"
     if ret5 is None and mfe is None and mae is None:
-        return "待观察"
-    return "波动正常"
+        return "等走势确认"
+    return "回撤可控"
 
 
 def _process_tone(label: str) -> str:

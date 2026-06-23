@@ -13,6 +13,294 @@
   </form>
 </header>
 
+{% set concept_items = concept_news.concepts.get("items", []) %}
+{% set theme_items = concept_news.theme_filter.get("items", []) if concept_news.theme_filter else [] %}
+{% set news_positive = concept_news.news.get("positive", []) %}
+{% set news_negative = concept_news.news.get("negative", []) %}
+{% set news_items = concept_news.news.get("items", []) %}
+{% set news_selection = concept_news.news.get("selection", {}) %}
+{% set brief = decision.get("research_brief", {}) %}
+{% set brief_quality = brief.get("data_quality", {}) %}
+{% macro render_event_card(event) -%}
+<article class="event-decision-card {{ event.impact_tone or 'neutral' }}">
+  <div class="event-decision-head">
+    <span class="impact-badge {{ event.impact_tone or 'neutral' }}">{{ event.impact_label or event.impact or "待判定" }} {{ event.materiality }}级</span>
+    <span>{{ event.mapped_industries|join("、") or "相关行业" }}</span>
+    <span>{{ event.source_quality or "来源待核验" }}</span>
+    <span>{{ event.catalyst_clock or "时效未知" }}</span>
+  </div>
+  <h3>
+    {% if event.source_url %}
+      <a class="event-title-link" href="{{ event.source_url }}" target="_blank" rel="noopener">{{ event.title }}</a>
+    {% else %}
+      {{ event.title }}
+    {% endif %}
+  </h3>
+  <p class="event-impact-text">{{ event.impact_degree_text or event.effect_summary or event.risk_note }}</p>
+  <p>{{ event.effect_summary or event.risk_note }}</p>
+  <div class="event-source-meta detailed">
+    <span>原始来源：{{ event.original_source or event.source_name or "未知" }}</span>
+    <span>采集来源：{{ event.collection_source or "本地新闻缓存" }}</span>
+    <span>发布：{{ event.publish_time or "未知" }}</span>
+    <span>采集：{{ event.collected_at or event.source_date or "未知" }}</span>
+  </div>
+  {% if event.verification_points %}
+    <ul class="event-verify">
+      {% for point in event.verification_points[:2] %}
+        <li>{{ point }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <div class="event-jump-links">
+    {% if event.industry_anchor %}<a href="#{{ event.industry_anchor }}">看相关行业</a>{% endif %}
+    {% if event.stock_anchor %}<a href="#{{ event.stock_anchor }}">看相关个股</a>{% endif %}
+    {% if event.source_url %}<a href="{{ event.source_url }}" target="_blank" rel="noopener">看原文</a>{% else %}<span>原文缺失</span>{% endif %}
+  </div>
+</article>
+{%- endmacro %}
+
+<section class="market-radar-v2-brief radar-summary-bar panel {{ brief.data_quality.tone if brief.data_quality else decision.tone }}">
+  <div class="panel-head">
+    <div>
+      <h2>研究员简报</h2>
+      <p>{{ brief.headline or decision.alignment }}</p>
+    </div>
+    <div class="brief-status">
+      <span class="tag {{ brief.data_quality.tone if brief.data_quality else decision.tone }}">{{ decision.confidence }}</span>
+      {% if latest_radar_snapshot %}
+        <small>已保存复盘 {{ latest_radar_snapshot.radar_date|fmt_date }}</small>
+      {% endif %}
+    </div>
+  </div>
+  {% if brief.risk_blocker %}
+  <div class="risk-blocker {{ brief.risk_blocker.tone }}">
+    <div>
+      <span>风险阻断</span>
+      <strong>{{ brief.risk_blocker.level }}</strong>
+    </div>
+    <p>{{ brief.risk_blocker.reason }}</p>
+    <small>{{ brief.risk_blocker.research_guardrail }}</small>
+  </div>
+  {% endif %}
+  <div class="brief-summary-grid">
+    <div>
+      <span>市场判断</span>
+      <strong>{{ decision.alignment }}</strong>
+      <p>{{ brief.market_regime_note or decision.primary_action }}</p>
+    </div>
+    <div>
+      <span>事件</span>
+      <strong>{{ brief.snapshot_summary.event_count if brief.snapshot_summary else 0 }}</strong>
+      <p>有效事件，最高等级 {{ brief.event_summary.top_materiality if brief.event_summary else "-" }}</p>
+    </div>
+    <div>
+      <span>行业 thesis</span>
+      <strong>{{ brief.snapshot_summary.thesis_count if brief.snapshot_summary else 0 }}</strong>
+      <p>按事件、量价、风险综合审计</p>
+    </div>
+    <div>
+      <span>个股证据</span>
+      <strong>{{ brief.snapshot_summary.stock_count if brief.snapshot_summary else 0 }}</strong>
+      <p>只作研究观察清单</p>
+    </div>
+  </div>
+</section>
+
+<section class="radar-workbench">
+  <section class="panel event-watchlist-panel event-workbench-main redesigned">
+    {% set event_groups = brief.event_groups or {} %}
+    <div class="panel-head">
+      <div>
+        <h2>关键事件</h2>
+        <p>先按风险、催化和来源可信度分流，再看影响程度和验证路径。</p>
+      </div>
+    </div>
+    <div class="event-filter-tabs">
+      <a href="#event-risk">风险优先 <b>{{ (event_groups.risk or [])|length }}</b></a>
+      <a href="#event-positive">利好催化 <b>{{ (event_groups.positive or [])|length }}</b></a>
+      <a href="#event-unverified">待核验 <b>{{ (event_groups.unverified or [])|length }}</b></a>
+      <a href="#event-all">全部事件 <b>{{ (event_groups.all or brief.event_watchlist or [])|length }}</b></a>
+    </div>
+
+    <div class="event-impact-columns">
+      <div class="event-group-section impact-column risk-column" id="event-risk">
+        <div class="event-group-title"><strong>风险优先</strong><span>先处理利空和冲突，避免利好噪音干扰。</span></div>
+        {% if event_groups.risk %}
+          <div class="event-decision-list">
+            {% for event in event_groups.risk[:4] %}{{ render_event_card(event) }}{% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-state soft">暂无明确风险事件。</div>
+        {% endif %}
+      </div>
+
+      <div class="event-group-section impact-column positive-column" id="event-positive">
+        <div class="event-group-title"><strong>利好催化</strong><span>只作为催化线索，仍需量价承接验证。</span></div>
+        {% if event_groups.positive %}
+          <div class="event-decision-list">
+            {% for event in event_groups.positive[:4] %}{{ render_event_card(event) }}{% endfor %}
+          </div>
+        {% else %}
+          <div class="empty-state soft">暂无高优先级利好催化。</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="event-group-section compact" id="event-unverified">
+      <div class="event-group-title"><strong>待核验</strong><span>来源不完整或映射较泛，默认降权。</span></div>
+      {% if event_groups.unverified %}
+        <div class="event-decision-list">
+          {% for event in event_groups.unverified[:3] %}{{ render_event_card(event) }}{% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state soft">暂无待核验事件。</div>
+      {% endif %}
+    </div>
+
+    <div class="event-group-section compact" id="event-all">
+      <div class="event-group-title"><strong>全部事件</strong><span>用于复盘检索，不作为默认阅读顺序。</span></div>
+      {% if event_groups.all or brief.event_watchlist %}
+        <div class="event-all-list">
+          {% for event in (event_groups.all or brief.event_watchlist)[:8] %}
+            <span class="event-all-chip {{ event.impact_tone or 'neutral' }}">{{ event.impact_label or event.impact }} {{ event.materiality }}级 · {{ event.title }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel review-loop-panel radar-side-rail">
+    <div class="panel-head">
+      <div>
+        <h2>复盘闭环</h2>
+        <p>记录主线是否被市场验证，以及下一交易日要核验什么。</p>
+      </div>
+      {% if decision.review_loop %}
+        <span class="tag {{ 'warn' if decision.review_loop.closing_judgement in ['风险优先', '仍待验证'] else 'ok' }}">{{ decision.review_loop.closing_judgement }}</span>
+      {% endif %}
+    </div>
+    {% if brief.verification_checklist %}
+      <ul class="v2-check-list">
+        {% for point in brief.verification_checklist[:5] %}
+          <li>{{ point }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="empty-state soft">暂无次日核验点。</div>
+    {% endif %}
+    <div class="side-rail-block">
+      <h3>风险审计</h3>
+      {% if brief.risk_board %}
+        <ul class="rail-risk-list">
+          {% for risk in brief.risk_board[:5] %}
+            <li><strong>{{ risk.target or risk.type }}</strong><span>{{ risk.reason }}</span></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="empty-state soft">暂无强风险项。</div>
+      {% endif %}
+    </div>
+    <div class="side-rail-block">
+      <h3>数据状态</h3>
+      <div class="rail-data-grid">
+        <span>行业</span><strong>{{ brief_quality.sector_date or "-" }}</strong>
+        <span>新闻</span><strong>{{ brief_quality.news_date or "-" }}</strong>
+        <span>概念</span><strong>{{ brief_quality.concept_date or "-" }}</strong>
+        <span>来源</span><strong>{{ brief_quality.news_source_count or 0 }}</strong>
+      </div>
+    </div>
+  </section>
+</section>
+
+<section class="research-grid">
+  <section class="panel sector-thesis-panel">
+    <div class="panel-head">
+      <div>
+        <h2>行业 Thesis</h2>
+        <p>把行业热度、事件质量、风险冲突合成研究判断。</p>
+      </div>
+    </div>
+    {% if brief.sector_theses %}
+      <div class="thesis-grid">
+        {% for thesis in brief.sector_theses[:6] %}
+        <article class="v2-mini-card" id="thesis-{{ thesis.industry }}">
+          <div class="v2-card-title">
+            <strong>{{ thesis.industry }}</strong>
+            <span class="tag {{ 'ok' if thesis.research_action == '可重点跟踪' else 'warn' if thesis.research_action == '等回踩确认' else 'watch' }}">{{ thesis.research_action }}</span>
+          </div>
+          <p>{{ thesis.thesis_label }} · 置信度 {{ thesis.conviction }} · {{ thesis.thesis_score }}分</p>
+          <small>{{ thesis.summary }}</small>
+          {% if thesis.evidence %}
+            <div class="thesis-evidence">
+              {% for item in thesis.evidence[:2] %}
+                <span>{{ item }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state soft">暂无行业 thesis。</div>
+    {% endif %}
+  </section>
+
+  <section class="panel stock-evidence-panel">
+    <div class="panel-head">
+      <div>
+        <h2>个股证据卡</h2>
+        <p>拆分量价、事件、策略和风险证据，避免只看单一分数。</p>
+      </div>
+    </div>
+    {% if brief.stock_watchlist %}
+      <div class="stock-evidence-table-wrap">
+        <table class="dense-table stock-evidence-table">
+          <thead>
+            <tr>
+              <th>股票</th>
+              <th>行业</th>
+              <th>共振</th>
+              <th>角色</th>
+              <th>动作</th>
+              <th>验证条件</th>
+              <th>证据/风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for stock in brief.stock_watchlist[:8] %}
+            <tr id="stocks-{{ stock.industry }}">
+              <td><a href="/stock/{{ stock.ts_code }}"><strong>{{ stock.name or stock.ts_code }}</strong><br><span class="muted">{{ stock.ts_code }}</span></a></td>
+              <td>{{ stock.industry }}</td>
+              <td><span class="resonance-chip">{{ stock.resonance_level or "★" }} {{ stock.resonance_label or "待补证据" }}</span></td>
+              <td><strong>{{ stock.stock_role }}</strong><br><span class="muted">{{ stock.event_relevance }} · {{ stock.market_behavior }}</span></td>
+              <td><span class="tag {{ 'ok' if stock.research_action == '可重点跟踪' else 'warn' if stock.research_action == '等回踩确认' else 'watch' }}">{{ stock.research_action }}</span></td>
+              <td class="stock-validation-cell">
+                {% if stock.validation_conditions %}
+                  {{ stock.validation_conditions[0] }}
+                {% else %}
+                  等待板块承接验证。
+                {% endif %}
+              </td>
+              <td>
+                {% if stock.reason_cards %}
+                  <div class="stock-evidence-reasons">
+                    {% for card in stock.reason_cards[:3] %}
+                      <span><b>{{ card.type }}</b>{{ card.label }}</span>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state soft">暂无个股证据卡。</div>
+    {% endif %}
+  </section>
+</section>
+
 <section class="sector-hero {{ radar.summary.tone }}">
   <div>
     <span>行业状态</span>
@@ -28,13 +316,6 @@
     <div><span>风险板块</span><strong>{{ radar.summary.risky_count }}</strong><small>当前展示 {{ radar.summary.risky_display_count }} 个 · 过热高潮/退潮中</small></div>
   </div>
 </section>
-
-{% set concept_items = concept_news.concepts.get("items", []) %}
-{% set theme_items = concept_news.theme_filter.get("items", []) if concept_news.theme_filter else [] %}
-{% set news_positive = concept_news.news.get("positive", []) %}
-{% set news_negative = concept_news.news.get("negative", []) %}
-{% set news_items = concept_news.news.get("items", []) %}
-{% set news_selection = concept_news.news.get("selection", {}) %}
 
 <section class="radar-decision-grid">
   <section class="panel radar-decision-card {{ decision.tone }}">

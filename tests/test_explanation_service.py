@@ -140,7 +140,7 @@ class ExplanationServiceTest(unittest.TestCase):
             "score": 66.57,
             "basis_text": "v9分 66.6 / 资金70 / 板块52 / 形态10",
             "performance_text": "5日-10.87% / MFE+8.24% / MAE-8.24%",
-            "quality_label": "有效信号",
+            "quality_label": "初筛通过",
             "outcome_label": "短线亏损",
             "process_label": "曾冲高回落",
         }
@@ -159,9 +159,9 @@ class ExplanationServiceTest(unittest.TestCase):
             "ts_code": "000012.SZ",
             "display_name": "南玻A",
             "display_code": "000012.SZ",
-            "quality_label": "有效信号",
-            "outcome_label": "窗口未满",
-            "process_label": "待观察",
+            "quality_label": "初筛通过",
+            "outcome_label": "未满5日",
+            "process_label": "等走势确认",
             "recommend_reason": "资金分较强；板块热度较好",
             "risk_reason_text": "形态38分偏弱；量比3.20偏热",
             "score_explain": {
@@ -183,18 +183,18 @@ class ExplanationServiceTest(unittest.TestCase):
             "ts_code": "002326.SZ",
             "display_name": "永太科技",
             "display_code": "002326.SZ",
-            "quality_label": "待验证信号",
-            "outcome_label": "窗口未满",
-            "process_label": "待观察",
+            "quality_label": "初筛通过",
+            "outcome_label": "未满5日",
+            "process_label": "等走势确认",
             "recommend_reason": "v9分较高，规则保留为重点跟踪",
-            "confidence_label": "强信号",
-            "confidence_summary": "分数 72.6 达到强信号层；窗口未满，仍需后续复盘验证",
+            "confidence_label": "重点看",
+            "confidence_summary": "分数 72.6 达到重点跟踪层；未满5日，仍需后续复盘验证",
         }
 
         doc = build_fallback_explanation(signal)
 
-        self.assertIn("可信度：强信号", doc["summary"])
-        self.assertTrue(any("窗口未满" in item for item in doc["risks"]))
+        self.assertIn("可信度：重点看", doc["summary"])
+        self.assertTrue(any("未满5日" in item for item in doc["risks"]))
 
     def test_get_or_create_signal_explanation_calls_ai_once_and_caches(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -352,9 +352,9 @@ class ExplanationServiceTest(unittest.TestCase):
                     "ts_code": "000012.SZ",
                     "display_name": "南玻A",
                     "display_code": "000012.SZ",
-                    "quality_label": "有效信号",
-                    "outcome_label": "震荡",
-                    "process_label": "波动正常",
+                    "quality_label": "初筛通过",
+                    "outcome_label": "未走出方向",
+                    "process_label": "回撤可控",
                 }
             )
             conn = sqlite3.connect(signal_db)

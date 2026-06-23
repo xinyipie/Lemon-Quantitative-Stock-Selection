@@ -11,6 +11,11 @@ import sqlite3
 from pathlib import Path
 
 from history_store import DEFAULT_HISTORY_DB_PATH
+from market_radar.brief import build_research_brief
+from market_radar.events import build_event_summary, build_events_from_news_payload
+from market_radar.review_loop import build_review_loop
+from market_radar.sector_thesis import build_sector_theses
+from market_radar.stock_evidence import build_stock_evidence
 from sector_heat_diagnostics import (
     _latest_trade_date,
     calculate_sector_heat,
@@ -89,9 +94,13 @@ def build_concept_news_radar(
     concepts = _load_concept_heat(cache_dir=cache_dir, today=today, limit=limit)
     if not concepts.get("items"):
         concepts = _concepts_from_news_impacts(news, limit=limit) or concepts
+    events = list(news.get("events") or [])
+    event_summary = news.get("event_summary") or build_event_summary(events)
     return {
         "concepts": concepts,
         "news": news,
+        "events": events,
+        "event_summary": event_summary,
         "theme_filter": _load_theme_filter(cache_dir=cache_dir, today=today, limit=limit),
     }
 
@@ -104,11 +113,17 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
     positive = list(news.get("positive") or [])
     negative = list(news.get("negative") or [])
     data_alignment = _market_data_alignment(radar, concept_news)
+    thesis_events = list(concept_news.get("events") or []) or _events_from_news_groups(positive, negative, news.get("source_date"))
+    sector_theses = build_sector_theses(radar, thesis_events)
+    top_thesis = sector_theses[0] if sector_theses else None
+    stock_watchlist = build_stock_evidence(list(radar.get("candidates") or []), sector_theses)
 
     healthy_names = [str(item.get("industry") or "") for item in healthy if item.get("industry")]
     positive_names = [str(item.get("industry") or "") for item in positive if item.get("industry")]
     negative_names = [str(item.get("industry") or "") for item in negative if item.get("industry")]
     aligned = [name for name in healthy_names if name in set(positive_names)]
+    if top_thesis and top_thesis.get("thesis_label") == "主线共振":
+        aligned = [str(top_thesis.get("industry") or "")]
 
     if aligned:
         alignment = "主线共振"
@@ -160,7 +175,7 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
     if not data_alignment["aligned"] and confidence == "高":
         confidence = "中"
 
-    return {
+    decision = {
         "alignment": alignment,
         "confidence": confidence,
         "tone": tone,
@@ -170,8 +185,14 @@ def build_market_radar_decision(radar: dict, concept_news: dict) -> dict:
         "avoid_action": avoid_text,
         "explanation": explanation,
         "data_alignment": data_alignment,
+        "sector_theses": sector_theses,
+        "top_thesis": top_thesis,
+        "stock_watchlist": stock_watchlist,
         "source_note": "以本地行业热度、入库信号新闻/概念因子和概念缓存综合判断；外部概念接口缺失时不参与决策。",
     }
+    decision["review_loop"] = build_review_loop(decision)
+    decision["research_brief"] = build_research_brief(decision, concept_news, radar)
+    return decision
 
 
 def _market_data_alignment(radar: dict, concept_news: dict) -> dict:
@@ -193,6 +214,47 @@ def _market_data_alignment(radar: dict, concept_news: dict) -> dict:
         "theme_date": theme_date,
         "message": "数据日期已对齐。" if aligned else "行业热度与消息/概念日期不一致，共振结论只作参考。",
     }
+
+
+def _events_from_news_groups(positive: list[dict], negative: list[dict], source_date: str | None = None) -> list[dict]:
+    events = []
+    for row in positive:
+        industry = str(row.get("industry") or "").strip()
+        if not industry:
+            continue
+        events.append(
+            {
+                "title": f"{industry}正面新闻/概念线索",
+                "event_type": "新闻线索",
+                "impact": "positive",
+                "materiality": "B" if float(row.get("impact_score") or 0) >= 20 else "C",
+                "mapped_industries": [industry],
+                "mapping_confidence": "medium",
+                "source_quality": "来源待核验",
+                "verification_points": [f"观察{industry}是否放量承接并出现策略信号扩散"],
+                "risk_note": "由旧新闻分组生成，需结合原始事件继续核验。",
+                "source_date": str(source_date or ""),
+            }
+        )
+    for row in negative:
+        industry = str(row.get("industry") or "").strip()
+        if not industry:
+            continue
+        events.append(
+            {
+                "title": f"{industry}负面新闻/风险线索",
+                "event_type": "风险提示",
+                "impact": "negative",
+                "materiality": "B" if abs(float(row.get("impact_score") or 0)) >= 10 else "C",
+                "mapped_industries": [industry],
+                "mapping_confidence": "medium",
+                "source_quality": "来源待核验",
+                "verification_points": [f"观察{industry}是否继续释放风险"],
+                "risk_note": "负面新闻线索需要优先核验风险影响范围。",
+                "source_date": str(source_date or ""),
+            }
+        )
+    return events
 
 
 def build_strategy_overlap(
@@ -618,12 +680,15 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
             source_date = str(payload.get("date") or path.stem.replace("news_sector_", ""))
             items = _decorate_news_items(payload, limit=limit)
             selection = _build_news_selection_summary(payload, positive, negative, items)
+            events = build_events_from_news_payload(payload, limit=max(limit * 2, limit))
             return {
                 "source_date": source_date,
                 "source_name": path.name,
                 "positive": positive,
                 "negative": negative,
                 "items": items,
+                "events": events,
+                "event_summary": build_event_summary(events),
                 "selection": selection,
                 "message": "",
             }
@@ -1309,24 +1374,23 @@ def _stage_tone(stage) -> str:
 def _candidate_action(item: dict) -> str:
     note = str(item.get("risk_note") or "")
     if "不追高" in note:
-        return "等分歧"
+        return "等回踩确认"
     if "退潮" in note:
         return "仅复盘"
     relative = _num(item.get("stock_vs_sector_10d"))
     if relative is not None and relative <= -8:
-        return "先观察"
+        return "先放观察池"
     score = float(item.get("candidate_score") or 0)
     if score >= 70:
-        return "可跟踪"
-    return "继续观察"
+        return "可重点跟踪"
+    return "先放观察池"
 
 
 def _candidate_tone(action: str) -> str:
     return {
-        "可跟踪": "ok",
-        "继续观察": "watch",
-        "先观察": "watch",
-        "等分歧": "warn",
+        "可重点跟踪": "ok",
+        "先放观察池": "watch",
+        "等回踩确认": "warn",
         "仅复盘": "bad",
     }.get(action, "neutral")
 

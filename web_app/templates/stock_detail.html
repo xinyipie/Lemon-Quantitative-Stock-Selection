@@ -165,7 +165,7 @@
       <td class="{% if item.performance.mfe_pct is none %}muted-cell{% endif %}">{{ item.mfe_text }}</td>
       <td><span class="tag {{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}soft-tag{% endif %}">{{ item.mae_text }}{% if item.performance.mae_pct is not none %} · {{ item.mae_risk_label }}{% endif %}</span></td>
       <td><span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">{{ item.confidence_label }}</span></td>
-      <td><span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span></td>
+      <td><span class="tag {{ 'ok' if item.quality_label == '初筛通过' else 'warn' if item.quality_label == '线索不足' else 'bad' if item.quality_label == '质量偏弱' else '' }}">{{ item.quality_label }}</span></td>
       <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span></td>
       <td><span class="tag {{ item.process_tone }}">{{ item.process_label }}</span></td>
       <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>

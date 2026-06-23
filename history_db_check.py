@@ -21,6 +21,8 @@ DATE_COLUMNS = {
     "income": "ann_date",
 }
 
+MIN_INDEX_DAILY_LATEST_COUNT = 20
+
 
 def check_history_db(db_path: str | Path = DEFAULT_HISTORY_DB_PATH) -> dict:
     db_path = Path(db_path)
@@ -55,6 +57,14 @@ def check_history_db(db_path: str | Path = DEFAULT_HISTORY_DB_PATH) -> dict:
             if latest_trade_date and tables["stock_daily"]["exists"]
             else {"latest_count": daily_stock_count, "recent_median": None, "coverage_ratio": None, "status_label": "OK"}
         )
+        if latest_trade_date and tables.get("index_daily", {}).get("exists"):
+            tables["index_daily"]["latest_count"] = _count_distinct_where(
+                conn,
+                "index_daily",
+                "ts_code",
+                "trade_date",
+                latest_trade_date,
+            )
         _attach_table_status_labels(tables, latest_trade_date)
         if daily_coverage.get("status_label") == "覆盖不足":
             tables["stock_daily"]["status_label"] = "覆盖不足"
@@ -122,6 +132,10 @@ def _attach_table_status_labels(tables: dict, latest_trade_date: str | None) -> 
         max_date = info.get("max_date")
         if table in same_day_tables and latest_trade_date and max_date and str(max_date) < str(latest_trade_date):
             info["status_label"] = "滞后"
+            info["status_tone"] = "warn"
+            continue
+        if table == "index_daily" and latest_trade_date and int(info.get("latest_count") or 0) < MIN_INDEX_DAILY_LATEST_COUNT:
+            info["status_label"] = "覆盖不足"
             info["status_tone"] = "warn"
             continue
         info["status_label"] = "OK"

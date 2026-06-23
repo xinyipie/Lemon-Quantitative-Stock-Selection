@@ -96,7 +96,7 @@
           <span class="tag bad" title="{{ item.current_risk_reason }}">{{ item.current_risk_label }}</span>
           {% endif %}
           <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">可信度：{{ item.confidence_label }}</span>
-          <span class="tag {{ 'ok' if item.quality_label == '有效信号' else 'warn' if item.quality_label == '观察信号' else '' }}">{{ item.quality_label }}</span>
+          <span class="tag {{ 'ok' if item.quality_label == '初筛通过' else 'warn' if item.quality_label == '线索不足' else 'bad' if item.quality_label == '质量偏弱' else '' }}">{{ item.quality_label }}</span>
           <span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span>
           <span class="tag {{ item.process_tone }}">{{ item.process_label }}</span>
         </div>

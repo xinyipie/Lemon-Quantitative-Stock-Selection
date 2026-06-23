@@ -205,7 +205,7 @@ def build_fallback_daily_brief(facts: dict) -> dict:
     positives = []
     risks = []
     if live_count:
-        positives.append(f"短线 live 信号有 {live_count} 条，代表系统发现了可跟踪的局部机会。")
+        positives.append(f"短线 live 信号有 {live_count} 条，代表系统发现了可重点跟踪的局部机会。")
         if short_names:
             positives.append(f"当前重点观察：{'、'.join(short_names)}。")
     else:
@@ -241,9 +241,9 @@ def build_fallback_daily_brief(facts: dict) -> dict:
 def build_fallback_explanation(signal: dict) -> dict:
     name = signal.get("display_name") or signal.get("name") or signal.get("ts_code")
     code = signal.get("display_code") or signal.get("ts_code")
-    outcome = signal.get("outcome_label") or "窗口未满"
-    process = signal.get("process_label") or "待观察"
-    quality = signal.get("quality_label") or "观察信号"
+    outcome = signal.get("outcome_label") or "未满5日"
+    process = signal.get("process_label") or "等走势确认"
+    quality = signal.get("quality_label") or "线索不足"
     basis = signal.get("basis_text") or "-"
     performance = signal.get("performance_text") or "-"
     confidence_label = str(signal.get("confidence_label") or "").strip()
@@ -257,22 +257,22 @@ def build_fallback_explanation(signal: dict) -> dict:
     risks = []
     positives.extend(rule_reasons[:3])
     risks.extend(risk_reasons[:3])
-    if quality == "有效信号":
-        positives.append("系统评分达到有效信号层级，说明当时至少有若干因子形成共振。")
-    elif quality == "观察信号":
+    if quality in {"初筛通过", "通过初筛", "有效信号"}:
+        positives.append("系统评分达到初筛通过层级，说明当时至少有若干因子形成共振。")
+    elif quality in {"线索不足", "只观察", "观察信号"}:
         positives.append("信号具备部分线索，但强度还不足以视为高置信机会。")
     else:
         risks.append("系统评分偏低，更适合作为复盘样本，而不是重点关注对象。")
 
     if confidence_label:
         confidence_text = f"可信度：{confidence_label}"
-        if confidence_label in {"强信号"}:
+        if confidence_label in {"重点看", "强信号"}:
             positives.append(confidence_text)
         else:
             risks.append(confidence_text)
     if confidence_summary:
         for part in [item.strip() for item in confidence_summary.split("；") if item.strip()]:
-            if any(token in part for token in ("风险", "亏损", "回撤", "窗口未满", "排除", "偏低")):
+            if any(token in part for token in ("风险", "亏损", "回撤", "窗口未满", "未满5日", "排除", "偏低")):
                 risks.append(part)
             else:
                 positives.append(part)

@@ -21,7 +21,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("最近实盘短线", response.text)
         self.assertIn("快速检测", response.text)
 
-        self.assertIn("日常同步", response.text)
+        self.assertIn("快速同步", response.text)
         self.assertIn("完整同步", response.text)
         self.assertIn("单股体检", response.text)
         self.assertNotIn("批量体检自选股", response.text)
@@ -37,6 +37,13 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 303)
         start_update.assert_called_once_with(mode="full")
+
+    def test_dashboard_update_button_labels_match_actions_after_polling(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('action="/update/run?mode=full"', response.text)
+        self.assertIn('button.textContent = index === 0 ? "完整同步" : "快速同步"', response.text)
 
     def test_update_status_endpoint_returns_json(self):
         with patch("web_app.app.read_update_status") as read_status:
@@ -87,7 +94,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("机会", response.text)
         self.assertIn("风险", response.text)
         self.assertIn("AI状态", response.text)
-        self.assertIn("待验证信号", response.text)
+        self.assertIn("初筛通过", response.text)
         self.assertIn("可信度", response.text)
         self.assertIn("short_v9_final", response.text)
 
