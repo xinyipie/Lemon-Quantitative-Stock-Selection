@@ -23,6 +23,34 @@ git switch codex/strategy-research
 python research/nightly_strategy_runner.py --until 08:00
 ```
 
+## Windows 任务计划兜底
+
+Codex App 自动化可能受应用未唤醒、电脑睡眠或调度环境影响。项目里额外提供 Windows 任务计划兜底，直接由系统每天 20:00 调 PowerShell 跑研究脚本。
+
+安装或重装任务：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_nightly_strategy_research_task.ps1 -StartTime 20:00
+```
+
+手动验证一次：
+
+```powershell
+Start-ScheduledTask -TaskName "Stock Nightly Strategy Research"
+```
+
+查看任务状态：
+
+```powershell
+Get-ScheduledTaskInfo -TaskName "Stock Nightly Strategy Research"
+```
+
+任务日志：
+
+```text
+reports/research/nightly/logs/nightly_strategy_research_YYYYMMDD_HHMMSS.log
+```
+
 输出目录：
 
 ```text
@@ -57,4 +85,3 @@ reports/research/nightly/YYYYMMDD/nightly_strategy_research_YYYYMMDD.md
 - 增加候选策略自动登记表，只允许标注为 `research_only`。
 - 将夜间报告写入研究数据库，供 Web 端展示。
 - 做一个 Codex skill，但当前脚本 + 自动化已经能满足今晚无人值守。
-
