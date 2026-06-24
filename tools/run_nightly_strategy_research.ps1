@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Continue"
 
 $ProjectDir = Split-Path -Parent $PSScriptRoot
+$EvidenceRoot = if ($env:NIGHTLY_RESEARCH_EVIDENCE_ROOT) { $env:NIGHTLY_RESEARCH_EVIDENCE_ROOT } else { $ProjectDir }
 $Until = if ($env:NIGHTLY_RESEARCH_UNTIL) { $env:NIGHTLY_RESEARCH_UNTIL } else { "08:00" }
 $LogDir = Join-Path $ProjectDir "reports\research\nightly\logs"
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -17,6 +18,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 Write-Log "=== Stock nightly strategy research started ==="
 Write-Log "ProjectDir=$ProjectDir"
+Write-Log "EvidenceRoot=$EvidenceRoot"
 Write-Log "Until=$Until"
 Write-Log "LogFile=$LogFile"
 
@@ -43,7 +45,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Log "Running nightly strategy runner ..."
-(& python research\nightly_strategy_runner.py --until $Until 2>&1) | ForEach-Object { Write-Log $_ }
+(& python research\nightly_strategy_runner.py --until $Until --evidence-root $EvidenceRoot 2>&1) | ForEach-Object { Write-Log $_ }
 $exitCode = $LASTEXITCODE
 
 Write-Log "RunnerExitCode=$exitCode"

@@ -42,6 +42,42 @@ class NightlyStrategyRunnerTest(unittest.TestCase):
         self.assertIn("strategy_research_overview.py", " ".join(fake.command_texts))
         self.assertIn("official_strategy_health_check.py", " ".join(fake.command_texts))
 
+    def test_uses_separate_evidence_root_for_research_inputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "runner"
+            evidence_root = Path(tmpdir) / "evidence"
+            root.mkdir()
+            evidence_root.mkdir()
+            fake = _FakeRunner(branch="codex/strategy-research")
+
+            result = run_nightly_research(
+                root=root,
+                evidence_root=evidence_root,
+                until="23:59",
+                runner=fake,
+                now_text="2026-06-22 20:00:00",
+            )
+
+        self.assertTrue(result["ok"])
+        command_text = " ".join(fake.command_texts)
+        self.assertIn(str(evidence_root), command_text)
+        self.assertNotIn(f"--root {root}", command_text)
+
+    def test_report_file_name_includes_timestamp_to_avoid_same_day_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            fake = _FakeRunner(branch="codex/strategy-research")
+
+            result = run_nightly_research(
+                root=root,
+                until="23:59",
+                runner=fake,
+                now_text="2026-06-22 20:15:30",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["report"].endswith("nightly_strategy_research_20260622_201530.md"))
+
 
 class _FakeRunner:
     def __init__(self, branch: str):

@@ -59,6 +59,7 @@ RESEARCH_TASKS = (
 
 def run_nightly_research(
     root: str | Path = ".",
+    evidence_root: str | Path | None = None,
     until: str = "08:00",
     runner: ResearchRunner | None = None,
     now_text: str | None = None,
@@ -66,6 +67,7 @@ def run_nightly_research(
 ) -> dict:
     """Run one nightly research sweep and write a summary report."""
     root_path = Path(root).resolve()
+    evidence_path = Path(evidence_root).resolve() if evidence_root else root_path
     run = runner or subprocess.run
     now = _parse_now(now_text)
 
@@ -83,9 +85,9 @@ def run_nightly_research(
     output_dir.mkdir(parents=True, exist_ok=True)
     tasks = []
     for task in RESEARCH_TASKS:
-        tasks.append(_run_task(root_path, output_dir, task, run))
+        tasks.append(_run_task(root_path, evidence_path, output_dir, task, run))
 
-    report_path = output_dir / f"nightly_strategy_research_{now.strftime('%Y%m%d')}.md"
+    report_path = output_dir / f"nightly_strategy_research_{now.strftime('%Y%m%d_%H%M%S')}.md"
     ok = all(task["returncode"] == 0 for task in tasks)
     message = "夜间研究巡检完成。" if ok else "夜间研究巡检存在失败任务，请先看报告。"
     report_path.write_text(
@@ -93,6 +95,7 @@ def run_nightly_research(
             now=now,
             until=until,
             branch=branch,
+            evidence_root=evidence_path,
             ok=ok,
             message=message,
             tasks=tasks,
@@ -128,13 +131,13 @@ def _current_branch(root: Path, runner: ResearchRunner) -> str:
     return (result.stdout or "").strip()
 
 
-def _run_task(root: Path, output_dir: Path, task: dict, runner: ResearchRunner) -> dict:
+def _run_task(root: Path, evidence_root: Path, output_dir: Path, task: dict, runner: ResearchRunner) -> dict:
     output_path = output_dir / task["output"]
     command = [
         sys.executable,
         task["script"],
         "--root",
-        str(root),
+        str(evidence_root),
         "--output",
         str(output_path),
     ]
@@ -183,6 +186,7 @@ def _format_report(
     now: datetime,
     until: str,
     branch: str,
+    evidence_root: Path,
     ok: bool,
     message: str,
     tasks: list[dict],
@@ -194,6 +198,7 @@ def _format_report(
         f"- 开始时间：`{now.strftime('%Y-%m-%d %H:%M:%S')}`",
         f"- 目标截止：`{until}`",
         f"- 分支：`{branch}`",
+        f"- 证据目录：`{evidence_root}`",
         f"- 状态：`{'完成' if ok else '有失败任务'}`",
         f"- 结论：{message}",
         "",
@@ -232,12 +237,14 @@ def _format_report(
 def main() -> int:
     parser = argparse.ArgumentParser(description="运行夜间策略研究巡检并生成总报告。")
     parser.add_argument("--root", default=".", help="项目根目录")
+    parser.add_argument("--evidence-root", default=None, help="历史回测/报告等研究证据目录；默认等于项目根目录")
     parser.add_argument("--until", default="08:00", help="研究目标截止时间，仅写入报告")
     parser.add_argument("--allow-any-branch", action="store_true", help="调试用：允许非研究分支运行")
     args = parser.parse_args()
 
     result = run_nightly_research(
         root=args.root,
+        evidence_root=args.evidence_root,
         until=args.until,
         allow_any_branch=args.allow_any_branch,
     )

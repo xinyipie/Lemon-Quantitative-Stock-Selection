@@ -27,10 +27,18 @@ python research/nightly_strategy_runner.py --until 08:00
 
 Codex App 自动化可能受应用未唤醒、电脑睡眠或调度环境影响。项目里额外提供 Windows 任务计划兜底，直接由系统每天 20:00 调 PowerShell 跑研究脚本。
 
+推荐把研究分支放在独立 worktree 中运行，例如：
+
+```text
+C:\tmp\stock-strategy-research
+```
+
+这样白天主工作区可以停在 `main` 做稳定版维护，夜间研究任务仍然固定在 `codex/strategy-research`。研究脚本可以通过 `EvidenceRoot` 读取主工作区的历史回测、数据库和报告数据。
+
 安装或重装任务：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_nightly_strategy_research_task.ps1 -StartTime 20:00
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\install_nightly_strategy_research_task.ps1 -StartTime 20:00 -EvidenceRoot "E:\代码项目\stock"
 ```
 
 手动验证一次：

@@ -1,12 +1,18 @@
 param(
     [string]$TaskName = "Stock Nightly Strategy Research",
-    [string]$StartTime = "20:00"
+    [string]$StartTime = "20:00",
+    [string]$EvidenceRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 $ScriptPath = Join-Path $ProjectDir "tools\run_nightly_strategy_research.ps1"
+if (-not $EvidenceRoot) {
+    $EvidenceRoot = $ProjectDir
+}
+$EscapedEvidenceRoot = $EvidenceRoot.Replace("'", "''")
+$EscapedScriptPath = $ScriptPath.Replace("'", "''")
 
 Write-Host "========================================"
 Write-Host "  Install Stock Nightly Research Task"
@@ -14,6 +20,7 @@ Write-Host "========================================"
 Write-Host "TaskName:  $TaskName"
 Write-Host "StartTime: $StartTime"
 Write-Host "Script:    $ScriptPath"
+Write-Host "Evidence:  $EvidenceRoot"
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath $ScriptPath)) {
@@ -23,7 +30,7 @@ if (-not (Test-Path -LiteralPath $ScriptPath)) {
 
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    -Argument "-NoProfile -ExecutionPolicy Bypass -Command `"`$env:NIGHTLY_RESEARCH_EVIDENCE_ROOT='$EscapedEvidenceRoot'; & '$EscapedScriptPath'`""
 
 $trigger = New-ScheduledTaskTrigger -Daily -At $StartTime
 $settings = New-ScheduledTaskSettingsSet `
