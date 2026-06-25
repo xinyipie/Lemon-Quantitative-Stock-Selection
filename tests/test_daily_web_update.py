@@ -1,11 +1,14 @@
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from daily_web_update import (
     build_longterm_periods,
     current_half_year_period,
+    latest_history_trade_date,
+    latest_short_backtest_date,
     next_calendar_day,
     run_update,
 )
@@ -25,6 +28,20 @@ class DailyWebUpdateTest(unittest.TestCase):
 
     def test_next_calendar_day(self):
         self.assertEqual(next_calendar_day("20260529"), "20260530")
+
+    def test_latest_history_trade_date_treats_empty_sqlite_as_empty_history(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "stock_history.db"
+            db_path.touch()
+
+            self.assertIsNone(latest_history_trade_date(db_path))
+
+    def test_latest_short_backtest_date_treats_empty_sqlite_as_empty_signal_db(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "stock_signals.db"
+            db_path.touch()
+
+            self.assertIsNone(latest_short_backtest_date(db_path))
 
     def test_run_update_refreshes_market_context_before_main(self):
         calls = []

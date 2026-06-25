@@ -42,6 +42,8 @@ def get_recent_signals(
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        if not _tables_exist(conn, "signal_pool", "signal_runs"):
+            return []
         filters = []
         params: list = []
         if source:
@@ -111,6 +113,8 @@ def get_active_longterm_pool(signal_db: str | Path = DEFAULT_DB_PATH) -> list[di
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        if not _tables_exist(conn, "pool_state"):
+            return []
         rows = conn.execute(
             """
             select mode, profile, ts_code, name, industry, state,
@@ -140,6 +144,8 @@ def get_signal_runs(
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        if not _tables_exist(conn, "signal_runs", "signal_pool"):
+            return []
         filters = []
         params: list = []
         if mode:
@@ -193,6 +199,8 @@ def get_longterm_runs(signal_db: str | Path = DEFAULT_DB_PATH, limit: int = 20) 
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        if not _tables_exist(conn, "signal_runs", "signal_pool"):
+            return []
         rows = conn.execute(
             """
             select r.run_id, r.trade_date, r.profile, r.source, r.label, r.created_at,
@@ -1097,6 +1105,18 @@ def _signal_profile_label(profile: str | None, mode: str | None = None) -> str:
     return str(profile or "-")
 
 
+def _tables_exist(conn: sqlite3.Connection, *table_names: str) -> bool:
+    if not table_names:
+        return True
+    placeholders = ",".join(["?"] * len(table_names))
+    rows = conn.execute(
+        f"select name from sqlite_master where type = 'table' and name in ({placeholders})",
+        table_names,
+    ).fetchall()
+    existing = {row[0] for row in rows}
+    return all(name in existing for name in table_names)
+
+
 def _enrich_stock_identity(signals: list[dict], history_db: str | Path | None) -> list[dict]:
     if not signals or not history_db or not Path(history_db).exists():
         return signals
@@ -1107,6 +1127,8 @@ def _enrich_stock_identity(signals: list[dict], history_db: str | Path | None) -
     conn = sqlite3.connect(history_db)
     conn.row_factory = sqlite3.Row
     try:
+        if not _tables_exist(conn, "stock_basic"):
+            return signals
         rows = conn.execute(
             f"select ts_code, name, industry from stock_basic where ts_code in ({placeholders})",
             codes,

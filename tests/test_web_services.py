@@ -277,6 +277,30 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(short_runs[0]["status_label"], "有入池标的")
         self.assertEqual([item["trade_date"] for item in mixed_short_recent[:2]], ["20250105", "20250104"])
 
+    def test_recent_signals_tolerates_history_db_without_stock_basic_table(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run("20250102", mode="short", profile="profile_v9", source="test")
+                store.update_pool(
+                    run_id,
+                    "20250102",
+                    mode="short",
+                    profile="profile_v9",
+                    records=[SignalRecord(ts_code="000001.SZ", score=66)],
+                )
+            finally:
+                store.close()
+
+            empty_history_db = Path(tmpdir) / "empty_history.db"
+            empty_history_db.touch()
+
+            recent = get_recent_signals(signal_db, history_db=empty_history_db, limit=10)
+
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["ts_code"], "000001.SZ")
+
     def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_db = Path(tmpdir) / "signals.db"

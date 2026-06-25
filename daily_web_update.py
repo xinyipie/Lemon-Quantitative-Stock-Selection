@@ -77,6 +77,10 @@ def latest_history_trade_date(history_db: Path = DEFAULT_HISTORY_DB) -> str | No
     try:
         row = conn.execute("select max(trade_date) from stock_daily").fetchone()
         return str(row[0]) if row and row[0] else None
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return None
+        raise
     finally:
         conn.close()
 
@@ -109,6 +113,10 @@ def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | Non
             (SHORT_PROFILE,),
         ).fetchone()
         return str(row[0]) if row and row[0] else None
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return None
+        raise
     finally:
         conn.close()
 
