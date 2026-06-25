@@ -177,14 +177,20 @@ def run_update(args: argparse.Namespace) -> None:
     target_start, target_end = resolve_update_window(target_end, args.start, args.history_db)
     py = sys.executable
     update_mode = getattr(args, "mode", "daily")
+    fast_mode = bool(getattr(args, "fast", False))
 
     if not args.skip_download:
         download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
         if args.skip_financial:
             download_cmd.append("--skip-financial")
+        if fast_mode:
+            download_cmd.append("--core-only")
         run_command(download_cmd, args.dry_run)
 
     if not args.skip_history_import:
+        import_tables = ["daily", "daily_basic", "moneyflow", "stock_basic"]
+        if not fast_mode:
+            import_tables.append("index_daily")
         run_command(
             [
                 py,
@@ -198,11 +204,7 @@ def run_update(args: argparse.Namespace) -> None:
                 "--end",
                 target_end,
                 "--tables",
-                "daily",
-                "daily_basic",
-                "moneyflow",
-                "index_daily",
-                "stock_basic",
+                *import_tables,
             ],
             args.dry_run,
         )
@@ -213,7 +215,7 @@ def run_update(args: argparse.Namespace) -> None:
     if effective_end != target_end:
         print(f"\n提示：目标日期 {target_end} 的行情未完整落库，市场上下文按有效行情日 {effective_end} 生成。")
 
-    if not args.skip_market_context:
+    if not args.skip_market_context and not fast_mode:
         run_command(
             [
                 py,
@@ -226,11 +228,12 @@ def run_update(args: argparse.Namespace) -> None:
 
     if not args.skip_main:
         run_command([py, "main.py"], args.dry_run)
-        if not args.skip_ai_explanations:
+        if not args.skip_ai_explanations and not fast_mode:
             _backfill_today_ai_explanations(py, args, effective_end)
             _generate_daily_ai_brief(py, args, effective_end)
         _refresh_dragon_limit_pool(py, args, effective_end)
-        refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
+        if not fast_mode:
+            refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
 
     if update_mode == "daily":
         print("\n日常轻量同步：跳过短线复盘回测和长线历史审计。需要补历史时请使用 --mode full。")
@@ -411,6 +414,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--signal-db", type=Path, default=DEFAULT_SIGNAL_DB)
     parser.add_argument("--mode", choices=["daily", "full"], default="daily", help="daily=轻量日更；full=补齐短线复盘和长线审计")
     parser.add_argument("--full-history", action="store_true", help="重跑并导入 2024H1 起所有半年度长线审计")
+    parser.add_argument("--fast", action="store_true", help="线上极速同步：跳过限频重接口、市场上下文和AI解释，只刷新核心信号")
     parser.add_argument("--skip-financial", action="store_true", default=True, help="日常更新默认跳过财务下载")
     parser.add_argument("--with-financial", dest="skip_financial", action="store_false", help="同时下载财务数据")
     parser.add_argument("--skip-download", action="store_true")

@@ -21,6 +21,8 @@ VALID_MODES = {"daily", "full"}
 def build_update_command(end: str | None = None, mode: str = "daily", full_history: bool = False) -> list[str]:
     update_mode = mode if mode in VALID_MODES else "daily"
     command = [sys.executable, "daily_web_update.py", "--mode", update_mode]
+    if update_mode == "daily":
+        command.append("--fast")
     if end:
         command.extend(["--end", str(end).replace("-", "")[:8]])
     if full_history:

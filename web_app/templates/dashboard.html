@@ -36,7 +36,7 @@
 <section class="panel update-panel" data-update-status-url="/update/status">
   <div>
     <h2>一键同步</h2>
-    <p>优先使用完整同步：更新行情、实盘信号、短线复盘、长线审计和市场上下文；只想快速刷新当日信号时再用快速同步。</p>
+    <p>线上日常优先使用快速同步：只刷新核心行情和今日信号；完整同步用于补历史复盘、长线审计和市场上下文，耗时会更久。</p>
     {% if update_status and update_status.message %}
       <div class="filter-summary {{ 'warn' if update_status.alignment_state == 'warn' else '' }}" data-update-message>当前状态：{{ update_status.display_message or update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
     {% else %}
@@ -45,14 +45,14 @@
     <pre class="update-error" data-update-error hidden></pre>
   </div>
   <div class="update-actions">
-    <form method="post" action="/update/run?mode=full">
+    <form method="post" action="/update/run?mode=daily">
       <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
-        {% if update_status and update_status.running %}正在同步{% else %}完整同步{% endif %}
+        {% if update_status and update_status.running %}正在同步{% else %}快速同步{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=daily">
+    <form method="post" action="/update/run?mode=full">
       <button class="ghost-button" type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
-        快速同步
+        完整同步
       </button>
     </form>
   </div>
@@ -311,7 +311,7 @@
       if (status.running) {
         button.textContent = index === 0 ? "正在同步" : "请稍候";
       } else {
-        button.textContent = index === 0 ? "完整同步" : "快速同步";
+        button.textContent = index === 0 ? "快速同步" : "完整同步";
       }
     });
     if (errorBox) {

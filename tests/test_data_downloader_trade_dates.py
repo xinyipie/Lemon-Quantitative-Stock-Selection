@@ -72,6 +72,35 @@ class HolderTradePro:
         )
 
 
+class CoreOnlyDailyPro:
+    def __init__(self):
+        self.calls = []
+
+    def daily(self, **kwargs):
+        self.calls.append("daily")
+        return pd.DataFrame([{"ts_code": "000001.SZ", "trade_date": kwargs["trade_date"], "close": 10.0}])
+
+    def daily_basic(self, **kwargs):
+        self.calls.append("daily_basic")
+        return pd.DataFrame([{"ts_code": "000001.SZ", "turnover_rate": 1.0, "volume_ratio": 1.2}])
+
+    def moneyflow(self, **kwargs):
+        self.calls.append("moneyflow")
+        return pd.DataFrame([{"ts_code": "000001.SZ", "net_mf_amount": 100.0}])
+
+    def index_daily(self, **kwargs):
+        raise AssertionError("core_only should skip index_daily")
+
+    def top_list(self, **kwargs):
+        raise AssertionError("core_only should skip top_list")
+
+    def top_inst(self, **kwargs):
+        raise AssertionError("core_only should skip top_inst")
+
+    def margin_detail(self, **kwargs):
+        raise AssertionError("core_only should skip margin_detail")
+
+
 class DataDownloaderTradeDatesTest(unittest.TestCase):
     def test_get_trade_dates_falls_back_to_cached_trade_calendar_when_api_is_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -217,6 +246,26 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
                 self.assertTrue(all("start_date" not in call and "end_date" not in call for call in pro.calls))
                 self.assertEqual(set(saved["ann_date"].astype(str)), {"20260610"})
                 self.assertEqual(set(saved["holder_type"].astype(str)), {"G", "P", "C"})
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+                data_downloader.time.sleep = old_sleep
+
+    def test_download_daily_range_core_only_skips_rate_limited_interfaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            old_sleep = data_downloader.time.sleep
+            data_downloader.CACHE_DIR = tmp
+            data_downloader.time.sleep = lambda _seconds: None
+            try:
+                data_downloader._ensure_dirs()
+                pro = CoreOnlyDailyPro()
+
+                result = data_downloader.download_daily_range(pro, ["20260624"], core_only=True)
+
+                self.assertEqual(result[:3], (1, 1, 1))
+                self.assertEqual(pro.calls, ["daily", "daily_basic", "moneyflow"])
+                self.assertFalse((Path(tmp) / "index_daily" / "20260624.parquet").exists())
+                self.assertFalse((Path(tmp) / "top_list" / "20260624.parquet").exists())
             finally:
                 data_downloader.CACHE_DIR = old_cache_dir
                 data_downloader.time.sleep = old_sleep

@@ -525,7 +525,7 @@ def download_income(pro, force: bool = False):
 # ==================== 按日期批量下载（含断点续传进度显示）====================
 
 def download_daily_range(pro, trade_dates: List[str], force: bool = False,
-                         only_new: bool = False):
+                         only_new: bool = False, core_only: bool = False):
     """
     批量下载每日数据。
     only_new=True 时只下载新增的三个接口（top_list/top_inst/margin_detail），
@@ -567,40 +567,42 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                 moneyflow_ok += 1
 
             # index_daily
-            need_idx = force or not _cache_has_rows(_daily_path("index_daily", date), min_rows=_index_cache_min_rows())
-            if need_idx:
-                if download_index_daily_one_date(pro, date, force):
+            if not core_only:
+                need_idx = force or not _cache_has_rows(_daily_path("index_daily", date), min_rows=_index_cache_min_rows())
+                if need_idx:
+                    if download_index_daily_one_date(pro, date, force):
+                        index_ok += 1
+                    time.sleep(0.5)
+                else:
                     index_ok += 1
-                time.sleep(0.5)
-            else:
-                index_ok += 1
 
         # ── 新增：top_list ──
-        need_tl = force or not os.path.exists(_daily_path("top_list", date))
-        if need_tl:
-            if download_top_list_one_date(pro, date, force):
+        if not core_only:
+            need_tl = force or not os.path.exists(_daily_path("top_list", date))
+            if need_tl:
+                if download_top_list_one_date(pro, date, force):
+                    top_list_ok += 1
+                time.sleep(0.8)
+            else:
                 top_list_ok += 1
-            time.sleep(0.8)
-        else:
-            top_list_ok += 1
 
         # ── 新增：top_inst ──
-        need_ti = force or not os.path.exists(_daily_path("top_inst", date))
-        if need_ti:
-            if download_top_inst_one_date(pro, date, force):
+            need_ti = force or not os.path.exists(_daily_path("top_inst", date))
+            if need_ti:
+                if download_top_inst_one_date(pro, date, force):
+                    top_inst_ok += 1
+                time.sleep(0.8)
+            else:
                 top_inst_ok += 1
-            time.sleep(0.8)
-        else:
-            top_inst_ok += 1
 
         # ── 新增：margin_detail ──
-        need_mg = force or not os.path.exists(_daily_path("margin_detail", date))
-        if need_mg:
-            if download_margin_detail_one_date(pro, date, force):
+            need_mg = force or not os.path.exists(_daily_path("margin_detail", date))
+            if need_mg:
+                if download_margin_detail_one_date(pro, date, force):
+                    margin_ok += 1
+                time.sleep(0.8)
+            else:
                 margin_ok += 1
-            time.sleep(0.8)
-        else:
-            margin_ok += 1
 
         # 每10天打印一次进度摘要
         if idx % 10 == 0 or idx == total:
@@ -627,7 +629,8 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
 # ==================== 主入口 ====================
 
 def run_download(start_date: str, end_date: str, force: bool = False,
-                 skip_financial: bool = False, only_new: bool = False):
+                 skip_financial: bool = False, only_new: bool = False,
+                 core_only: bool = False):
     """
     执行完整的数据下载流程
 
@@ -656,10 +659,13 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         time.sleep(0.5)
         download_stock_basic(pro, force)
         time.sleep(0.5)
-        download_share_float(pro, start_date, end_date, force)
-        time.sleep(0.5)
-        download_stk_holdertrade(pro, start_date, end_date, force)
-        time.sleep(0.5)
+        if not core_only:
+            download_share_float(pro, start_date, end_date, force)
+            time.sleep(0.5)
+            download_stk_holdertrade(pro, start_date, end_date, force)
+            time.sleep(0.5)
+        else:
+            logger.info("  -> core-only：跳过 share_float / stk_holdertrade")
 
         if not skip_financial:
             download_fina_indicator(pro, force)
@@ -681,7 +687,7 @@ def run_download(start_date: str, end_date: str, force: bool = False,
     # ── 阶段3：按日数据 ──
     label = "新增接口（top_list/top_inst/margin_detail）" if only_new else "行情/换手率/资金流/指数/龙虎榜/融资"
     logger.info(f"\n【阶段3】按日下载{label}")
-    results = download_daily_range(pro, trade_dates, force, only_new=only_new)
+    results = download_daily_range(pro, trade_dates, force, only_new=only_new, core_only=core_only)
     daily_ok, basic_ok, mf_ok, idx_ok, tl_ok, ti_ok, mg_ok = results
 
     # ── 完成报告 ──
@@ -710,6 +716,8 @@ def main():
     parser.add_argument('--only-new', action='store_true',
                         help='只补充新增三个接口（top_list/top_inst/margin_detail），'
                              '已有数据保持不动，适合在已有回测数据基础上补充新信号')
+    parser.add_argument('--core-only', action='store_true',
+                        help='线上极速同步：只下载 daily/daily_basic/moneyflow/stock_basic，跳过指数、龙虎榜和融资融券')
     args = parser.parse_args()
 
     run_download(
@@ -718,6 +726,7 @@ def main():
         force=args.force,
         skip_financial=args.skip_financial,
         only_new=args.only_new,
+        core_only=args.core_only,
     )
 
 

@@ -242,6 +242,46 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertTrue(any("main.py" in text for text in command_texts))
         refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
 
+    def test_fast_daily_mode_uses_core_download_and_skips_heavy_context_layers(self):
+        calls = []
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=False,
+            skip_history_import=False,
+            skip_market_context=False,
+            skip_main=False,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            fast=True,
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260624"
+        ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar:
+            run_update(args)
+
+        command_texts = [" ".join(map(str, command)) for command in calls]
+        self.assertTrue(any("data_downloader.py" in text and "--core-only" in text for text in command_texts))
+        importer = next(text for text in command_texts if "history_db_importer.py" in text)
+        self.assertIn("daily daily_basic moneyflow stock_basic", importer)
+        self.assertNotIn("index_daily", importer)
+        self.assertTrue(any("main.py" in text for text in command_texts))
+        self.assertFalse(any("market_context_snapshot.py" in text for text in command_texts))
+        self.assertFalse(any("backfill_signal_explanations.py" in text for text in command_texts))
+        self.assertFalse(any("daily_ai_brief.py" in text for text in command_texts))
+        refresh_radar.assert_not_called()
+
     def test_daily_mode_refreshes_dragon_limit_pool_after_main_when_research_tree_exists(self):
         calls = []
         args = Namespace(

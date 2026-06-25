@@ -24,6 +24,7 @@ class UpdateServiceTest(unittest.TestCase):
         self.assertIn("20260616", command)
         self.assertIn("--mode", command)
         self.assertIn("daily", command)
+        self.assertIn("--fast", command)
         self.assertNotIn("--full-history", command)
 
     def test_build_update_command_can_request_full_mode(self):
@@ -32,6 +33,7 @@ class UpdateServiceTest(unittest.TestCase):
         self.assertIn("--mode", command)
         self.assertIn("full", command)
         self.assertIn("--full-history", command)
+        self.assertNotIn("--fast", command)
 
     def test_run_update_job_records_finished_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
