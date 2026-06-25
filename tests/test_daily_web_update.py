@@ -193,6 +193,75 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertTrue(all("--start 20260616 --end 20260616" in text for text in command_texts if "backfill_signal_explanations.py" in text))
         self.assertTrue(any("--date 20260616" in text for text in command_texts if "daily_ai_brief.py" in text))
 
+    def test_daily_mode_refreshes_market_radar_snapshot_after_main(self):
+        calls = []
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=True,
+            skip_main=False,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260623"
+        ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar:
+            run_update(args)
+
+        command_texts = [" ".join(command) for command in calls]
+        self.assertTrue(any("main.py" in text for text in command_texts))
+        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
+
+    def test_daily_mode_refreshes_dragon_limit_pool_after_main_when_research_tree_exists(self):
+        calls = []
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=True,
+            skip_history_import=True,
+            skip_market_context=True,
+            skip_main=False,
+            skip_short_review=True,
+            skip_longterm_audit=True,
+            skip_ai_explanations=True,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="daily",
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260624"
+        ), patch("daily_web_update.refresh_market_radar_snapshot"), patch(
+            "daily_web_update._dragon_limit_pool_collector_path", return_value=Path("E:/代码项目/stock-strategy-research/research/limit_pool_collector.py")
+        ):
+            run_update(args)
+
+        command_texts = [" ".join(map(str, command)) for command in calls]
+        main_index = next(i for i, text in enumerate(command_texts) if "main.py" in text)
+        dragon_indexes = [i for i, text in enumerate(command_texts) if "limit_pool_collector.py" in text]
+        self.assertEqual(len(dragon_indexes), 1)
+        self.assertGreater(dragon_indexes[0], main_index)
+        self.assertIn("--date 20260624", command_texts[dragon_indexes[0]])
+
     def test_skip_ai_explanations_disables_daily_backfill(self):
         calls = []
         args = Namespace(

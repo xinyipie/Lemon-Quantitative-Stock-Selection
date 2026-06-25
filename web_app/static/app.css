@@ -107,6 +107,81 @@ p { margin: 6px 0 0; color: var(--muted); }
   min-width: 360px;
 }
 
+.radar-header-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.radar-refresh-form button {
+  white-space: nowrap;
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.radar-header-actions > .command-search {
+  display: none;
+}
+
+.radar-refresh-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  border-left: 4px solid #0f766e;
+}
+
+.radar-refresh-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.radar-refresh-main strong {
+  margin-right: 4px;
+}
+
+.radar-refresh-main span,
+.radar-history-filter summary {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #eef6f5;
+  color: #31516f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.radar-history-filter {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.radar-history-filter summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.radar-history-filter summary::-webkit-details-marker {
+  display: none;
+}
+
+.radar-history-filter .command-search {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 10;
+  min-width: 420px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .12);
+}
+
 input, button {
   height: 36px;
   border: 1px solid var(--line-strong);
@@ -974,6 +1049,20 @@ th {
   background: #f8fffb;
 }
 
+.event-group-section.background-column {
+  border-color: #dbe6f5;
+  background: #f8fafc;
+}
+
+.event-group-section.source-gap-column {
+  border-color: #fde68a;
+  background: #fffdf4;
+}
+
+.trader-message-columns.secondary {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
 .event-group-section.compact .event-decision-list {
   gap: 6px;
 }
@@ -1099,6 +1188,13 @@ th {
 
 .event-source-meta.detailed {
   margin-top: 2px;
+}
+
+.source-confidence-note {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  font-weight: 800;
 }
 
 .event-jump-links,
@@ -2191,6 +2287,141 @@ code {
   color: #98a2b3;
 }
 
+.dragon-header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.dragon-board {
+  border-left: 4px solid var(--green);
+}
+
+.dragon-board-head {
+  display: grid;
+  gap: 8px;
+}
+
+.dragon-board-head strong {
+  font-size: 20px;
+  color: #102033;
+}
+
+.dragon-board-head p {
+  margin: 0;
+  color: #64748b;
+}
+
+.dragon-metrics {
+  margin-top: 14px;
+}
+
+.dragon-column-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.dragon-column {
+  min-width: 0;
+}
+
+.dragon-column.focus {
+  border-top: 3px solid var(--green);
+}
+
+.dragon-column.wait {
+  border-top: 3px solid var(--amber);
+}
+
+.dragon-column.avoid {
+  border-top: 3px solid var(--red);
+}
+
+.dragon-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.dragon-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.dragon-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.dragon-card-top strong {
+  display: block;
+  color: #1d4ed8;
+}
+
+.dragon-card-top span {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.dragon-card-top b {
+  font-size: 18px;
+  color: #102033;
+}
+
+.dragon-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.dragon-action {
+  margin: 8px 0 10px;
+  color: #0f172a;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.dragon-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.dragon-facts div {
+  min-width: 0;
+  padding: 6px;
+  border-radius: 6px;
+  background: #f1f5f9;
+}
+
+.dragon-facts dt,
+.dragon-facts dd {
+  margin: 0;
+}
+
+.dragon-facts dt {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dragon-facts dd {
+  color: #102033;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dragon-study {
+  border-left: 4px solid var(--blue);
+}
+
 @media (max-width: 1080px) {
   body { grid-template-columns: 1fr; }
   .sidebar { position: static; }
@@ -2198,7 +2429,7 @@ code {
     grid-template-columns: 1fr;
   }
   .sector-hero, .sector-hero-facts, .sector-candidate-head, .radar-decision-grid, .strategy-overlap-item,
-  .radar-v2-grid, .radar-v2-grid.wide, .radar-workbench, .research-grid, .thesis-grid, .risk-board-list, .event-impact-columns { grid-template-columns: 1fr; }
+  .radar-v2-grid, .radar-v2-grid.wide, .radar-workbench, .research-grid, .thesis-grid, .risk-board-list, .event-impact-columns, .dragon-column-grid { grid-template-columns: 1fr; }
   .brief-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .risk-blocker { grid-template-columns: 1fr; }
   .stock-evidence-card { grid-template-columns: 1fr; align-items: stretch; }
@@ -2206,5 +2437,7 @@ code {
   .market-context-grid, .market-context-grid.message-layout, .news-impact-grid, .message-audit-grid, .message-impact-summary, .message-detail-grid { grid-template-columns: 1fr; }
   .filter-bar { grid-template-columns: 1fr; }
   .command-search { min-width: 0; width: 100%; }
+  .radar-header-actions { width: 100%; justify-content: stretch; }
+  .radar-refresh-form, .radar-refresh-form button { width: 100%; }
   .terminal-header { flex-direction: column; }
 }

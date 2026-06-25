@@ -16,6 +16,7 @@ def build_research_brief(
     stock_watchlist = list(decision.get("stock_watchlist") or [])
     events = list(concept_news.get("events") or [])
     event_groups = _event_groups(events)
+    trade_event_groups = _trade_event_groups(events)
     risk_board = _risk_board(review, sector_theses, stock_watchlist)
     verification = _verification_checklist(review, sector_theses, events)
     risk_blocker = _risk_blocker(data_quality, sector_theses, events, risk_board)
@@ -26,6 +27,7 @@ def build_research_brief(
         "mainlines": _mainlines(sector_theses),
         "event_watchlist": events[:8],
         "event_groups": event_groups,
+        "trade_event_groups": trade_event_groups,
         "sector_theses": sector_theses[:12],
         "stock_watchlist": stock_watchlist[:12],
         "risk_board": risk_board,
@@ -39,7 +41,34 @@ def build_research_brief(
             "risk_count": len(risk_board),
         },
         "strategy_overlap": strategy_overlap or {},
+}
+
+
+def _trade_event_groups(events: list[dict]) -> dict:
+    rows = [item for item in events if isinstance(item, dict)]
+    groups = {
+        "catalysts": [],
+        "risks": [],
+        "background": [],
+        "source_gaps": [],
+        "watch": [],
+        "all": rows[:8],
     }
+    for event in rows:
+        priority = str(event.get("trade_priority") or "")
+        if priority == "catalyst":
+            groups["catalysts"].append(event)
+        elif priority == "risk":
+            groups["risks"].append(event)
+        elif priority == "background":
+            groups["background"].append(event)
+        elif priority == "source_gap":
+            groups["source_gaps"].append(event)
+        else:
+            groups["watch"].append(event)
+    for key in ("catalysts", "risks", "background", "source_gaps", "watch"):
+        groups[key] = groups[key][:6]
+    return groups
 
 
 def _event_groups(events: list[dict]) -> dict:
@@ -53,8 +82,12 @@ def _event_groups(events: list[dict]) -> dict:
     }
     for event in rows:
         bucket = str(event.get("event_bucket") or "")
+        if bucket == "background":
+            groups["mixed"].append(event)
+            continue
         if bucket == "unverified":
             groups["unverified"].append(event)
+            continue
         if bucket == "risk" or event.get("impact") == "negative":
             groups["risk"].append(event)
         elif bucket == "positive" or event.get("impact") == "positive":
@@ -105,6 +138,8 @@ def _severe_negative_event(theses: list[dict], events: list[dict]) -> str:
         if str(item.get("thesis_label") or "") in {"风险冲突", "椋庨櫓鍐茬獊", "退潮风险", "閫€娼闄?"}
     }
     for event in events:
+        if event.get("event_bucket") == "background" or event.get("trade_priority") == "background":
+            continue
         if event.get("impact") != "negative" or event.get("materiality") != "A":
             continue
         industries = [str(item) for item in event.get("mapped_industries") or [] if item]

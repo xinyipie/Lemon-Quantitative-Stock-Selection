@@ -2199,7 +2199,11 @@ def get_stock_industry_rs_scores(
     return result
 
 
-def get_net_profit_growth_batch(codes: List[str], trade_date: str = '') -> Dict[str, Dict]:
+def get_net_profit_growth_batch(
+    codes: List[str],
+    trade_date: str = '',
+    cache_path: str | os.PathLike | None = None,
+) -> Dict[str, Dict]:
     """
     批量获取净利润同比增长率（用于波段策略财务质量评分）。
     优先从 Tushare fina_indicator 字段 netprofit_yoy 获取，若无则降级跳过。
@@ -2219,8 +2223,22 @@ def get_net_profit_growth_batch(codes: List[str], trade_date: str = '') -> Dict[
     try:
         batch_size = 50
         all_dfs = []
+        cache_loaded = False
+        fina_cache_path = cache_path or os.path.join('data', 'cache', 'fina_indicator.parquet')
 
-        if is_offline:
+        if fina_cache_path and os.path.exists(fina_cache_path):
+            try:
+                df_cache = pd.read_parquet(fina_cache_path)
+                if not df_cache.empty and 'netprofit_yoy' in df_cache.columns:
+                    all_dfs.append(df_cache)
+                    cache_loaded = True
+                    logger.info(f"✅ 净利润增速使用本地缓存：{fina_cache_path}")
+            except Exception as e:
+                logger.debug(f"本地fina_indicator(netprofit_yoy)读取失败，回退在线接口：{e}")
+
+        if cache_loaded:
+            pass
+        elif is_offline:
             try:
                 # 离线模式：全量读取，包含 netprofit_yoy 字段
                 df = pro.fina_indicator(
@@ -2250,7 +2268,7 @@ def get_net_profit_growth_batch(codes: List[str], trade_date: str = '') -> Dict[
             return result
 
         df_all = pd.concat(all_dfs, ignore_index=True)
-        if is_offline:
+        if is_offline or cache_loaded:
             df_all = df_all[df_all['ts_code'].isin(set(ts_codes))]
 
         # 时间截面约束（防未来函数）

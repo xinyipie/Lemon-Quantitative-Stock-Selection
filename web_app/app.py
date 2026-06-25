@@ -23,6 +23,7 @@ from web_app.services.sector_service import (
     build_strategy_overlap,
 )
 from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
+from web_app.services.dragon_service import build_dragon_observation
 from web_app.services.signal_service import (
     build_admission_diagnostics,
     build_dashboard_decision,
@@ -217,6 +218,26 @@ def sectors(request: Request, end: str = ""):
     )
 
 
+def refresh_market_radar_snapshot_for_page(end: str = "") -> int | None:
+    radar = build_sector_radar(DEFAULT_HISTORY_DB_PATH, end_date=end or None)
+    concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
+    decision = build_market_radar_decision(radar, concept_news)
+    brief = decision.get("research_brief") if isinstance(decision, dict) else None
+    if not isinstance(brief, dict) or not brief:
+        return None
+    radar_date = str(radar.get("end_date") or end or "").replace("-", "")[:8]
+    return save_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH, radar_date, brief, decision)
+
+
+@app.post("/sectors/update")
+def update_market_radar(end: str = ""):
+    refresh_market_radar_snapshot_for_page(end)
+    redirect_url = "/sectors"
+    if end:
+        redirect_url = f"{redirect_url}?end={end}"
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+
 @app.get("/stock")
 def stock_redirect(code: str = ""):
     if not code:
@@ -292,6 +313,21 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
                 "is_default_window": not any([start, end, q, industry]),
             },
             "active_nav": "signals",
+        },
+    )
+
+
+@app.get("/dragon")
+def dragon_leaders(request: Request, end: str = ""):
+    observation = build_dragon_observation(end_date=end or None)
+    return templates.TemplateResponse(
+        request,
+        "dragon_leaders.html",
+        {
+            "request": request,
+            "observation": observation,
+            "filters": {"end": end},
+            "active_nav": "dragon",
         },
     )
 

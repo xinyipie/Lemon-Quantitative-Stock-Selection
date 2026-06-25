@@ -104,14 +104,16 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("市场雷达", response.text)
         self.assertIn("健康主线", response.text)
         self.assertIn("板块候选", response.text)
-        self.assertIn("过热/退潮", response.text)
+        self.assertIn('id="risk-sectors"', response.text)
+        self.assertIn("退潮中", response.text)
         self.assertIn("sector-candidate-group", response.text)
         self.assertIn("concept-heat-panel", response.text)
         self.assertIn("message-radar-panel", response.text)
-        self.assertIn("留空 = 使用历史库最新交易日", response.text)
+        self.assertIn("\u5386\u53f2\u590d\u76d8", response.text)
+        self.assertIn("\u7559\u7a7a\u4f7f\u7528\u6700\u65b0\u6570\u636e", response.text)
         self.assertIn("message-detail", response.text)
-        self.assertIn("消息筛选链路", response.text)
-        self.assertIn("消息评级", response.text)
+        self.assertIn("message-audit-grid", response.text)
+        self.assertIn("message-news-list", response.text)
 
     def test_sector_page_renders_market_radar_v2_sections(self):
         client = TestClient(app)
@@ -136,6 +138,30 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("event-verify", response.text)
         self.assertIn("stock-evidence-reasons", response.text)
         self.assertLess(response.text.find("market-radar-v2-brief"), response.text.find("sector-hero"))
+
+    def test_sector_page_has_radar_only_update_button(self):
+        client = TestClient(app)
+
+        response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('action="/sectors/update"', response.text)
+        self.assertIn("更新市场雷达", response.text)
+
+    def test_sector_page_uses_trader_message_workbench_layout(self):
+        client = TestClient(app)
+
+        response = client.get("/sectors")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("radar-refresh-strip", response.text)
+        self.assertIn("历史复盘", response.text)
+        self.assertIn("今日新增催化", response.text)
+        self.assertIn("风险阻断", response.text)
+        self.assertIn("背景消息", response.text)
+        self.assertIn("source-confidence-note", response.text)
+        self.assertIn('href="#thesis-', response.text)
+        self.assertIn('href="#sector-', response.text)
 
     def test_concept_news_radar_reads_cache_and_signal_boosts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -408,9 +434,9 @@ class SectorWebTest(unittest.TestCase):
         response = client.get("/sectors")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("查看详情", response.text)
-        self.assertIn("交易含义", response.text)
-        self.assertIn("验证点", response.text)
+        self.assertIn("message-detail", response.text)
+        self.assertIn("message-detail-grid", response.text)
+        self.assertIn("message-verify-list", response.text)
         self.assertNotIn("消息行业明细", response.text)
 
     def test_news_cache_attaches_raw_source_details_to_ai_item(self):
@@ -622,6 +648,8 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("原始新闻", response.text)
         self.assertIn("财联社", response.text)
+        self.assertIn("message-source-time", response.text)
+        self.assertIn("2026-06-18 09:30:00", response.text)
         self.assertIn("https://example.com/news/1", response.text)
         self.assertIn("2000亿设备更新", response.text)
 
@@ -750,22 +778,21 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         save_snapshot.assert_called_once()
         self.assertEqual(save_snapshot.call_args.args[1], "20260622")
-        self.assertIn("风险阻断", response.text)
-        self.assertIn("暂停新关注", response.text)
-        self.assertIn("风险优先", response.text)
-        self.assertIn("利好催化", response.text)
-        self.assertIn("待核验", response.text)
-        self.assertIn("利空 A级", response.text)
-        self.assertIn("A级利空：可能改变板块风险偏好", response.text)
-        self.assertIn("原始来源：财联社", response.text)
-        self.assertIn("采集来源：本地新闻缓存", response.text)
-        self.assertIn('href="#thesis-计算机"', response.text)
+        self.assertIn("\u98ce\u9669\u963b\u65ad", response.text)
+        self.assertIn("\u6682\u505c\u65b0\u5173\u6ce8", response.text)
+        self.assertIn("\u98ce\u9669\u4f18\u5148", response.text)
+        self.assertIn("\u4eca\u65e5\u65b0\u589e\u50ac\u5316", response.text)
+        self.assertIn("\u6765\u6e90\u5f85\u6838\u9a8c", response.text)
+        self.assertIn("\u5229\u7a7a A\u7ea7", response.text)
+        self.assertIn("A\u7ea7\u5229\u7a7a\uff1a\u53ef\u80fd\u6539\u53d8\u677f\u5757\u98ce\u9669\u504f\u597d", response.text)
+        self.assertIn("\u539f\u59cb\u5a92\u4f53\uff1a\u8d22\u8054\u793e", response.text)
+        self.assertIn("\u91c7\u96c6\u901a\u9053\uff1a\u65b0\u95fb\u7f13\u5b58", response.text)
+        self.assertIn('href="#thesis-\u8ba1\u7b97\u673a', response.text)
         self.assertIn('href="https://example.com/ai"', response.text)
         self.assertIn('class="event-title-link"', response.text)
-        self.assertIn("来源：财联社", response.text)
-        self.assertIn("发布：2026-06-22 09:15:00", response.text)
-        self.assertIn("★★★ 策略+主线+事件共振", response.text)
-        self.assertIn("前60分钟成交额", response.text)
+        self.assertIn("\u53d1\u5e03\uff1a2026-06-22 09:15:00", response.text)
+        self.assertIn("\u2605\u2605\u2605 \u7b56\u7565+\u4e3b\u7ebf+\u4e8b\u4ef6\u5171\u632f", response.text)
+        self.assertIn("\u524d60\u5206\u949f\u6210\u4ea4\u989d", response.text)
 
     def test_risky_sector_actions_are_nuanced(self):
         heat_rows = [

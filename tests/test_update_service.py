@@ -1,6 +1,10 @@
 import json
+import sys
 import tempfile
+import threading
+import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from web_app.services.update_service import (
@@ -58,6 +62,84 @@ class UpdateServiceTest(unittest.TestCase):
 
         self.assertEqual(status["state"], "idle")
         self.assertFalse(status["running"])
+
+    def test_read_update_status_expires_stale_running_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "state": "running",
+                        "running": True,
+                        "started_at": "2026-06-24 09:00:00",
+                        "message": "running",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            status = read_update_status(
+                status_path=status_path,
+                stale_after_seconds=60,
+                now=datetime(2026, 6, 24, 9, 2, 1),
+            )
+
+        self.assertEqual(status["state"], "failed")
+        self.assertFalse(status["running"])
+        self.assertIn("超时", status["message"])
+
+    def test_read_update_status_uses_shorter_default_timeout_for_daily_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "state": "running",
+                        "running": True,
+                        "mode": "daily",
+                        "started_at": "2026-06-24 09:00:00",
+                        "message": "running",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            status = read_update_status(
+                status_path=status_path,
+                now=datetime(2026, 6, 24, 9, 25, 1),
+            )
+
+        self.assertEqual(status["state"], "failed")
+        self.assertFalse(status["running"])
+
+    def test_run_update_job_streams_progress_before_process_finishes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            script_path = tmp_path / "slow_update.py"
+            status_path = tmp_path / "status.json"
+            script_path.write_text(
+                "import time\n"
+                "print('step one', flush=True)\n"
+                "time.sleep(0.6)\n"
+                "print('step two', flush=True)\n",
+                encoding="utf-8",
+            )
+
+            worker = threading.Thread(
+                target=run_update_job,
+                args=([sys.executable, str(script_path)],),
+                kwargs={"status_path": status_path},
+            )
+            worker.start()
+            time.sleep(0.25)
+            mid_status = read_update_status(status_path=status_path)
+            worker.join(timeout=3)
+            final_status = read_update_status(status_path=status_path)
+
+        self.assertIn("step one", mid_status.get("stdout_tail", ""))
+        self.assertTrue(mid_status["running"])
+        self.assertEqual(final_status["state"], "finished")
+        self.assertIn("step two", final_status.get("stdout_tail", ""))
 
     def test_finished_update_status_warns_when_freshness_is_not_aligned(self):
         status = {

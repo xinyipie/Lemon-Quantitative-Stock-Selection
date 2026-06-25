@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}热门龙头观察池{% endblock %}
+{% block content %}
+<header class="page-header dragon-header">
+  <div>
+    <div class="eyebrow">Dragon Leader Lab</div>
+    <h1>热门龙头观察池</h1>
+    <p>研究版，只做次日观察辅助；不生成交易执行指令。</p>
+  </div>
+  <form class="command-search" action="/dragon" method="get">
+    <input name="end" value="{{ filters.end }}" placeholder="历史日期，如 20260624">
+    <button type="submit">查看</button>
+  </form>
+</header>
+
+<section class="panel dragon-board">
+  <div class="dragon-board-head">
+    <div>
+      <span class="tag soft-tag">数据日 {{ observation.trade_date|fmt_date if observation.trade_date else "-" }}</span>
+      <span class="tag {{ 'success-tag' if observation.summary.source_quality == 'real' else 'soft-tag' }}">来源 {{ observation.summary.source_quality }}</span>
+    </div>
+    <strong>{{ observation.summary.headline }}</strong>
+    <p>{{ observation.summary.note }}</p>
+  </div>
+  <div class="metric-grid dragon-metrics">
+    <div class="metric"><span>重点跟踪</span><strong>{{ observation.summary.focus_count }}</strong><small>低换手 + 热门扩散</small></div>
+    <div class="metric"><span>等分歧确认</span><strong>{{ observation.summary.wait_count }}</strong><small>题材较强，但条件未齐</small></div>
+    <div class="metric"><span>禁止追高</span><strong>{{ observation.summary.avoid_count }}</strong><small>高换手/晚封/多次开板</small></div>
+    <div class="metric"><span>低换手验证</span><strong>{{ observation.study.low_turnover_next_limit }}</strong><small>历史次日涨停率</small></div>
+  </div>
+</section>
+
+<section class="dragon-column-grid">
+  {% for key, title, hint in [
+    ("focus", "明日重点跟踪", "只看小高开/平开承接，不追过高竞价。"),
+    ("wait", "等分歧确认", "先观察承接和回封，不急着抢。"),
+    ("avoid", "禁止追高", "风险优先，等下一轮更干净的板。")
+  ] %}
+  <section class="panel dragon-column {{ key }}">
+    <div class="panel-title-row">
+      <div>
+        <h2>{{ title }}</h2>
+        <p>{{ hint }}</p>
+      </div>
+      <span class="tag soft-tag">{{ observation.buckets[key]|length }}</span>
+    </div>
+    {% if observation.buckets[key] %}
+      <div class="dragon-card-list">
+      {% for item in observation.buckets[key] %}
+        <article class="dragon-card">
+          <div class="dragon-card-top">
+            <div>
+              <a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong></a>
+              <span>{{ item.ts_code }} · {{ item.industry }}</span>
+            </div>
+            <b>{{ "%.1f"|format(item.score) }}</b>
+          </div>
+          <div class="dragon-badges">
+            {% for badge in item.badges %}
+              <span class="tag soft-tag">{{ badge }}</span>
+            {% endfor %}
+          </div>
+          <p class="dragon-action">{{ item.action }}</p>
+          <dl class="dragon-facts">
+            <div><dt>换手</dt><dd>{{ item.turnover_rate }}</dd></div>
+            <div><dt>同题材</dt><dd>{{ item.theme_heat_count }}</dd></div>
+            <div><dt>首封</dt><dd>{{ item.first_limit_time }}</dd></div>
+            <div><dt>开板</dt><dd>{{ item.open_count }}</dd></div>
+          </dl>
+        </article>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state">暂无候选。</div>
+    {% endif %}
+  </section>
+  {% endfor %}
+</section>
+
+<section class="panel dragon-study">
+  <h2>研究验证</h2>
+  <div class="metric-grid dragon-metrics">
+    <div class="metric"><span>历史基准</span><strong>{{ observation.study.baseline_next_limit }}</strong><small>全涨停样本次日涨停率</small></div>
+    <div class="metric"><span>低换手前20%</span><strong>{{ observation.study.low_turnover_next_limit }}</strong><small>跨年度稳定提升</small></div>
+    <div class="metric"><span>低换手断头率</span><strong>{{ observation.study.low_turnover_decapatated }}</strong><small>3日断头风险</small></div>
+    <div class="metric"><span>强封板短样本</span><strong>{{ observation.study.real_board_early_next_limit }}</strong><small>真实源仍需扩样</small></div>
+  </div>
+</section>
+{% endblock %}

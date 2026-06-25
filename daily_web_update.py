@@ -113,6 +113,39 @@ def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | Non
         conn.close()
 
 
+def refresh_market_radar_snapshot(
+    history_db: Path = DEFAULT_HISTORY_DB,
+    signal_db: Path = DEFAULT_SIGNAL_DB,
+    radar_date: str | None = None,
+    dry_run: bool = False,
+) -> int | None:
+    """Build and persist the latest Market Radar snapshot for the dashboard."""
+    if dry_run:
+        print(f"> refresh_market_radar_snapshot --date {radar_date or 'latest'}")
+        return None
+
+    from market_radar.store import save_market_radar_snapshot
+    from web_app.services.sector_service import (
+        build_concept_news_radar,
+        build_market_radar_decision,
+        build_sector_radar,
+    )
+
+    end_date = normalize_date(radar_date) if radar_date else None
+    radar = build_sector_radar(history_db, end_date=end_date)
+    concept_news = build_concept_news_radar(signal_db, today=end_date)
+    decision = build_market_radar_decision(radar, concept_news)
+    brief = decision.get("research_brief") if isinstance(decision, dict) else None
+    if not isinstance(brief, dict) or not brief:
+        print("市场雷达快照跳过：未生成研究简报。")
+        return None
+
+    snapshot_date = normalize_date(str(radar.get("end_date") or end_date or today_text()))
+    row_id = save_market_radar_snapshot(signal_db, snapshot_date, brief, decision)
+    print(f"市场雷达快照已更新：date={snapshot_date} row_id={row_id}")
+    return row_id
+
+
 def run_command(args: list[str], dry_run: bool = False) -> RunResult:
     print("\n> " + " ".join(args))
     if dry_run:
@@ -188,6 +221,8 @@ def run_update(args: argparse.Namespace) -> None:
         if not args.skip_ai_explanations:
             _backfill_today_ai_explanations(py, args, effective_end)
             _generate_daily_ai_brief(py, args, effective_end)
+        _refresh_dragon_limit_pool(py, args, effective_end)
+        refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
 
     if update_mode == "daily":
         print("\n日常轻量同步：跳过短线复盘回测和长线历史审计。需要补历史时请使用 --mode full。")
@@ -323,6 +358,36 @@ def _generate_daily_ai_brief(py: str, args: argparse.Namespace, effective_end: s
             str(args.signal_db),
             "--history-db",
             str(args.history_db),
+        ],
+        args.dry_run,
+    )
+
+
+def _dragon_limit_pool_collector_path() -> Path | None:
+    candidates = [
+        Path("research") / "limit_pool_collector.py",
+        Path("..") / "stock-strategy-research" / "research" / "limit_pool_collector.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _refresh_dragon_limit_pool(py: str, args: argparse.Namespace, effective_end: str) -> None:
+    collector = _dragon_limit_pool_collector_path()
+    if collector is None:
+        print("\n龙头观察池：未找到涨停池采集脚本，跳过。")
+        return
+    output_root = collector.resolve().parents[1] / "data_research"
+    run_command(
+        [
+            py,
+            str(collector),
+            "--date",
+            effective_end,
+            "--output-root",
+            str(output_root),
         ],
         args.dry_run,
     )

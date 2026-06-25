@@ -163,6 +163,31 @@ class MarketRadarBriefTest(unittest.TestCase):
         self.assertEqual([item["title"] for item in brief["event_groups"]["unverified"]], ["unknown source"])
         self.assertEqual(len(brief["event_groups"]["all"]), 3)
 
+    def test_build_research_brief_groups_events_by_trading_workflow(self):
+        decision = {
+            "alignment": "主线分裂",
+            "data_alignment": {"aligned": True},
+            "sector_theses": [],
+            "stock_watchlist": [],
+            "review_loop": {"risk_audit": [], "next_day_watch_points": []},
+        }
+        concept_news = {
+            "events": [
+                {"title": "today catalyst", "trade_priority": "catalyst", "event_bucket": "positive"},
+                {"title": "risk blocker", "trade_priority": "risk", "event_bucket": "risk"},
+                {"title": "old background", "trade_priority": "background", "event_bucket": "background"},
+                {"title": "missing source", "trade_priority": "source_gap", "event_bucket": "unverified"},
+            ],
+            "event_summary": {"event_count": 4},
+        }
+
+        brief = build_research_brief(decision, concept_news, {})
+
+        self.assertEqual([item["title"] for item in brief["trade_event_groups"]["catalysts"]], ["today catalyst"])
+        self.assertEqual([item["title"] for item in brief["trade_event_groups"]["risks"]], ["risk blocker"])
+        self.assertEqual([item["title"] for item in brief["trade_event_groups"]["background"]], ["old background"])
+        self.assertEqual([item["title"] for item in brief["trade_event_groups"]["source_gaps"]], ["missing source"])
+
 
 if __name__ == "__main__":
     unittest.main()

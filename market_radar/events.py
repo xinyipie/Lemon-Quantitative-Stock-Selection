@@ -106,6 +106,10 @@ def _decorate_event(item: dict, payload: dict) -> dict:
     impact = item.get("impact") or "mixed"
     evidence_urls = _evidence_urls(raw_sources)
     source_url = evidence_urls[0]["url"] if evidence_urls else ""
+    freshness_bucket = _freshness_bucket(catalyst_age_days)
+    source_channel = _source_channel(source_meta)
+    source_confidence_note = _source_confidence_note(source_meta, source_url)
+    trade_priority = _trade_priority(impact, materiality, source_meta, source_url, freshness_bucket)
     return {
         "event_id": event_id,
         "title": title,
@@ -136,10 +140,15 @@ def _decorate_event(item: dict, payload: dict) -> dict:
         "collected_at": source_meta["collected_at"],
         "catalyst_age_days": catalyst_age_days,
         "catalyst_clock": _catalyst_clock(catalyst_age_days),
-        "event_bucket": _event_bucket(impact, source_quality, source_meta),
+        "freshness_bucket": freshness_bucket,
+        "freshness_label": _freshness_label(catalyst_age_days),
+        "source_channel": source_channel,
+        "source_confidence_note": source_confidence_note,
+        "trade_priority": trade_priority,
+        "event_bucket": _event_bucket(impact, source_quality, source_meta, source_url, freshness_bucket),
         "effect_summary": _effect_summary(impact, materiality, sectors, mapping_confidence),
         "industry_anchor": _anchor("thesis", sectors[0] if sectors else ""),
-        "stock_anchor": _anchor("stocks", sectors[0] if sectors else ""),
+        "stock_anchor": _anchor("sector", sectors[0] if sectors else ""),
     }
 
 
@@ -172,6 +181,90 @@ def _event_bucket(impact: str | None, source_quality: str, source_meta: dict) ->
     if impact == "positive":
         return "positive"
     return "mixed"
+
+
+def _event_bucket(
+    impact: str | None,
+    source_quality: str,
+    source_meta: dict,
+    source_url: str,
+    freshness_bucket: str,
+) -> str:
+    if _source_has_gap(source_meta, source_url):
+        return "unverified"
+    if freshness_bucket == "background":
+        return "background"
+    if impact == "negative":
+        return "risk"
+    if impact == "positive":
+        return "positive"
+    return "mixed"
+
+
+def _trade_priority(
+    impact: str | None,
+    materiality: str,
+    source_meta: dict,
+    source_url: str,
+    freshness_bucket: str,
+) -> str:
+    if _source_has_gap(source_meta, source_url):
+        return "source_gap"
+    if freshness_bucket == "background":
+        return "background"
+    if impact == "negative" and materiality in {"A", "B"}:
+        return "risk"
+    if impact == "positive" and materiality in {"A", "B"}:
+        return "catalyst"
+    return "watch"
+
+
+def _freshness_bucket(age_days: int | None) -> str:
+    if age_days is None:
+        return "unknown"
+    if age_days <= 0:
+        return "today"
+    if age_days <= 2:
+        return "active"
+    return "background"
+
+
+def _freshness_label(age_days: int | None) -> str:
+    if age_days is None:
+        return "时效待核验"
+    if age_days <= 0:
+        return "D0 今日催化"
+    if age_days <= 2:
+        return f"D{age_days} 发酵中"
+    if age_days <= 5:
+        return f"D{age_days} 背景观察"
+    return f"D{age_days} 过期背景"
+
+
+def _source_channel(source_meta: dict) -> str:
+    collection = str(source_meta.get("collection_source") or "")
+    if not collection or _is_unknown_source(collection):
+        return "新闻缓存"
+    if "缓存" in collection or "缂撳瓨" in collection:
+        return "新闻缓存"
+    return collection
+
+
+def _source_confidence_note(source_meta: dict, source_url: str) -> str:
+    if not source_url:
+        return "缺原文，降级为待核验"
+    if _is_unknown_source(source_meta.get("original_source")):
+        return "原始媒体待核验"
+    return "原文可核验"
+
+
+def _source_has_gap(source_meta: dict, source_url: str) -> bool:
+    return (not source_url) or _is_unknown_source(source_meta.get("original_source"))
+
+
+def _is_unknown_source(value) -> bool:
+    text = str(value or "").strip()
+    return (not text) or text in {"未知", "鏈煡", "unknown", "Unknown", "UNKNOWN"}
 
 
 def _effect_summary(impact: str | None, materiality: str, sectors: list[str], mapping_confidence: str) -> str:

@@ -157,13 +157,14 @@ class MarketRadarEventsTest(unittest.TestCase):
         self.assertEqual(event["impact_label"], "利空")
         self.assertEqual(event["impact_tone"], "bad")
         self.assertEqual(event["event_bucket"], "risk")
+        self.assertEqual(event["trade_priority"], "risk")
         self.assertIn("A级利空", event["impact_degree_text"])
         self.assertIn("风险偏好", event["effect_summary"])
         self.assertEqual(event["original_source"], "Reuters")
         self.assertEqual(event["collection_source"], "本地新闻缓存")
         self.assertEqual(event["source_url"], "https://example.com/ai-risk")
         self.assertEqual(event["industry_anchor"], "thesis-Computer")
-        self.assertEqual(event["stock_anchor"], "stocks-Computer")
+        self.assertEqual(event["stock_anchor"], "sector-Computer")
 
     def test_build_events_finds_raw_source_when_summary_title_is_shortened(self):
         payload = {
@@ -196,7 +197,8 @@ class MarketRadarEventsTest(unittest.TestCase):
         self.assertEqual(event["original_source"], "市场动态")
         self.assertEqual(event["source_url"], "https://database.caixin.com/2026-06-15/102454182.html")
         self.assertEqual(event["publish_time"], "2026-06-15")
-        self.assertEqual(event["event_bucket"], "risk")
+        self.assertEqual(event["event_bucket"], "background")
+        self.assertEqual(event["trade_priority"], "background")
 
     def test_build_events_uses_reason_to_disambiguate_similar_short_titles(self):
         payload = {
@@ -230,6 +232,67 @@ class MarketRadarEventsTest(unittest.TestCase):
 
         self.assertEqual(event["original_source"], "市场动态")
         self.assertEqual(event["source_url"], "https://database.caixin.com/2026-06-16/102454525.html")
+
+    def test_old_news_is_background_not_trade_risk(self):
+        payload = {
+            "date": "20260623",
+            "items": [
+                {
+                    "news": "old aluminum pressure",
+                    "type": "price",
+                    "sectors": ["Nonferrous"],
+                    "impact": "negative",
+                    "strength": 7,
+                    "reason": "old risk",
+                }
+            ],
+            "raw_news": [
+                {
+                    "title": "old aluminum pressure",
+                    "source": "Market Desk",
+                    "provider": "caixin",
+                    "url": "https://example.com/aluminum",
+                    "publish_time": "2026-06-16",
+                }
+            ],
+        }
+
+        event = build_events_from_news_payload(payload)[0]
+
+        self.assertEqual(event["freshness_bucket"], "background")
+        self.assertEqual(event["event_bucket"], "background")
+        self.assertEqual(event["trade_priority"], "background")
+        self.assertIn("背景", event["freshness_label"])
+
+    def test_missing_original_url_is_source_gap_and_deprioritized(self):
+        payload = {
+            "date": "20260623",
+            "items": [
+                {
+                    "news": "new catalyst without url",
+                    "type": "policy",
+                    "sectors": ["Electronics"],
+                    "impact": "positive",
+                    "strength": 8,
+                    "reason": "source missing",
+                }
+            ],
+            "raw_news": [
+                {
+                    "title": "new catalyst without url",
+                    "source": "Newswire",
+                    "provider": "mainstream",
+                    "publish_time": "2026-06-23",
+                }
+            ],
+        }
+
+        event = build_events_from_news_payload(payload)[0]
+
+        self.assertEqual(event["event_bucket"], "unverified")
+        self.assertEqual(event["trade_priority"], "source_gap")
+        self.assertIn("缺原文", event["source_confidence_note"])
+        self.assertEqual(event["source_channel"], "新闻缓存")
 
 
 if __name__ == "__main__":
