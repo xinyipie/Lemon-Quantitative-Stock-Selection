@@ -415,11 +415,13 @@ def download_stk_holdertrade(pro, start_date: str, end_date: str, force: bool = 
     all_dfs = []
     for holder_type in ['G', 'P', 'C']:
         df = _retry(lambda ht=holder_type: pro.stk_holdertrade(
-            start_date=buf_start, end_date=end_date,
             holder_type=ht,
             fields='ts_code,ann_date,in_de,holder_type'
         ))
         if df is not None and not df.empty:
+            if 'ann_date' in df.columns:
+                ann_dates = df['ann_date'].astype(str).str.replace('-', '', regex=False).str[:8]
+                df = df[(ann_dates >= buf_start) & (ann_dates <= end_date)].copy()
             all_dfs.append(df)
         time.sleep(0.5)
 

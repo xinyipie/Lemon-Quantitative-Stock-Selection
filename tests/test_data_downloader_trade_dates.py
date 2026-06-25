@@ -56,6 +56,22 @@ class IndexPro:
         )
 
 
+class HolderTradePro:
+    def __init__(self):
+        self.calls = []
+
+    def stk_holdertrade(self, **kwargs):
+        self.calls.append(kwargs)
+        if "start_date" in kwargs or "end_date" in kwargs:
+            raise AssertionError("stk_holdertrade should not filter by trade_date-like parameters")
+        return pd.DataFrame(
+            [
+                {"ts_code": "000001.SZ", "ann_date": "20260610", "in_de": "DE", "holder_type": kwargs["holder_type"]},
+                {"ts_code": "000002.SZ", "ann_date": "20260501", "in_de": "DE", "holder_type": kwargs["holder_type"]},
+            ]
+        )
+
+
 class DataDownloaderTradeDatesTest(unittest.TestCase):
     def test_get_trade_dates_falls_back_to_cached_trade_calendar_when_api_is_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,6 +198,27 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
             finally:
                 data_downloader.CACHE_DIR = old_cache_dir
                 data_downloader.INDEX_CODES = old_index_codes
+                data_downloader.time.sleep = old_sleep
+
+    def test_download_stk_holdertrade_filters_ann_date_locally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            old_sleep = data_downloader.time.sleep
+            data_downloader.CACHE_DIR = tmp
+            data_downloader.time.sleep = lambda _seconds: None
+            try:
+                data_downloader._ensure_dirs()
+                pro = HolderTradePro()
+
+                data_downloader.download_stk_holdertrade(pro, "20260601", "20260625", force=True)
+
+                saved = pd.read_parquet(Path(tmp) / "stk_holdertrade.parquet")
+                self.assertEqual(len(pro.calls), 3)
+                self.assertTrue(all("start_date" not in call and "end_date" not in call for call in pro.calls))
+                self.assertEqual(set(saved["ann_date"].astype(str)), {"20260610"})
+                self.assertEqual(set(saved["holder_type"].astype(str)), {"G", "P", "C"})
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
                 data_downloader.time.sleep = old_sleep
 
 
