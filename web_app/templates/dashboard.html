@@ -50,16 +50,6 @@
         {% if update_status and update_status.running %}正在同步{% else %}快速同步{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=dragon">
-      <button class="ghost-button" type="submit" data-update-button data-update-mode="dragon" data-update-label="更新热门龙头" {% if update_status and update_status.running %}disabled{% endif %}>
-        更新热门龙头
-      </button>
-    </form>
-    <form method="post" action="/update/run?mode=radar">
-      <button class="ghost-button" type="submit" data-update-button data-update-mode="radar" data-update-label="更新市场雷达" {% if update_status and update_status.running %}disabled{% endif %}>
-        更新市场雷达
-      </button>
-    </form>
     <form method="post" action="/update/run?mode=full">
       <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整同步" {% if update_status and update_status.running %}disabled{% endif %}>
         完整同步

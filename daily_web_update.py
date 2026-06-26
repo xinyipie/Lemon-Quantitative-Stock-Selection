@@ -183,7 +183,7 @@ def run_update(args: argparse.Namespace) -> None:
         effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
         print(f"\n有效最新交易日：{effective_end}")
         if update_mode == "dragon":
-            _refresh_dragon_limit_pool(py, args, effective_end)
+            _refresh_dragon_limit_pool(py, args, effective_end, required=True)
             print("\n热门龙头更新流程完成。")
             return
         if not args.skip_market_context:
@@ -398,10 +398,13 @@ def _dragon_limit_pool_collector_path() -> Path | None:
     return None
 
 
-def _refresh_dragon_limit_pool(py: str, args: argparse.Namespace, effective_end: str) -> None:
+def _refresh_dragon_limit_pool(py: str, args: argparse.Namespace, effective_end: str, required: bool = False) -> None:
     collector = _dragon_limit_pool_collector_path()
     if collector is None:
-        print("\n龙头观察池：未找到涨停池采集脚本，跳过。")
+        message = "未找到 limit_pool_collector.py，无法刷新热门龙头观察池。请部署 research/limit_pool_collector.py 或 stock-strategy-research。"
+        if required:
+            raise SystemExit(message)
+        print(f"\n龙头观察池：{message}")
         return
     output_root = collector.resolve().parents[1] / "data_research"
     run_command(

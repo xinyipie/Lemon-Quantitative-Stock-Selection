@@ -13,10 +13,22 @@
       <button type="submit">查看</button>
     </form>
     <form class="radar-refresh-form" action="/sectors/update" method="post">
-      <button type="submit">更新市场雷达</button>
+      <button type="submit" {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running and update_status.mode == "radar" %}正在刷新{% else %}刷新市场雷达{% endif %}
+      </button>
     </form>
   </div>
 </header>
+
+{% if update_status and update_status.mode == "radar" and update_status.message %}
+<section class="radar-refresh-strip panel">
+  <div class="radar-refresh-main">
+    <strong>市场雷达刷新状态</strong>
+    <span>{{ update_status.message }}</span>
+    {% if update_status.finished_at %}<span>完成 {{ update_status.finished_at }}</span>{% endif %}
+  </div>
+</section>
+{% endif %}
 
 {% set concept_items = concept_news.concepts.get("items", []) %}
 {% set theme_items = concept_news.theme_filter.get("items", []) if concept_news.theme_filter else [] %}

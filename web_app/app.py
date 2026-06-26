@@ -213,6 +213,7 @@ def sectors(request: Request, end: str = ""):
             "strategy_overlap": strategy_overlap,
             "latest_radar_snapshot": latest_radar_snapshot,
             "filters": {"end": end},
+            "update_status": read_update_status(),
             "active_nav": "sectors",
         },
     )
@@ -231,7 +232,7 @@ def refresh_market_radar_snapshot_for_page(end: str = "") -> int | None:
 
 @app.post("/sectors/update")
 def update_market_radar(end: str = ""):
-    refresh_market_radar_snapshot_for_page(end)
+    start_web_update(mode="radar")
     redirect_url = "/sectors"
     if end:
         redirect_url = f"{redirect_url}?end={end}"
@@ -327,9 +328,16 @@ def dragon_leaders(request: Request, end: str = ""):
             "request": request,
             "observation": observation,
             "filters": {"end": end},
+            "update_status": read_update_status(),
             "active_nav": "dragon",
         },
     )
+
+
+@app.post("/dragon/update")
+def update_dragon_leaders():
+    start_web_update(mode="dragon")
+    return RedirectResponse(url="/dragon", status_code=303)
 
 
 @app.get("/explain/signal/{trade_date}/{ts_code}")

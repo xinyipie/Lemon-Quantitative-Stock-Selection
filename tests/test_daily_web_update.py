@@ -322,6 +322,35 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertFalse(any("main.py" in text for text in command_texts))
         refresh_radar.assert_not_called()
 
+    def test_dragon_mode_fails_when_collector_is_missing(self):
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=False,
+            skip_history_import=False,
+            skip_market_context=False,
+            skip_main=False,
+            skip_short_review=False,
+            skip_longterm_audit=False,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="dragon",
+            fast=False,
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.latest_history_trade_date", return_value="20260624"), patch(
+            "daily_web_update._dragon_limit_pool_collector_path", return_value=None
+        ):
+            with self.assertRaisesRegex(SystemExit, "limit_pool_collector"):
+                run_update(args)
+
     def test_radar_mode_only_refreshes_market_context_and_radar_snapshot(self):
         calls = []
         args = Namespace(

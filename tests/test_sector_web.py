@@ -1,4 +1,4 @@
-import json
+﻿import json
 import sqlite3
 import tempfile
 import unittest
@@ -146,7 +146,18 @@ class SectorWebTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('action="/sectors/update"', response.text)
-        self.assertIn("更新市场雷达", response.text)
+        self.assertIn("刷新市场雷达", response.text)
+
+    def test_sector_update_button_starts_radar_refresh_and_returns_to_page(self):
+        client = TestClient(app)
+
+        with patch("web_app.app.start_web_update") as start_update:
+            start_update.return_value = {"state": "running", "started": True}
+            response = client.post("/sectors/update", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/sectors")
+        start_update.assert_called_once_with(mode="radar")
 
     def test_sector_page_uses_trader_message_workbench_layout(self):
         client = TestClient(app)

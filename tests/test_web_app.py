@@ -26,12 +26,10 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("单股体检", response.text)
         self.assertNotIn("批量体检自选股", response.text)
         self.assertIn("/update/run?mode=daily", response.text)
-        self.assertIn("/update/run?mode=dragon", response.text)
-        self.assertIn("/update/run?mode=radar", response.text)
         self.assertIn("/update/run?mode=full", response.text)
-        self.assertLess(response.text.find("/update/run?mode=daily"), response.text.find("/update/run?mode=dragon"))
-        self.assertLess(response.text.find("/update/run?mode=dragon"), response.text.find("/update/run?mode=radar"))
-        self.assertLess(response.text.find("/update/run?mode=radar"), response.text.find("/update/run?mode=full"))
+        self.assertNotIn("/update/run?mode=dragon", response.text)
+        self.assertNotIn("/update/run?mode=radar", response.text)
+        self.assertLess(response.text.find("/update/run?mode=daily"), response.text.find("/update/run?mode=full"))
         self.assertIn('data-update-status-url="/update/status"', response.text)
 
     def test_dashboard_update_button_starts_background_update(self):
@@ -47,9 +45,9 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('action="/update/run?mode=daily"', response.text)
-        self.assertIn('action="/update/run?mode=dragon"', response.text)
-        self.assertIn('action="/update/run?mode=radar"', response.text)
         self.assertIn('action="/update/run?mode=full"', response.text)
+        self.assertNotIn('action="/update/run?mode=dragon"', response.text)
+        self.assertNotIn('action="/update/run?mode=radar"', response.text)
         self.assertIn("button.dataset.updateLabel", response.text)
         self.assertIn("button.dataset.updateMode === status.mode", response.text)
 

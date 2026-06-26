@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}热门龙头观察池{% endblock %}
 {% block content %}
 <header class="page-header dragon-header">
@@ -7,11 +7,28 @@
     <h1>热门龙头观察池</h1>
     <p>研究版，只做次日观察辅助；不生成交易执行指令。</p>
   </div>
-  <form class="command-search" action="/dragon" method="get">
-    <input name="end" value="{{ filters.end }}" placeholder="历史日期，如 20260624">
-    <button type="submit">查看</button>
-  </form>
+  <div class="radar-header-actions">
+    <form class="command-search" action="/dragon" method="get">
+      <input name="end" value="{{ filters.end }}" placeholder="历史日期，如 20260624">
+      <button type="submit">查看</button>
+    </form>
+    <form class="radar-refresh-form" action="/dragon/update" method="post">
+      <button type="submit" {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running and update_status.mode == "dragon" %}正在刷新{% else %}刷新龙头池{% endif %}
+      </button>
+    </form>
+  </div>
 </header>
+
+{% if update_status and update_status.mode == "dragon" and update_status.message %}
+<section class="radar-refresh-strip panel">
+  <div class="radar-refresh-main">
+    <strong>龙头池刷新状态</strong>
+    <span>{{ update_status.message }}</span>
+    {% if update_status.finished_at %}<span>完成 {{ update_status.finished_at }}</span>{% endif %}
+  </div>
+</section>
+{% endif %}
 
 <section class="panel dragon-board">
   <div class="dragon-board-head">
