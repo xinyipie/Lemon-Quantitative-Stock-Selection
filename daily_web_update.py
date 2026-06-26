@@ -179,6 +179,19 @@ def run_update(args: argparse.Namespace) -> None:
     update_mode = getattr(args, "mode", "daily")
     fast_mode = bool(getattr(args, "fast", False))
 
+    if update_mode in ("dragon", "radar"):
+        effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
+        print(f"\n有效最新交易日：{effective_end}")
+        if update_mode == "dragon":
+            _refresh_dragon_limit_pool(py, args, effective_end)
+            print("\n热门龙头更新流程完成。")
+            return
+        if not args.skip_market_context:
+            run_command([py, "market_context_snapshot.py", "--date", effective_end], args.dry_run)
+        refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
+        print("\n市场雷达更新流程完成。")
+        return
+
     if not args.skip_download:
         download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
         if args.skip_financial:
@@ -412,7 +425,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--history-db", type=Path, default=DEFAULT_HISTORY_DB)
     parser.add_argument("--signal-db", type=Path, default=DEFAULT_SIGNAL_DB)
-    parser.add_argument("--mode", choices=["daily", "full"], default="daily", help="daily=轻量日更；full=补齐短线复盘和长线审计")
+    parser.add_argument("--mode", choices=["daily", "dragon", "radar", "full"], default="daily", help="daily=轻量日更；dragon=只更新热门龙头；radar=只更新市场雷达；full=补齐短线复盘和长线审计")
     parser.add_argument("--full-history", action="store_true", help="重跑并导入 2024H1 起所有半年度长线审计")
     parser.add_argument("--fast", action="store_true", help="线上极速同步：跳过限频重接口、市场上下文和AI解释，只刷新核心信号")
     parser.add_argument("--skip-financial", action="store_true", default=True, help="日常更新默认跳过财务下载")

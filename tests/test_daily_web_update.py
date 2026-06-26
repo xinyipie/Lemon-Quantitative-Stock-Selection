@@ -282,6 +282,86 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertFalse(any("daily_ai_brief.py" in text for text in command_texts))
         refresh_radar.assert_not_called()
 
+    def test_dragon_mode_only_refreshes_dragon_limit_pool(self):
+        calls = []
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=False,
+            skip_history_import=False,
+            skip_market_context=False,
+            skip_main=False,
+            skip_short_review=False,
+            skip_longterm_audit=False,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="dragon",
+            fast=False,
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260624"
+        ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar, patch(
+            "daily_web_update._dragon_limit_pool_collector_path", return_value=Path("E:/代码项目/stock-strategy-research/research/limit_pool_collector.py")
+        ):
+            run_update(args)
+
+        command_texts = [" ".join(map(str, command)) for command in calls]
+        self.assertEqual(len(command_texts), 1)
+        self.assertIn("limit_pool_collector.py", command_texts[0])
+        self.assertIn("--date 20260624", command_texts[0])
+        self.assertFalse(any("data_downloader.py" in text for text in command_texts))
+        self.assertFalse(any("history_db_importer.py" in text for text in command_texts))
+        self.assertFalse(any("main.py" in text for text in command_texts))
+        refresh_radar.assert_not_called()
+
+    def test_radar_mode_only_refreshes_market_context_and_radar_snapshot(self):
+        calls = []
+        args = Namespace(
+            end="20260624",
+            start="20260624",
+            skip_download=False,
+            skip_history_import=False,
+            skip_market_context=False,
+            skip_main=False,
+            skip_short_review=False,
+            skip_longterm_audit=False,
+            skip_ai_explanations=False,
+            ai_explanation_limit=0,
+            skip_financial=True,
+            mode="radar",
+            fast=False,
+            cache_dir=Path("data/cache"),
+            history_db=Path("data/stock_history.db"),
+            signal_db=Path("data/stock_signals.db"),
+            dry_run=False,
+            short_start=None,
+            full_history=False,
+        )
+
+        with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
+            "daily_web_update.latest_history_trade_date", return_value="20260623"
+        ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar, patch(
+            "daily_web_update._dragon_limit_pool_collector_path"
+        ) as dragon_path:
+            run_update(args)
+
+        command_texts = [" ".join(map(str, command)) for command in calls]
+        self.assertEqual(len(command_texts), 1)
+        self.assertIn("market_context_snapshot.py --date 20260623", command_texts[0])
+        self.assertFalse(any("data_downloader.py" in text for text in command_texts))
+        self.assertFalse(any("history_db_importer.py" in text for text in command_texts))
+        self.assertFalse(any("main.py" in text for text in command_texts))
+        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
+        dragon_path.assert_not_called()
+
     def test_daily_mode_refreshes_dragon_limit_pool_after_main_when_research_tree_exists(self):
         calls = []
         args = Namespace(

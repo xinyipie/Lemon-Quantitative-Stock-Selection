@@ -46,12 +46,22 @@
   </div>
   <div class="update-actions">
     <form method="post" action="/update/run?mode=daily">
-      <button type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
+      <button type="submit" data-update-button data-update-mode="daily" data-update-label="快速同步" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running %}正在同步{% else %}快速同步{% endif %}
       </button>
     </form>
+    <form method="post" action="/update/run?mode=dragon">
+      <button class="ghost-button" type="submit" data-update-button data-update-mode="dragon" data-update-label="更新热门龙头" {% if update_status and update_status.running %}disabled{% endif %}>
+        更新热门龙头
+      </button>
+    </form>
+    <form method="post" action="/update/run?mode=radar">
+      <button class="ghost-button" type="submit" data-update-button data-update-mode="radar" data-update-label="更新市场雷达" {% if update_status and update_status.running %}disabled{% endif %}>
+        更新市场雷达
+      </button>
+    </form>
     <form method="post" action="/update/run?mode=full">
-      <button class="ghost-button" type="submit" data-update-button {% if update_status and update_status.running %}disabled{% endif %}>
+      <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整同步" {% if update_status and update_status.running %}disabled{% endif %}>
         完整同步
       </button>
     </form>
@@ -306,12 +316,12 @@
       text += `（完成于 ${status.finished_at}）`;
     }
     message.textContent = text;
-    buttons.forEach((button, index) => {
+    buttons.forEach((button) => {
       button.disabled = Boolean(status.running);
       if (status.running) {
-        button.textContent = index === 0 ? "正在同步" : "请稍候";
+        button.textContent = button.dataset.updateMode === status.mode ? "正在同步" : "请稍候";
       } else {
-        button.textContent = index === 0 ? "快速同步" : "完整同步";
+        button.textContent = button.dataset.updateLabel || button.textContent;
       }
     });
     if (errorBox) {

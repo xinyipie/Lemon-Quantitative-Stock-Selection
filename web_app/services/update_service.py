@@ -15,7 +15,13 @@ from typing import Callable
 
 
 DEFAULT_STATUS_PATH = Path("data") / "web_update_status.json"
-VALID_MODES = {"daily", "full"}
+VALID_MODES = {"daily", "dragon", "radar", "full"}
+MODE_LABELS = {
+    "daily": "快速同步",
+    "dragon": "热门龙头更新",
+    "radar": "市场雷达更新",
+    "full": "完整同步",
+}
 
 
 def build_update_command(end: str | None = None, mode: str = "daily", full_history: bool = False) -> list[str]:
@@ -25,7 +31,7 @@ def build_update_command(end: str | None = None, mode: str = "daily", full_histo
         command.append("--fast")
     if end:
         command.extend(["--end", str(end).replace("-", "")[:8]])
-    if full_history:
+    if full_history and update_mode == "full":
         command.append("--full-history")
     return command
 
@@ -95,7 +101,7 @@ def start_web_update(
 
     update_mode = mode if mode in VALID_MODES else "daily"
     command = build_update_command(end=end, mode=update_mode, full_history=full_history)
-    mode_label = "日常轻量同步" if update_mode == "daily" else "完整同步"
+    mode_label = MODE_LABELS.get(update_mode, MODE_LABELS["daily"])
     _write_status(
         status_path,
         {
@@ -280,9 +286,14 @@ def _extract_mode(command: list[str]) -> str:
 
 
 def _running_message(command: list[str]) -> str:
-    if _extract_mode(command) == "full":
+    mode = _extract_mode(command)
+    if mode == "full":
         return "正在完整同步：行情、实盘、短线复盘、长线审计和市场上下文。"
-    return "正在日常同步：更新行情、市场上下文并运行 main.py。"
+    if mode == "dragon":
+        return "正在更新热门龙头：只刷新涨停池和龙头观察池。"
+    if mode == "radar":
+        return "正在更新市场雷达：只刷新市场上下文和雷达快照。"
+    return "正在快速同步：刷新核心行情、今日信号和龙头池。"
 
 
 def _summarize_progress_line(line: str) -> str:

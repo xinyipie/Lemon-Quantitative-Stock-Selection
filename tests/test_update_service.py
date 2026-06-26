@@ -35,6 +35,26 @@ class UpdateServiceTest(unittest.TestCase):
         self.assertIn("--full-history", command)
         self.assertNotIn("--fast", command)
 
+    def test_build_update_command_can_request_dragon_mode(self):
+        command = build_update_command(end="20260616", mode="dragon")
+
+        self.assertIn("--mode", command)
+        self.assertIn("dragon", command)
+        self.assertIn("--end", command)
+        self.assertIn("20260616", command)
+        self.assertNotIn("--fast", command)
+        self.assertNotIn("--full-history", command)
+
+    def test_build_update_command_can_request_radar_mode(self):
+        command = build_update_command(end="20260616", mode="radar")
+
+        self.assertIn("--mode", command)
+        self.assertIn("radar", command)
+        self.assertIn("--end", command)
+        self.assertIn("20260616", command)
+        self.assertNotIn("--fast", command)
+        self.assertNotIn("--full-history", command)
+
     def test_run_update_job_records_finished_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
