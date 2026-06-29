@@ -31,6 +31,9 @@ class WebAppTest(unittest.TestCase):
         self.assertNotIn("/update/run?mode=radar", response.text)
         self.assertLess(response.text.find("/update/run?mode=daily"), response.text.find("/update/run?mode=full"))
         self.assertIn('data-update-status-url="/update/status"', response.text)
+        self.assertIn("data-background-update-form", response.text)
+        self.assertIn("stock:updatePending", response.text)
+        self.assertIn("window.location.reload()", response.text)
 
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
@@ -39,6 +42,15 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 303)
         start_update.assert_called_once_with(mode="full")
+
+    def test_dashboard_update_button_can_start_without_page_redirect_for_ajax(self):
+        with patch("web_app.app.start_web_update") as start_update:
+            start_update.return_value = {"state": "running", "started": True, "mode": "daily"}
+            response = self.client.post("/update/run?mode=daily", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "running")
+        start_update.assert_called_once_with(mode="daily")
 
     def test_dashboard_update_button_labels_match_actions_after_polling(self):
         response = self.client.get("/")

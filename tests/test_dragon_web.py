@@ -126,6 +126,8 @@ class DragonWebTest(unittest.TestCase):
         self.assertIn("small gap ok", response.text)
         self.assertIn("29.4%", response.text)
         self.assertIn('action="/dragon/update"', response.text)
+        self.assertIn("data-background-update-form", response.text)
+        self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("刷新龙头池", response.text)
 
     def test_dragon_update_button_starts_dragon_refresh_and_returns_to_page(self):
@@ -135,6 +137,15 @@ class DragonWebTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/dragon")
+        start_update.assert_called_once_with(mode="dragon")
+
+    def test_dragon_update_button_can_start_without_page_redirect_for_ajax(self):
+        with patch("web_app.app.start_web_update") as start_update:
+            start_update.return_value = {"state": "running", "started": True, "mode": "dragon"}
+            response = TestClient(app).post("/dragon/update", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mode"], "dragon")
         start_update.assert_called_once_with(mode="dragon")
 
 

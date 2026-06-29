@@ -12,23 +12,22 @@
       <input name="end" value="{{ filters.end }}" placeholder="历史日期，如 20260624">
       <button type="submit">查看</button>
     </form>
-    <form class="radar-refresh-form" action="/dragon/update" method="post">
-      <button type="submit" {% if update_status and update_status.running %}disabled{% endif %}>
+    <form class="radar-refresh-form" action="/dragon/update" method="post" data-background-update-form>
+      <button type="submit" data-update-button data-update-mode="dragon" data-update-label="刷新龙头池" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running and update_status.mode == "dragon" %}正在刷新{% else %}刷新龙头池{% endif %}
       </button>
     </form>
   </div>
 </header>
 
-{% if update_status and update_status.mode == "dragon" and update_status.message %}
-<section class="radar-refresh-strip panel">
+<section class="radar-refresh-strip panel" data-update-status-url="/update/status">
   <div class="radar-refresh-main">
     <strong>龙头池刷新状态</strong>
-    <span>{{ update_status.message }}</span>
+    <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行龙头池刷新。" }}</span>
     {% if update_status.finished_at %}<span>完成 {{ update_status.finished_at }}</span>{% endif %}
   </div>
+  <pre class="update-error" data-update-error hidden></pre>
 </section>
-{% endif %}
 
 <section class="panel dragon-board">
   <div class="dragon-board-head">

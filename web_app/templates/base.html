@@ -29,5 +29,97 @@
   <main class="content">
     {% block content %}{% endblock %}
   </main>
+  <script>
+  (() => {
+    const forms = document.querySelectorAll("[data-background-update-form]");
+    const panels = document.querySelectorAll("[data-update-status-url]");
+    if (!forms.length && !panels.length) return;
+
+    const statusUrl = (panels[0] && panels[0].dataset.updateStatusUrl) || "/update/status";
+    const pendingKey = "stock:updatePending";
+    let reloadWhenFinished = window.sessionStorage.getItem(pendingKey) === "1";
+
+    function updatePanels(status) {
+      panels.forEach((panel) => {
+        const message = panel.querySelector("[data-update-message]");
+        const buttons = panel.querySelectorAll("[data-update-button]");
+        const errorBox = panel.querySelector("[data-update-error]");
+        const displayMessage = status.display_message || status.message || "状态读取中";
+        if (message) {
+          let text = `当前状态：${displayMessage}`;
+          if (status.started_at && status.running) {
+            const eta = status.mode === "full" ? "通常需要 5-30 分钟" : "通常需要 1-5 分钟";
+            text += `（开始于 ${status.started_at}，${eta}）`;
+          } else if (status.finished_at) {
+            text += `（完成于 ${status.finished_at}）`;
+          }
+          message.textContent = text;
+        }
+        buttons.forEach((button) => {
+          button.disabled = Boolean(status.running);
+          if (status.running) {
+            button.textContent = button.dataset.updateMode === status.mode ? "正在同步" : "请稍候";
+          } else {
+            button.textContent = button.dataset.updateLabel || button.textContent;
+          }
+        });
+        if (errorBox) {
+          const tail = status.state === "failed" ? (status.stderr_tail || status.stdout_tail || "") : "";
+          errorBox.hidden = !tail;
+          errorBox.textContent = tail.slice(-1200);
+        }
+      });
+    }
+
+    function maybeReload(status) {
+      if (status.running) return;
+      if (reloadWhenFinished && status.state === "finished") {
+        window.sessionStorage.removeItem(pendingKey);
+        reloadWhenFinished = false;
+        window.location.reload();
+      }
+    }
+
+    async function fetchStatus() {
+      try {
+        const response = await fetch(statusUrl, { cache: "no-store" });
+        if (!response.ok) return;
+        const status = await response.json();
+        updatePanels(status);
+        maybeReload(status);
+        if (status.running) window.setTimeout(fetchStatus, 5000);
+      } catch (error) {
+        panels.forEach((panel) => {
+          const message = panel.querySelector("[data-update-message]");
+          if (message) message.textContent = "当前状态：暂时读取不到更新进度，稍后自动重试。";
+        });
+        if (reloadWhenFinished) window.setTimeout(fetchStatus, 5000);
+      }
+    }
+
+    forms.forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        window.sessionStorage.setItem(pendingKey, "1");
+        reloadWhenFinished = true;
+        form.querySelectorAll("[data-update-button], button[type='submit']").forEach((button) => {
+          button.disabled = true;
+          button.textContent = "正在同步";
+        });
+        try {
+          await fetch(form.action, {
+            method: "POST",
+            headers: { "Accept": "application/json" },
+            cache: "no-store",
+          });
+        } finally {
+          fetchStatus();
+        }
+      });
+    });
+
+    fetchStatus();
+  })();
+  </script>
 </body>
 </html>

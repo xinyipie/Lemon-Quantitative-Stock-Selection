@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
 from sector_heat_diagnostics import rank_sector_stocks
+import web_app.app as web_app_module
 from web_app.app import app
 from web_app.services.sector_service import (
     build_concept_news_radar,
@@ -43,6 +44,9 @@ def daily_rows(code: str, closes: list[float], industry: str, name: str) -> tupl
 
 
 class SectorWebTest(unittest.TestCase):
+    def setUp(self):
+        web_app_module._sector_page_cache.clear()
+
     def make_history_db(self) -> Path:
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
@@ -146,6 +150,8 @@ class SectorWebTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('action="/sectors/update"', response.text)
+        self.assertIn("data-background-update-form", response.text)
+        self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("刷新市场雷达", response.text)
 
     def test_sector_update_button_starts_radar_refresh_and_returns_to_page(self):
@@ -158,6 +164,69 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/sectors")
         start_update.assert_called_once_with(mode="radar")
+
+    def test_sector_update_button_can_start_without_page_redirect_for_ajax(self):
+        client = TestClient(app)
+
+        with patch("web_app.app.start_web_update") as start_update:
+            start_update.return_value = {"state": "running", "started": True, "mode": "radar"}
+            response = client.post("/sectors/update", headers={"Accept": "application/json"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mode"], "radar")
+        start_update.assert_called_once_with(mode="radar")
+
+    def test_sector_page_reuses_short_lived_payload_cache(self):
+        client = TestClient(app)
+        fake_radar = {
+            "end_date": "20260617",
+            "summary": {
+                "tone": "watch",
+                "headline": "market test",
+                "stance": "watch",
+                "top_sector": "AI",
+                "top_stage": "trend",
+                "top_score": 80,
+                "healthy_count": 1,
+                "healthy_display_count": 1,
+                "risky_count": 0,
+                "risky_display_count": 0,
+            },
+            "message": "",
+            "healthy": [],
+            "risky": [],
+            "candidate_groups": [],
+        }
+        fake_news = {
+            "concepts": {"items": [], "source_date": "20260617", "source_kind": "empty", "message": ""},
+            "theme_filter": {"items": [], "source_date": "20260617"},
+            "news": {"source_date": "20260617", "selection": {}, "positive": [], "negative": [], "message": "", "items": []},
+        }
+        fake_decision = {
+            "tone": "watch",
+            "confidence": "medium",
+            "alignment": "split",
+            "primary_action": "watch",
+            "explanation": "test",
+            "focus_industries": [],
+            "avoid_industries": [],
+            "source_note": "source",
+        }
+        fake_overlap = {"source_date": "20260617", "items": [], "orphan_items": [], "conflict_items": [], "message": "no overlap"}
+        with patch("web_app.app.build_sector_radar", return_value=fake_radar) as build_radar, patch(
+            "web_app.app.build_concept_news_radar", return_value=fake_news
+        ) as build_news, patch("web_app.app.build_market_radar_decision", return_value=fake_decision) as build_decision, patch(
+            "web_app.app.build_strategy_overlap", return_value=fake_overlap
+        ) as build_overlap:
+            first = client.get("/sectors?end=20260617")
+            second = client.get("/sectors?end=20260617")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(build_radar.call_count, 1)
+        self.assertEqual(build_news.call_count, 1)
+        self.assertEqual(build_decision.call_count, 1)
+        self.assertEqual(build_overlap.call_count, 1)
 
     def test_sector_page_uses_trader_message_workbench_layout(self):
         client = TestClient(app)

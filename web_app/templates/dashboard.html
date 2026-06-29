@@ -45,12 +45,12 @@
     <pre class="update-error" data-update-error hidden></pre>
   </div>
   <div class="update-actions">
-    <form method="post" action="/update/run?mode=daily">
+    <form method="post" action="/update/run?mode=daily" data-background-update-form>
       <button type="submit" data-update-button data-update-mode="daily" data-update-label="快速同步" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running %}正在同步{% else %}快速同步{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=full">
+    <form method="post" action="/update/run?mode=full" data-background-update-form>
       <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整同步" {% if update_status and update_status.running %}disabled{% endif %}>
         完整同步
       </button>

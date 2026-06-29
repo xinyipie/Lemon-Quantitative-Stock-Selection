@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -62,6 +63,19 @@ def _fmt_date(value):
 
 
 templates.env.filters["fmt_date"] = _fmt_date
+
+_SECTOR_PAGE_CACHE_TTL_SECONDS = 120
+_sector_page_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def _wants_json(request: Request) -> bool:
+    return "application/json" in str(request.headers.get("accept") or "").lower()
+
+
+def _update_start_response(request: Request, status: dict | None, redirect_url: str):
+    if _wants_json(request):
+        return JSONResponse(status or {"state": "running"})
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @app.get("/")
@@ -143,9 +157,9 @@ def dashboard(request: Request):
 
 
 @app.post("/update/run")
-def run_update(mode: str = "daily"):
-    start_web_update(mode=mode)
-    return RedirectResponse(url="/", status_code=303)
+def run_update(request: Request, mode: str = "daily"):
+    status = start_web_update(mode=mode)
+    return _update_start_response(request, status, "/")
 
 
 @app.get("/update/status")
@@ -189,6 +203,43 @@ def db_status(request: Request):
 
 @app.get("/sectors")
 def sectors(request: Request, end: str = ""):
+    payload = _get_sector_page_payload(end)
+    return templates.TemplateResponse(
+        request,
+        "sectors.html",
+        {
+            "request": request,
+            **payload,
+            "filters": {"end": end},
+            "update_status": read_update_status(),
+            "active_nav": "sectors",
+        },
+    )
+
+
+def _get_sector_page_payload(end: str = "") -> dict:
+    key = _sector_page_cache_key(end)
+    cached = _sector_page_cache.get(key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _SECTOR_PAGE_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    payload = _build_sector_page_payload(end)
+    _sector_page_cache[key] = (now, payload)
+    return payload
+
+
+def _sector_page_cache_key(end: str = "") -> tuple:
+    return (
+        str(end or "latest"),
+        id(build_sector_radar),
+        id(build_concept_news_radar),
+        id(build_market_radar_decision),
+        id(build_strategy_overlap),
+    )
+
+
+def _build_sector_page_payload(end: str = "") -> dict:
     radar = build_sector_radar(DEFAULT_HISTORY_DB_PATH, end_date=end or None)
     concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
     decision = build_market_radar_decision(radar, concept_news)
@@ -202,21 +253,13 @@ def sectors(request: Request, end: str = ""):
             latest_radar_snapshot = get_latest_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH)
         except Exception:
             latest_radar_snapshot = None
-    return templates.TemplateResponse(
-        request,
-        "sectors.html",
-        {
-            "request": request,
-            "radar": radar,
-            "concept_news": concept_news,
-            "decision": decision,
-            "strategy_overlap": strategy_overlap,
-            "latest_radar_snapshot": latest_radar_snapshot,
-            "filters": {"end": end},
-            "update_status": read_update_status(),
-            "active_nav": "sectors",
-        },
-    )
+    return {
+        "radar": radar,
+        "concept_news": concept_news,
+        "decision": decision,
+        "strategy_overlap": strategy_overlap,
+        "latest_radar_snapshot": latest_radar_snapshot,
+    }
 
 
 def refresh_market_radar_snapshot_for_page(end: str = "") -> int | None:
@@ -231,12 +274,13 @@ def refresh_market_radar_snapshot_for_page(end: str = "") -> int | None:
 
 
 @app.post("/sectors/update")
-def update_market_radar(end: str = ""):
-    start_web_update(mode="radar")
+def update_market_radar(request: Request, end: str = ""):
+    _sector_page_cache.clear()
+    status = start_web_update(mode="radar")
     redirect_url = "/sectors"
     if end:
         redirect_url = f"{redirect_url}?end={end}"
-    return RedirectResponse(url=redirect_url, status_code=303)
+    return _update_start_response(request, status, redirect_url)
 
 
 @app.get("/stock")
@@ -335,9 +379,9 @@ def dragon_leaders(request: Request, end: str = ""):
 
 
 @app.post("/dragon/update")
-def update_dragon_leaders():
-    start_web_update(mode="dragon")
-    return RedirectResponse(url="/dragon", status_code=303)
+def update_dragon_leaders(request: Request):
+    status = start_web_update(mode="dragon")
+    return _update_start_response(request, status, "/dragon")
 
 
 @app.get("/explain/signal/{trade_date}/{ts_code}")
