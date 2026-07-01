@@ -1,0 +1,14 @@
+<section class="panel update-panel compact-update-panel" data-update-status-url="/update/status">
+  <div>
+    <h2>同步状态</h2>
+    <p>同步任务运行时，本页会继续监听进度；任务完成后自动刷新当前数据。</p>
+    {% if update_status and (update_status.display_message or update_status.message) %}
+      <div class="filter-summary {{ 'warn' if update_status.alignment_state == 'warn' else '' }}" data-update-message>
+        当前状态：{{ update_status.display_message or update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}
+      </div>
+    {% else %}
+      <div class="filter-summary" data-update-message>当前状态：尚未运行一键更新。</div>
+    {% endif %}
+    <pre class="update-error" data-update-error hidden></pre>
+  </div>
+</section>

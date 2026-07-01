@@ -700,6 +700,8 @@ def build_data_freshness(
     latest_live_short_run: dict | None,
     signal_summary: dict,
     lag_warning_days: int = 7,
+    now: datetime | None = None,
+    calendar_warning_days: int = 3,
 ) -> dict:
     """Summarize whether the dashboard data sources are in sync."""
     history_date = str(status.get("latest_trade_date") or "") or None
@@ -708,6 +710,7 @@ def build_data_freshness(
     live_lag_days = _days_between(history_date, live_date)
     history_lag_days = _days_between(live_date, history_date)
     backtest_lag_days = _days_between(history_date, backtest_date)
+    current_lag_days = _days_between((now or datetime.now()).strftime("%Y%m%d"), history_date)
     warnings: list[str] = []
     notes: list[str] = []
     if history_lag_days is not None and history_lag_days > 0:
@@ -719,9 +722,13 @@ def build_data_freshness(
     elif live_lag_days is not None:
         notes.append("今日实盘记录已更新；若无推荐，表示规则当天没有留下可入池标的。")
     if backtest_lag_days is not None and backtest_lag_days > lag_warning_days:
-        notes.append(f"短线事后复盘样本最新到 {backtest_date}，比行情少 {backtest_lag_days} 天；这是未来收益未满期，不等同于今日实盘数据滞后。")
+        notes.append(f"短线事后复盘样本最新到 {backtest_date}，比行情少 {backtest_lag_days} 天；复盘只统计已有入池样本且后续收益可验证的日期，不等同于今日实盘数据滞后。")
     if history_date is None:
         warnings.append("历史行情库暂无最新交易日，请先检查数据导入状态。")
+    elif current_lag_days is not None and current_lag_days > calendar_warning_days:
+        warnings.append(
+            f"历史行情有效日停在 {history_date}，距离当前日期已 {current_lag_days} 天；可能是交易日历或行情源尚未更新。"
+        )
     if history_lag_days is not None and history_lag_days > 0:
         tone = "warn"
         status_label = "行情滞后"
@@ -734,6 +741,10 @@ def build_data_freshness(
         tone = "warn"
         status_label = "缺少行情"
         headline = "历史行情库暂无最新交易日"
+    elif current_lag_days is not None and current_lag_days > calendar_warning_days:
+        tone = "warn"
+        status_label = "行情源滞后"
+        headline = f"行情有效日 {history_date}，距离当前日期已 {current_lag_days} 天"
     else:
         tone = "ok"
         status_label = "日期同步"
@@ -745,6 +756,7 @@ def build_data_freshness(
         "live_lag_days": live_lag_days,
         "history_lag_days": history_lag_days,
         "backtest_lag_days": backtest_lag_days,
+        "current_lag_days": current_lag_days,
         "tone": tone,
         "status_label": status_label,
         "headline": headline,

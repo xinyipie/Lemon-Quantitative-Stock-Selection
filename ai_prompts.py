@@ -395,14 +395,14 @@ PROMPT_BATCH_STOCK_ANALYSIS = """\
     "target_price": 目标价格（保留2位小数）,
     "target_gain_pct": 目标涨幅百分比（整数，如15表示15%）,
     "stop_loss_price": 建议止损价（保留2位小数）,
-    "buy_timing": "买入时机（立即买入/回调至XX元买入/突破XX元买入/观望）",
+    "buy_timing": "观察触发条件（站稳XX元/回调至XX元附近可继续观察/突破XX元后再评估/观望），禁止写立即买入",
     "risk_level": "风险等级（低/中/高）",
     "technical_analysis": "技术面分析（80-120字，包含：均线位置、量能变化、支撑压力位、技术形态，并注明目标价和止损价的技术依据）",
     "capital_analysis": "资金面分析（50-80字，包含：主力资金动向、量比换手率解读）",
     "fundamental_analysis": "基本面分析（50-80字，包含：ROE、营收增长、负债率评价，行业地位）",
     "catalyst": "上涨催化剂（30-50字，可能推动股价上涨的因素，如政策、业绩、技术突破等）",
     "risk_warning": "风险提示（30-50字，最大的风险点）",
-    "operation_suggestion": "操作建议（50-80字，具体的买卖建议和仓位管理）"
+    "operation_suggestion": "观察建议（50-80字，只能给条件式观察、放弃条件和风险纪律，不生成买卖指令或仓位管理）"
   }}
 ]
 

@@ -21,8 +21,8 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("最近实盘短线", response.text)
         self.assertIn("快速检测", response.text)
 
-        self.assertIn("快速同步", response.text)
-        self.assertIn("完整同步", response.text)
+        self.assertIn("更新到最新交易日", response.text)
+        self.assertIn("完整重算", response.text)
         self.assertIn("单股体检", response.text)
         self.assertNotIn("批量体检自选股", response.text)
         self.assertIn("/update/run?mode=daily", response.text)
@@ -115,6 +115,23 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("初筛通过", response.text)
         self.assertIn("可信度", response.text)
         self.assertIn("short_v9_final", response.text)
+        self.assertIn('data-update-status-url="/update/status"', response.text)
+        self.assertIn("stock:updatePending", response.text)
+
+    def test_signals_page_uses_latest_run_date_when_no_new_signals(self):
+        with patch("web_app.app.get_signal_runs") as get_runs, patch("web_app.app.get_recent_signals") as get_signals:
+            get_runs.return_value = [
+                {
+                    "trade_date": "20260630",
+                    "status_label": "无入选标的",
+                    "signal_count": 0,
+                }
+            ]
+            get_signals.return_value = []
+            response = self.client.get("/signals")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("2026-06-30", response.text)
 
     def test_signal_explanation_page_renders(self):
         response = self.client.get("/explain/signal/20260525/000012.SZ")
@@ -129,6 +146,8 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("长线观察池", response.text)
         self.assertIn("Elite", response.text)
         self.assertIn("Watch", response.text)
+        self.assertIn('data-update-status-url="/update/status"', response.text)
+        self.assertIn("stock:updatePending", response.text)
         self.assertIn("最近运行", response.text)
         self.assertIn("生命周期事件", response.text)
         self.assertIn("历史长线池验证", response.text)

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -368,6 +369,7 @@ class WebServicesTest(unittest.TestCase):
             status={"latest_trade_date": "20260615"},
             latest_live_short_run={"trade_date": "20260615"},
             signal_summary={"latest_backtest_date": "20260529"},
+            now=datetime(2026, 6, 15),
         )
 
         self.assertEqual(freshness["live_lag_days"], 0)
@@ -381,6 +383,7 @@ class WebServicesTest(unittest.TestCase):
             status={"latest_trade_date": "20260615"},
             latest_live_short_run={"trade_date": "20260617"},
             signal_summary={"latest_backtest_date": "20260612"},
+            now=datetime(2026, 6, 17),
         )
 
         self.assertEqual(freshness["history_date"], "20260615")
@@ -570,6 +573,7 @@ class WebServicesTest(unittest.TestCase):
             status={"latest_trade_date": "20260615"},
             latest_live_short_run={"trade_date": "20260615"},
             signal_summary={"latest_backtest_date": "20260529"},
+            now=datetime(2026, 6, 15),
         )
 
         self.assertEqual(freshness["history_date"], "20260615")
@@ -577,6 +581,19 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(freshness["backtest_lag_days"], 17)
         self.assertFalse(freshness["warnings"])
         self.assertTrue(any("事后复盘" in item for item in freshness["notes"]))
+
+    def test_data_freshness_warns_when_history_date_is_far_behind_today(self):
+        freshness = build_data_freshness(
+            status={"latest_trade_date": "20260625"},
+            latest_live_short_run={"trade_date": "20260625"},
+            signal_summary={"latest_backtest_date": "20260618"},
+            now=datetime(2026, 6, 30),
+        )
+
+        self.assertEqual(freshness["tone"], "warn")
+        self.assertEqual(freshness["status_label"], "行情源滞后")
+        self.assertEqual(freshness["current_lag_days"], 5)
+        self.assertTrue(any("20260625" in item and "行情源" in item for item in freshness["warnings"]))
 
     def test_short_signal_performance_summary_uses_recent_signal_outcomes(self):
         summary = summarize_short_signal_performance(

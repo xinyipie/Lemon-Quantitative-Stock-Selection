@@ -13,8 +13,8 @@
       <button type="submit">查看</button>
     </form>
     <form class="radar-refresh-form" action="/sectors/update" method="post" data-background-update-form>
-      <button type="submit" data-update-button data-update-mode="radar" data-update-label="刷新市场雷达" {% if update_status and update_status.running %}disabled{% endif %}>
-        {% if update_status and update_status.running and update_status.mode == "radar" %}正在刷新{% else %}刷新市场雷达{% endif %}
+      <button type="submit" data-update-button data-update-mode="radar" data-update-label="更新行情并刷新雷达" {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running and update_status.mode == "radar" %}正在更新{% else %}更新行情并刷新雷达{% endif %}
       </button>
     </form>
   </div>
@@ -23,8 +23,8 @@
 <section class="radar-refresh-strip panel" data-update-status-url="/update/status">
   <div class="radar-refresh-main">
     <strong>市场雷达刷新状态</strong>
-    <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行市场雷达刷新。" }}</span>
-    {% if update_status.finished_at %}<span>完成 {{ update_status.finished_at }}</span>{% endif %}
+    <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行市场雷达刷新；点击后会先补核心行情，再刷新雷达。" }}</span>
+    <span data-update-finished {% if not update_status.finished_at or update_status.running %}hidden{% endif %}>{{ "完成" if update_status and update_status.state == "finished" else "结束" }} {{ update_status.finished_at if update_status and update_status.finished_at else "" }}</span>
   </div>
   <pre class="update-error" data-update-error hidden></pre>
 </section>

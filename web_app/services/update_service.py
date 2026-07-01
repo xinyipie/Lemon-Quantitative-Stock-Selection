@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -15,12 +16,13 @@ from typing import Callable
 
 
 DEFAULT_STATUS_PATH = Path("data") / "web_update_status.json"
+_STATUS_FILE_LOCK = threading.RLock()
 VALID_MODES = {"daily", "dragon", "radar", "full"}
 MODE_LABELS = {
-    "daily": "快速同步",
-    "dragon": "热门龙头更新",
-    "radar": "市场雷达更新",
-    "full": "完整同步",
+    "daily": "更新到最新交易日",
+    "dragon": "行情 + 龙头池更新",
+    "radar": "行情 + 市场雷达更新",
+    "full": "完整重算",
 }
 
 
@@ -92,6 +94,8 @@ def start_web_update(
     mode: str = "daily",
     full_history: bool = False,
     status_path: str | Path = DEFAULT_STATUS_PATH,
+    launcher: Callable | None = None,
+    startup_timeout_seconds: float = 3.0,
 ) -> dict:
     status = read_update_status(status_path)
     if status.get("running"):
@@ -115,9 +119,61 @@ def start_web_update(
             "message": f"{mode_label}已开始，完成前请不要重复点击。",
         },
     )
-    thread = threading.Thread(target=run_update_job, args=(command, Path(status_path)), daemon=True)
-    thread.start()
+    worker_command = build_update_worker_command(command, Path(status_path))
+    launch = launcher or _launch_update_worker
+    try:
+        launch(worker_command)
+    except Exception as exc:
+        failed = {
+            "state": "failed",
+            "running": False,
+            "started": False,
+            "mode": update_mode,
+            "command": command,
+            "worker_command": worker_command,
+            "started_at": read_update_status(status_path).get("started_at"),
+            "updated_at": _now(),
+            "finished_at": _now(),
+            "stderr_tail": str(exc),
+            "message": "同步任务启动失败，请查看错误摘要。",
+        }
+        _write_status(status_path, failed)
+        return read_update_status(status_path)
+    started_status = _wait_for_started_process(status_path, timeout_seconds=startup_timeout_seconds)
+    if _looks_like_unstarted_running_job(started_status):
+        failed = dict(started_status)
+        failed.update(
+            {
+                "state": "failed",
+                "running": False,
+                "finished_at": _now(),
+                "message": "同步任务未能启动后台进程，请刷新页面后重试。",
+            }
+        )
+        _write_status(status_path, failed)
+        return read_update_status(status_path)
     return read_update_status(status_path)
+
+
+def build_update_worker_command(command: list[str], status_path: str | Path) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "web_app.services.update_worker",
+        json.dumps(command, ensure_ascii=False),
+        str(Path(status_path)),
+    ]
+
+
+def _launch_update_worker(worker_command: list[str]) -> subprocess.Popen:
+    return subprocess.Popen(
+        worker_command,
+        cwd=Path.cwd(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
 
 
 def run_update_job(
@@ -231,19 +287,37 @@ def _run_streaming_process(command: list[str], status_path: Path) -> _ProcessRes
 
 
 def _write_status(status_path: str | Path, status: dict) -> None:
+    with _STATUS_FILE_LOCK:
+        _write_status_unlocked(status_path, status)
+
+
+def _write_status_unlocked(status_path: str | Path, status: dict) -> None:
     path = Path(status_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
+    tmp_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
 
 
 def _merge_status(status_path: str | Path, patch: dict) -> None:
+    with _STATUS_FILE_LOCK:
+        path = Path(status_path)
+        try:
+            current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, json.JSONDecodeError):
+            current = {}
+        current.update(patch)
+        _write_status_unlocked(path, current)
+
+
+def _wait_for_started_process(status_path: str | Path, timeout_seconds: float = 1.0) -> dict:
+    deadline = time.monotonic() + max(timeout_seconds, 0)
     path = Path(status_path)
-    try:
-        current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except (OSError, json.JSONDecodeError):
-        current = {}
-    current.update(patch)
-    _write_status(path, current)
+    status = read_update_status(path, stale_after_seconds=None)
+    while status.get("state") == "running" and _looks_like_unstarted_running_job(status) and time.monotonic() < deadline:
+        time.sleep(0.05)
+        status = read_update_status(path, stale_after_seconds=None)
+    return status
 
 
 def _tail(text: str, limit: int = 4000) -> str:
@@ -267,6 +341,8 @@ def _is_stale_status(status: dict, stale_after_seconds: int | None, now: datetim
     except ValueError:
         return False
     current = now or datetime.now()
+    if _looks_like_unstarted_running_job(status) and (current - last_update).total_seconds() > 10:
+        return True
     return (current - last_update).total_seconds() > threshold
 
 
@@ -275,6 +351,12 @@ def _default_stale_seconds(status: dict) -> int:
     if mode == "full":
         return 90 * 60
     return 20 * 60
+
+
+def _looks_like_unstarted_running_job(status: dict) -> bool:
+    if status.get("state") != "running":
+        return False
+    return not any(status.get(key) for key in ("pid", "stdout_tail", "stderr_tail", "returncode"))
 
 
 def _extract_mode(command: list[str]) -> str:
@@ -290,10 +372,10 @@ def _running_message(command: list[str]) -> str:
     if mode == "full":
         return "正在完整同步：行情、实盘、短线复盘、长线审计和市场上下文。"
     if mode == "dragon":
-        return "正在更新热门龙头：只刷新涨停池和龙头观察池。"
+        return "正在更新热门龙头：先更新核心行情，再刷新涨停池和龙头观察池。"
     if mode == "radar":
-        return "正在更新市场雷达：只刷新市场上下文和雷达快照。"
-    return "正在快速同步：刷新核心行情、今日信号和龙头池。"
+        return "正在更新市场雷达：先更新核心行情，再刷新市场上下文和雷达快照。"
+    return "正在更新到最新交易日：刷新核心行情、今日信号和龙头池。"
 
 
 def _summarize_progress_line(line: str) -> str:

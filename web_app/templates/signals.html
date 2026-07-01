@@ -10,12 +10,14 @@
   </div>
 </header>
 
+{% include "partials/update_status_panel.html" %}
+
 <section class="status-strip">
   <div class="status-cell"><span>本页记录</span><strong>{{ signals|length }}</strong></div>
-  <div class="status-cell"><span>最新日期</span><strong>{{ signals[0].trade_date|fmt_date if signals else 'NA' }}</strong></div>
+  <div class="status-cell"><span>最新运行</span><strong>{{ latest_signal_run.trade_date|fmt_date if latest_signal_run else 'NA' }}</strong></div>
   <div class="status-cell"><span>来源</span><strong>回测 + 实盘</strong></div>
   <div class="status-cell"><span>策略</span><strong>short_v9_final</strong></div>
-  <div class="status-cell"><span>用途</span><strong>复盘追踪</strong></div>
+  <div class="status-cell"><span>最新状态</span><strong>{{ latest_signal_run.status_label if latest_signal_run else '未运行' }}</strong></div>
 </section>
 
 <section class="metric-grid short-review-metrics">

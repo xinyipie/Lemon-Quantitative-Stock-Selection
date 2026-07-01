@@ -318,15 +318,14 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
     default_window_days = 100
     review_sources = ["backtest_ic_short", "live"]
     review_profiles = ["short_v9_final", "profile_v9_sector_quality_guard"]
-    probe = get_recent_signals(
+    latest_runs = get_signal_runs(
         DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        limit=1,
         source=review_sources,
-        profile=review_profiles,
         mode="short",
+        limit=1,
     )
-    latest_signal_date = probe[0]["trade_date"] if probe else None
+    latest_signal_run = latest_runs[0] if latest_runs else None
+    latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     effective_start = start or build_default_signal_start(latest_signal_date, days=default_window_days)
     recent_signals = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
@@ -348,6 +347,8 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
             "request": request,
             "signals": recent_signals,
             "short_stats": short_stats,
+            "latest_signal_run": latest_signal_run,
+            "update_status": read_update_status(),
             "filters": {
                 "q": q,
                 "start": start,
@@ -434,6 +435,7 @@ def longterm_pool(request: Request, start: str = "", end: str = ""):
             "pool_status": pool_status,
             "filters": sample_filters,
             "sample_filter_summary": sample_filter_summary,
+            "update_status": read_update_status(),
             "active_nav": "longterm",
         },
     )

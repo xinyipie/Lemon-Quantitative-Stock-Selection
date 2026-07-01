@@ -35,6 +35,17 @@ class DailyPro:
         )
 
 
+class EmptyDailyPro:
+    def daily(self, **kwargs):
+        return pd.DataFrame(columns=["ts_code", "trade_date"])
+
+    def daily_basic(self, **kwargs):
+        return pd.DataFrame(columns=["ts_code", "turnover_rate", "volume_ratio"])
+
+    def moneyflow(self, **kwargs):
+        return pd.DataFrame(columns=["ts_code", "net_mf_amount"])
+
+
 class IndexPro:
     def __init__(self):
         self.calls = []
@@ -125,6 +136,29 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
             finally:
                 data_downloader.CACHE_DIR = old_cache_dir
 
+    def test_get_trade_dates_extends_stale_cached_calendar_with_weekdays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            data_downloader.CACHE_DIR = tmp
+            try:
+                cache = pd.DataFrame(
+                    {
+                        "cal_date": ["20260624", "20260625"],
+                        "is_open": [1, 1],
+                    }
+                )
+                cache.to_parquet(Path(tmp) / "trade_cal.parquet", index=False)
+
+                dates = data_downloader._get_trade_dates(
+                    EmptyTradeCalPro(),
+                    "20260624",
+                    "20260630",
+                )
+
+                self.assertEqual(dates, ["20260624", "20260625", "20260626", "20260629", "20260630"])
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+
     def test_save_preserves_empty_dataframe_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "empty.parquet"
@@ -195,6 +229,26 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
                 self.assertEqual(pro.calls, 1)
                 self.assertEqual(len(saved), 1)
                 self.assertEqual(saved["trade_date"].astype(str).tolist(), ["20260618"])
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+
+    def test_core_daily_downloads_do_not_count_empty_api_responses_as_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            data_downloader.CACHE_DIR = tmp
+            try:
+                data_downloader._ensure_dirs()
+                pro = EmptyDailyPro()
+
+                daily_ok = data_downloader.download_daily_one_date(pro, "20260630")
+                basic_ok = data_downloader.download_daily_basic_one_date(pro, "20260630")
+                moneyflow_ok = data_downloader.download_moneyflow_one_date(pro, "20260630")
+
+                self.assertFalse(daily_ok)
+                self.assertFalse(basic_ok)
+                self.assertFalse(moneyflow_ok)
+                self.assertTrue((Path(tmp) / "daily" / "20260630.parquet").exists())
+                self.assertEqual(len(pd.read_parquet(Path(tmp) / "daily" / "20260630.parquet")), 0)
             finally:
                 data_downloader.CACHE_DIR = old_cache_dir
 

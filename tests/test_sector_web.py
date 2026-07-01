@@ -152,7 +152,7 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn('action="/sectors/update"', response.text)
         self.assertIn("data-background-update-form", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
-        self.assertIn("刷新市场雷达", response.text)
+        self.assertIn("更新行情并刷新雷达", response.text)
 
     def test_sector_update_button_starts_radar_refresh_and_returns_to_page(self):
         client = TestClient(app)

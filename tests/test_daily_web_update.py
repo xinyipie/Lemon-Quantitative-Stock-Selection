@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from daily_web_update import (
+    _refresh_dragon_limit_pool,
     build_longterm_periods,
     current_half_year_period,
     latest_history_trade_date,
@@ -199,6 +200,8 @@ class DailyWebUpdateTest(unittest.TestCase):
 
         command_texts = [" ".join(command) for command in calls]
         main_index = next(i for i, text in enumerate(command_texts) if "main.py" in text)
+        self.assertIn("--local-data-live", command_texts[main_index])
+        self.assertIn("--cache-dir data\\cache", command_texts[main_index])
         explanation_indexes = [i for i, text in enumerate(command_texts) if "backfill_signal_explanations.py" in text]
         brief_indexes = [i for i, text in enumerate(command_texts) if "daily_ai_brief.py" in text]
         self.assertEqual(len(explanation_indexes), 2)
@@ -282,7 +285,7 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertFalse(any("daily_ai_brief.py" in text for text in command_texts))
         refresh_radar.assert_not_called()
 
-    def test_dragon_mode_only_refreshes_dragon_limit_pool(self):
+    def test_dragon_mode_updates_core_history_then_refreshes_dragon_limit_pool(self):
         calls = []
         args = Namespace(
             end="20260624",
@@ -314,11 +317,12 @@ class DailyWebUpdateTest(unittest.TestCase):
             run_update(args)
 
         command_texts = [" ".join(map(str, command)) for command in calls]
-        self.assertEqual(len(command_texts), 1)
-        self.assertIn("limit_pool_collector.py", command_texts[0])
-        self.assertIn("--date 20260624", command_texts[0])
-        self.assertFalse(any("data_downloader.py" in text for text in command_texts))
-        self.assertFalse(any("history_db_importer.py" in text for text in command_texts))
+        self.assertEqual(len(command_texts), 3)
+        self.assertIn("data_downloader.py --start 20260624 --end 20260624 --core-only", command_texts[0])
+        self.assertIn("history_db_importer.py", command_texts[1])
+        self.assertIn("daily daily_basic moneyflow stock_basic", command_texts[1])
+        self.assertIn("limit_pool_collector.py", command_texts[2])
+        self.assertIn("--date 20260624", command_texts[2])
         self.assertFalse(any("main.py" in text for text in command_texts))
         refresh_radar.assert_not_called()
 
@@ -351,7 +355,7 @@ class DailyWebUpdateTest(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "limit_pool_collector"):
                 run_update(args)
 
-    def test_radar_mode_only_refreshes_market_context_and_radar_snapshot(self):
+    def test_radar_mode_updates_core_history_then_refreshes_market_context_and_radar_snapshot(self):
         calls = []
         args = Namespace(
             end="20260624",
@@ -383,10 +387,11 @@ class DailyWebUpdateTest(unittest.TestCase):
             run_update(args)
 
         command_texts = [" ".join(map(str, command)) for command in calls]
-        self.assertEqual(len(command_texts), 1)
-        self.assertIn("market_context_snapshot.py --date 20260623", command_texts[0])
-        self.assertFalse(any("data_downloader.py" in text for text in command_texts))
-        self.assertFalse(any("history_db_importer.py" in text for text in command_texts))
+        self.assertEqual(len(command_texts), 3)
+        self.assertIn("data_downloader.py --start 20260624 --end 20260624 --core-only", command_texts[0])
+        self.assertIn("history_db_importer.py", command_texts[1])
+        self.assertIn("daily daily_basic moneyflow stock_basic", command_texts[1])
+        self.assertIn("market_context_snapshot.py --date 20260623", command_texts[2])
         self.assertFalse(any("main.py" in text for text in command_texts))
         refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
         dragon_path.assert_not_called()
@@ -427,6 +432,25 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertEqual(len(dragon_indexes), 1)
         self.assertGreater(dragon_indexes[0], main_index)
         self.assertIn("--date 20260624", command_texts[dragon_indexes[0]])
+
+    def test_optional_dragon_limit_pool_failure_does_not_fail_daily_update(self):
+        args = Namespace(dry_run=False)
+
+        with patch(
+            "daily_web_update._dragon_limit_pool_collector_path",
+            return_value=Path("E:/stock/research/limit_pool_collector.py"),
+        ), patch("daily_web_update.run_command", side_effect=SystemExit("collector failed")):
+            _refresh_dragon_limit_pool("python", args, "20260624", required=False)
+
+    def test_required_dragon_limit_pool_failure_still_fails(self):
+        args = Namespace(dry_run=False)
+
+        with patch(
+            "daily_web_update._dragon_limit_pool_collector_path",
+            return_value=Path("E:/stock/research/limit_pool_collector.py"),
+        ), patch("daily_web_update.run_command", side_effect=SystemExit("collector failed")):
+            with self.assertRaisesRegex(SystemExit, "collector failed"):
+                _refresh_dragon_limit_pool("python", args, "20260624", required=True)
 
     def test_skip_ai_explanations_disables_daily_backfill(self):
         calls = []

@@ -172,38 +172,14 @@ def latest_ic_short_file(since_mtime: float | None = None) -> Path | None:
     return None
 
 
-def run_update(args: argparse.Namespace) -> None:
-    target_end = normalize_date(args.end or today_text())
-    target_start, target_end = resolve_update_window(target_end, args.start, args.history_db)
-    py = sys.executable
-    update_mode = getattr(args, "mode", "daily")
-    fast_mode = bool(getattr(args, "fast", False))
-
-    if update_mode in ("dragon", "radar"):
-        effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
-        print(f"\n有效最新交易日：{effective_end}")
-        if update_mode == "dragon":
-            _refresh_dragon_limit_pool(py, args, effective_end, required=True)
-            print("\n热门龙头更新流程完成。")
-            return
-        if not args.skip_market_context:
-            run_command([py, "market_context_snapshot.py", "--date", effective_end], args.dry_run)
-        refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
-        print("\n市场雷达更新流程完成。")
-        return
-
+def refresh_core_history_data(py: str, args: argparse.Namespace, target_start: str, target_end: str) -> str:
     if not args.skip_download:
-        download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
+        download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end, "--core-only"]
         if args.skip_financial:
             download_cmd.append("--skip-financial")
-        if fast_mode:
-            download_cmd.append("--core-only")
         run_command(download_cmd, args.dry_run)
 
     if not args.skip_history_import:
-        import_tables = ["daily", "daily_basic", "moneyflow", "stock_basic"]
-        if not fast_mode:
-            import_tables.append("index_daily")
         run_command(
             [
                 py,
@@ -217,10 +193,68 @@ def run_update(args: argparse.Namespace) -> None:
                 "--end",
                 target_end,
                 "--tables",
-                *import_tables,
+                "daily",
+                "daily_basic",
+                "moneyflow",
+                "stock_basic",
             ],
             args.dry_run,
         )
+
+    return target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
+
+
+def run_update(args: argparse.Namespace) -> None:
+    target_end = normalize_date(args.end or today_text())
+    target_start, target_end = resolve_update_window(target_end, args.start, args.history_db)
+    py = sys.executable
+    update_mode = getattr(args, "mode", "daily")
+    fast_mode = bool(getattr(args, "fast", False))
+
+    if update_mode in ("dragon", "radar"):
+        effective_end = refresh_core_history_data(py, args, target_start, target_end)
+        print(f"\n有效最新交易日：{effective_end}")
+        if update_mode == "dragon":
+            _refresh_dragon_limit_pool(py, args, effective_end, required=True)
+            print("\n热门龙头更新流程完成。")
+            return
+        if not args.skip_market_context:
+            run_command([py, "market_context_snapshot.py", "--date", effective_end], args.dry_run)
+        refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
+        print("\n市场雷达更新流程完成。")
+        return
+
+    if fast_mode:
+        refresh_core_history_data(py, args, target_start, target_end)
+    else:
+        if not args.skip_download:
+            download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
+            if args.skip_financial:
+                download_cmd.append("--skip-financial")
+            run_command(download_cmd, args.dry_run)
+
+        if not args.skip_history_import:
+            run_command(
+                [
+                    py,
+                    "history_db_importer.py",
+                    "--cache-dir",
+                    str(args.cache_dir),
+                    "--db",
+                    str(args.history_db),
+                    "--start",
+                    target_start,
+                    "--end",
+                    target_end,
+                    "--tables",
+                    "daily",
+                    "daily_basic",
+                    "moneyflow",
+                    "stock_basic",
+                    "index_daily",
+                ],
+                args.dry_run,
+            )
 
     effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
     print(f"\n有效最新交易日：{effective_end}")
@@ -240,7 +274,7 @@ def run_update(args: argparse.Namespace) -> None:
         )
 
     if not args.skip_main:
-        run_command([py, "main.py"], args.dry_run)
+        run_command([py, "main.py", "--local-data-live", "--cache-dir", str(args.cache_dir)], args.dry_run)
         if not args.skip_ai_explanations and not fast_mode:
             _backfill_today_ai_explanations(py, args, effective_end)
             _generate_daily_ai_brief(py, args, effective_end)
@@ -407,17 +441,22 @@ def _refresh_dragon_limit_pool(py: str, args: argparse.Namespace, effective_end:
         print(f"\n龙头观察池：{message}")
         return
     output_root = collector.resolve().parents[1] / "data_research"
-    run_command(
-        [
-            py,
-            str(collector),
-            "--date",
-            effective_end,
-            "--output-root",
-            str(output_root),
-        ],
-        args.dry_run,
-    )
+    try:
+        run_command(
+            [
+                py,
+                str(collector),
+                "--date",
+                effective_end,
+                "--output-root",
+                str(output_root),
+            ],
+            args.dry_run,
+        )
+    except SystemExit as exc:
+        if required:
+            raise
+        print(f"\n龙头观察池：刷新失败，已跳过（不影响行情同步）：{exc}")
 
 
 def parse_args() -> argparse.Namespace:

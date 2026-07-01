@@ -1,11 +1,11 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}热门龙头观察池{% endblock %}
 {% block content %}
 <header class="page-header dragon-header">
   <div>
     <div class="eyebrow">Dragon Leader Lab</div>
     <h1>热门龙头观察池</h1>
-    <p>研究版，只做次日观察辅助；不生成交易执行指令。</p>
+    <p>按当天涨停池生成观察清单，验证口径为 T+1 开盘到 T+3 收盘；只做研究辅助，不生成交易执行指令。</p>
   </div>
   <div class="radar-header-actions">
     <form class="command-search" action="/dragon" method="get">
@@ -13,8 +13,8 @@
       <button type="submit">查看</button>
     </form>
     <form class="radar-refresh-form" action="/dragon/update" method="post" data-background-update-form>
-      <button type="submit" data-update-button data-update-mode="dragon" data-update-label="刷新龙头池" {% if update_status and update_status.running %}disabled{% endif %}>
-        {% if update_status and update_status.running and update_status.mode == "dragon" %}正在刷新{% else %}刷新龙头池{% endif %}
+      <button type="submit" data-update-button data-update-mode="dragon" data-update-label="更新行情并刷新龙头池" {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running and update_status.mode == "dragon" %}正在更新{% else %}更新行情并刷新龙头池{% endif %}
       </button>
     </form>
   </div>
@@ -23,8 +23,8 @@
 <section class="radar-refresh-strip panel" data-update-status-url="/update/status">
   <div class="radar-refresh-main">
     <strong>龙头池刷新状态</strong>
-    <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行龙头池刷新。" }}</span>
-    {% if update_status.finished_at %}<span>完成 {{ update_status.finished_at }}</span>{% endif %}
+    <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行龙头池刷新；点击后会先补核心行情，再刷新龙头池。" }}</span>
+    <span data-update-finished {% if not update_status.finished_at or update_status.running %}hidden{% endif %}>{{ "完成" if update_status and update_status.state == "finished" else "结束" }} {{ update_status.finished_at if update_status and update_status.finished_at else "" }}</span>
   </div>
   <pre class="update-error" data-update-error hidden></pre>
 </section>
@@ -39,30 +39,44 @@
     <p>{{ observation.summary.note }}</p>
   </div>
   <div class="metric-grid dragon-metrics">
-    <div class="metric"><span>重点跟踪</span><strong>{{ observation.summary.focus_count }}</strong><small>低换手 + 热门扩散</small></div>
-    <div class="metric"><span>等分歧确认</span><strong>{{ observation.summary.wait_count }}</strong><small>题材较强，但条件未齐</small></div>
-    <div class="metric"><span>禁止追高</span><strong>{{ observation.summary.avoid_count }}</strong><small>高换手/晚封/多次开板</small></div>
-    <div class="metric"><span>低换手验证</span><strong>{{ observation.study.low_turnover_next_limit }}</strong><small>历史次日涨停率</small></div>
+    <div class="metric"><span>优先关注</span><strong>{{ observation.summary.priority_count }}</strong><small>验证最强的二板/三板结构</small></div>
+    <div class="metric"><span>谨慎观察</span><strong>{{ observation.summary.caution_count }}</strong><small>题材与换手有亮点</small></div>
+    <div class="metric"><span>研究样本</span><strong>{{ observation.summary.research_count }}</strong><small>辅助观察市场温度</small></div>
+    <div class="metric"><span>已隐藏风险</span><strong>{{ observation.summary.hidden_count }}</strong><small>不在页面列出个股</small></div>
   </div>
 </section>
 
-<section class="dragon-column-grid">
-  {% for key, title, hint in [
-    ("focus", "明日重点跟踪", "只看小高开/平开承接，不追过高竞价。"),
-    ("wait", "等分歧确认", "先观察承接和回封，不急着抢。"),
-    ("avoid", "禁止追高", "风险优先，等下一轮更干净的板。")
-  ] %}
+<section class="panel dragon-board">
+  <div class="dragon-board-head">
+    <div>
+      <span class="tag soft-tag">盘后情绪</span>
+      <span class="tag success-tag">{{ observation.emotion_snapshot.emotion_phase }}</span>
+    </div>
+    <strong>{{ observation.emotion_snapshot.summary_text }}</strong>
+    <p>主线状态：{{ observation.emotion_snapshot.mainline_state }} · 风险状态：{{ observation.emotion_snapshot.risk_state }} · 明日偏向：{{ observation.emotion_snapshot.next_day_bias }}</p>
+  </div>
+  <div class="metric-grid dragon-metrics">
+    <div class="metric"><span>3日验证样本</span><strong>{{ observation.study.page_sample_count }}</strong><small>页面展示回测样本数</small></div>
+    <div class="metric"><span>展示均值</span><strong>{{ observation.study.page_avg_3d }}</strong><small>T+1 开盘到 T+3 收盘</small></div>
+    <div class="metric"><span>优先关注均值</span><strong>{{ observation.study.priority_avg_3d }}</strong><small>样本仍需继续扩充</small></div>
+    <div class="metric"><span>优先关注胜率</span><strong>{{ observation.study.priority_win_3d }}</strong><small>历史研究，不代表承诺</small></div>
+  </div>
+</section>
+
+<section class="dragon-column-grid dragon-display-grid">
+  {% for key in ["priority", "caution", "research"] %}
+  {% set meta = observation.display_group_meta[key] %}
   <section class="panel dragon-column {{ key }}">
     <div class="panel-title-row">
       <div>
-        <h2>{{ title }}</h2>
-        <p>{{ hint }}</p>
+        <h2>{{ meta.title }}</h2>
+        <p>{{ meta.hint }}</p>
       </div>
-      <span class="tag soft-tag">{{ observation.buckets[key]|length }}</span>
+      <span class="tag soft-tag">{{ meta.metric }}</span>
     </div>
-    {% if observation.buckets[key] %}
+    {% if observation.display_groups[key] %}
       <div class="dragon-card-list">
-      {% for item in observation.buckets[key] %}
+      {% for item in observation.display_groups[key] %}
         <article class="dragon-card">
           <div class="dragon-card-top">
             <div>
@@ -72,16 +86,19 @@
             <b>{{ "%.1f"|format(item.score) }}</b>
           </div>
           <div class="dragon-badges">
+            {% if item.lifecycle %}<span class="tag success-tag">{{ item.lifecycle }}</span>{% endif %}
             {% for badge in item.badges %}
               <span class="tag soft-tag">{{ badge }}</span>
             {% endfor %}
           </div>
           <p class="dragon-action">{{ item.action }}</p>
           <dl class="dragon-facts">
+            <div><dt>题材</dt><dd>{{ item.theme_name }}</dd></div>
+            <div><dt>题材分</dt><dd>{{ "%.1f"|format(item.theme_score) }}</dd></div>
             <div><dt>换手</dt><dd>{{ item.turnover_rate }}</dd></div>
-            <div><dt>同题材</dt><dd>{{ item.theme_heat_count }}</dd></div>
             <div><dt>首封</dt><dd>{{ item.first_limit_time }}</dd></div>
             <div><dt>开板</dt><dd>{{ item.open_count }}</dd></div>
+            <div><dt>连板</dt><dd>{{ item.limit_days }}</dd></div>
           </dl>
         </article>
       {% endfor %}
@@ -93,13 +110,61 @@
   {% endfor %}
 </section>
 
+<section class="panel dragon-board">
+  <div class="panel-title-row">
+    <div>
+      <h2>主线题材雷达</h2>
+      <p>先判断市场合力在哪里，再看龙头和低位扩散。</p>
+    </div>
+    <span class="tag soft-tag">{{ observation.themes|length }}</span>
+  </div>
+  {% if observation.themes %}
+    <div class="dragon-card-list">
+    {% for theme in observation.themes[:6] %}
+      <article class="dragon-card">
+        <div class="dragon-card-top">
+          <div>
+            <strong>{{ theme.theme_name }}</strong>
+            <span>{{ theme.primary_industry }} · {{ theme.theme_state }}</span>
+          </div>
+          <b>{{ "%.1f"|format(theme.theme_score) }}</b>
+        </div>
+        <dl class="dragon-facts">
+          <div><dt>涨停</dt><dd>{{ theme.limit_up_count }}</dd></div>
+          <div><dt>强势</dt><dd>{{ theme.strong_count }}</dd></div>
+          <div><dt>二板</dt><dd>{{ theme.board_2_count }}</dd></div>
+          <div><dt>高位</dt><dd>{{ theme.board_3_plus_count }}</dd></div>
+        </dl>
+        {% if theme.leader_codes %}
+          <p class="dragon-action">
+            代表样本：
+            {% for item in theme.leader_codes %}
+              {{ item.name }}{% if item.lifecycle %}（{{ item.lifecycle }}）{% endif %}{% if not loop.last %}、{% endif %}
+            {% endfor %}
+          </p>
+        {% endif %}
+        {% if theme.risk_notes %}
+          <div class="dragon-badges">
+            {% for note in theme.risk_notes %}
+              <span class="tag soft-tag">{{ note }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </article>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">暂无题材雷达数据。</div>
+  {% endif %}
+</section>
+
 <section class="panel dragon-study">
   <h2>研究验证</h2>
   <div class="metric-grid dragon-metrics">
     <div class="metric"><span>历史基准</span><strong>{{ observation.study.baseline_next_limit }}</strong><small>全涨停样本次日涨停率</small></div>
     <div class="metric"><span>低换手前20%</span><strong>{{ observation.study.low_turnover_next_limit }}</strong><small>跨年度稳定提升</small></div>
     <div class="metric"><span>低换手断头率</span><strong>{{ observation.study.low_turnover_decapatated }}</strong><small>3日断头风险</small></div>
-    <div class="metric"><span>强封板短样本</span><strong>{{ observation.study.real_board_early_next_limit }}</strong><small>真实源仍需扩样</small></div>
+    <div class="metric"><span>优先Top1均值</span><strong>{{ observation.study.priority_top1_avg_3d }}</strong><small>2026样本研究结果</small></div>
   </div>
 </section>
 {% endblock %}

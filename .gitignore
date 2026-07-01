@@ -30,6 +30,9 @@ data/
 logs/
 reports/
 backtest_results/
+data_research/
+.codegraph/
+tmp/
 
 # Experiment outputs
 *.log

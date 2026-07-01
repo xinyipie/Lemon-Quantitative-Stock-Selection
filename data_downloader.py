@@ -144,6 +144,15 @@ def _get_trade_dates(pro, start_date: str, end_date: str) -> List[str]:
             if cached_dates is not None:
                 if not dates:
                     logger.warning("  trade_cal 接口返回为空，已回退使用本地交易日历缓存")
+                if cached_dates and max(cached_dates) >= end_date:
+                    return cached_dates
+                fallback_start = start_date
+                if cached_dates:
+                    fallback_start = (datetime.strptime(max(cached_dates), '%Y%m%d') + timedelta(days=1)).strftime('%Y%m%d')
+                fallback_dates = _weekday_dates(fallback_start, end_date)
+                if fallback_dates:
+                    logger.warning("  本地 trade_cal 缓存未覆盖目标日期，已追加工作日兜底")
+                    return sorted(set(cached_dates) | set(fallback_dates))
                 return cached_dates
         except Exception as e:
             logger.warning(f"  本地 trade_cal 缓存读取失败：{e}")
@@ -251,6 +260,10 @@ def download_daily_one_date(pro, date: str, force: bool = False) -> bool:
     df = _retry(_fetch)
     if df is None:
         return False
+    if df.empty:
+        _save(df, path)
+        logger.warning(f"  ⚠ daily {date} 返回0行，未计入有效下载")
+        return False
     _save(df, path)
     logger.info(f"  ✓ daily {date}：{len(df)} 只")
     return True
@@ -268,6 +281,10 @@ def download_daily_basic_one_date(pro, date: str, force: bool = False) -> bool:
     ))
     if df is None:
         return False
+    if df.empty:
+        _save(df, path)
+        logger.warning(f"  ⚠ daily_basic {date} 返回0行，未计入有效下载")
+        return False
     _save(df, path)
     logger.info(f"  ✓ daily_basic {date}：{len(df)} 只")
     return True
@@ -284,6 +301,10 @@ def download_moneyflow_one_date(pro, date: str, force: bool = False) -> bool:
         fields='ts_code,net_mf_amount'
     ))
     if df is None:
+        return False
+    if df.empty:
+        _save(df, path)
+        logger.warning(f"  ⚠ moneyflow {date} 返回0行，未计入有效下载")
         return False
     _save(df, path)
     logger.info(f"  ✓ moneyflow {date}：{len(df)} 只")

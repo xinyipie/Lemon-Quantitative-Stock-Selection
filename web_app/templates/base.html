@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260701-dragon-columns">
 </head>
 <body>
   <aside class="sidebar">
@@ -44,6 +44,7 @@
         const message = panel.querySelector("[data-update-message]");
         const buttons = panel.querySelectorAll("[data-update-button]");
         const errorBox = panel.querySelector("[data-update-error]");
+        const finishedStamp = panel.querySelector("[data-update-finished]");
         const displayMessage = status.display_message || status.message || "状态读取中";
         if (message) {
           let text = `当前状态：${displayMessage}`;
@@ -54,6 +55,16 @@
             text += `（完成于 ${status.finished_at}）`;
           }
           message.textContent = text;
+        }
+        if (finishedStamp) {
+          if (!status.running && status.finished_at) {
+            finishedStamp.hidden = false;
+            const finishedLabel = status.state === "finished" ? "完成" : "结束";
+            finishedStamp.textContent = `${finishedLabel} ${status.finished_at}`;
+          } else {
+            finishedStamp.hidden = true;
+            finishedStamp.textContent = "";
+          }
         }
         buttons.forEach((button) => {
           button.disabled = Boolean(status.running);

@@ -9,6 +9,8 @@
   </div>
 </header>
 
+{% include "partials/update_status_panel.html" %}
+
 <section class="status-strip">
   <div class="status-cell"><span>Active合计</span><strong>{{ pool|length }}</strong></div>
   <div class="status-cell"><span>Elite提醒</span><strong>{{ buckets.elite|length }}</strong></div>

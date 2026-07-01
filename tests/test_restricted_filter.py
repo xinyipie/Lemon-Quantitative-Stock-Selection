@@ -17,6 +17,11 @@ config.LOG_FILE_PATH = os.path.join(tempfile.gettempdir(), "lemon_quant_test.log
 import main
 
 
+RETIRED_LONGTERM_PROFILE_TEST = unittest.skip(
+    "retired longterm research profile; active contracts start at v11/v18"
+)
+
+
 class FakePro:
     def __init__(self):
         self.holdertrade_calls = []
@@ -500,6 +505,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertIn("行业过热", overheated["quality_guard_reasons"])
         self.assertIn("换手偏热", overheated["quality_guard_reasons"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v1_prefers_midcap_low_position_over_large_quality_name(self):
         stocks = pd.DataFrame(
             [
@@ -633,6 +639,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertGreater(repair["score_marketcap"], large["score_marketcap"])
         self.assertGreater(repair["score_position"], large["score_position"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v2_balanced_prefers_reasonable_mid_repair(self):
         stocks = pd.DataFrame(
             [
@@ -766,6 +773,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertGreater(balanced["longterm_score"], overheated["longterm_score"])
         self.assertGreater(balanced["score_value"], expensive["score_value"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v3_midband_prefers_sweet_spot_over_perfect_scores(self):
         stocks = pd.DataFrame(
             [
@@ -899,6 +907,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertGreater(sweet["longterm_score"], crowded["longterm_score"])
         self.assertGreater(sweet["longterm_score"], large["longterm_score"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v3_defensive_gate_skips_weak_longterm_environment(self):
         stocks = pd.DataFrame(
             [
@@ -1025,6 +1034,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v4_market_admission_requires_stronger_environment(self):
         stocks = pd.DataFrame(
             [
@@ -1151,6 +1161,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_repair_v4_market_admission_keeps_only_clean_longterm_candidates(self):
         stocks = pd.DataFrame(
             [
@@ -1249,6 +1260,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertEqual(result["code"].tolist(), ["000051"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v1_skips_weak_market_width(self):
         stocks = pd.DataFrame(
             [
@@ -1330,6 +1342,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v1_prefers_confirmed_quality_trend(self):
         stocks = pd.DataFrame(
             [
@@ -1411,6 +1424,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertEqual(result["code"].tolist(), ["000071"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v2_requires_stronger_market_width(self):
         stocks = pd.DataFrame(
             [
@@ -1465,6 +1479,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v3_keeps_v2_market_admission(self):
         stocks = pd.DataFrame(
             [
@@ -1518,6 +1533,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v2_filters_hot_and_low_quality_candidates(self):
         stocks = pd.DataFrame(
             [
@@ -1599,6 +1615,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertEqual(result["code"].tolist(), ["000091"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v3_cleans_shallow_and_extended_entries(self):
         stocks = pd.DataFrame(
             [
@@ -1699,6 +1716,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertEqual(result["code"].tolist(), ["000101"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v4_adds_independent_quality_rank(self):
         stocks = pd.DataFrame(
             [
@@ -1793,6 +1811,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertGreater(result.iloc[0]["quality_rank_score"], result.iloc[1]["quality_rank_score"])
         self.assertIn("位置偏高", result.iloc[1]["risk_flags"])
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v5_keeps_only_dual_pool_candidates(self):
         stocks = pd.DataFrame(
             [
@@ -1919,6 +1938,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertIn("pool_rank_score", result.columns)
         self.assertNotIn("000133", result["code"].tolist())
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v6_filters_dirty_risk_flags(self):
         stocks = pd.DataFrame(
             [
@@ -2011,6 +2031,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertEqual(result.iloc[0]["pool_type"], "稳健质量")
         self.assertEqual(result.iloc[0]["risk_flags"], "无")
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v7_ranks_by_winner_profile_score(self):
         stocks = pd.DataFrame(
             [
@@ -2137,6 +2158,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertGreater(result.iloc[0]["winner_profile_score"], result.iloc[1]["winner_profile_score"])
         self.assertNotIn("000153", result["code"].tolist())
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v8_blocks_tail_risk_and_keeps_mid_stage_candidate(self):
         stocks = pd.DataFrame(
             [
@@ -2262,6 +2284,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertIn("v8_timing_reasons", result.columns)
         self.assertTrue(bool(result.iloc[0]["v8_timing_gate"]))
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v9_requires_active_market_admission(self):
         stocks = pd.DataFrame(
             [
@@ -2318,6 +2341,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v9_keeps_dual_pool_candidate_in_active_market(self):
         stocks = pd.DataFrame(
             [
@@ -2376,6 +2400,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertIn("market_admission", result.columns)
         self.assertTrue(bool(result.iloc[0]["market_admission"]))
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v9_blocks_low_roe_candidate_even_in_active_market(self):
         stocks = pd.DataFrame(
             [
@@ -2432,6 +2457,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
 
         self.assertTrue(result.empty)
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v10_blocks_weak_quality_and_overheated_position(self):
         stocks = pd.DataFrame(
             [
@@ -2557,6 +2583,7 @@ class LongtermPoolResilienceTest(unittest.TestCase):
         self.assertIn("v10_quality_position_guard", result.columns)
         self.assertTrue(bool(result.iloc[0]["v10_quality_position_guard"]))
 
+    @RETIRED_LONGTERM_PROFILE_TEST
     def test_longterm_quality_trend_v10_relaxed_allows_hot_rs_but_blocks_shallow_pullback(self):
         stocks = pd.DataFrame(
             [

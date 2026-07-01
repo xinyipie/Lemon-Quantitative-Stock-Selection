@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,36 @@ def collect_limit_pool_for_date(
     }
     Path(result["report_path"]).write_text(format_quality_report(result), encoding="utf-8")
     return result
+
+
+def collect_limit_pool_range(
+    start_date: str,
+    end_date: str,
+    output_root: str | Path = "data_research",
+    trade_dates: list[str] | None = None,
+    ak_module: Any | None = None,
+    sleep_seconds: float = 0.5,
+) -> dict:
+    """按交易日区间批量采集涨停池研究数据。"""
+    start = _normalize_date(start_date)
+    end = _normalize_date(end_date)
+    dates = _trade_dates_in_range(start, end, trade_dates)
+    ak = ak_module or _load_akshare()
+    results = []
+    for idx, trade_date in enumerate(dates, start=1):
+        result = collect_limit_pool_for_date(trade_date, output_root=output_root, ak_module=ak)
+        results.append(result)
+        if sleep_seconds > 0 and idx < len(dates):
+            time.sleep(sleep_seconds)
+    return {
+        "start_date": start,
+        "end_date": end,
+        "total_days": len(dates),
+        "non_empty_days": sum(1 for item in results if int(item.get("total_rows", 0) or 0) > 0),
+        "ok_days": sum(1 for item in results if item.get("ok")),
+        "total_rows": sum(int(item.get("total_rows", 0) or 0) for item in results),
+        "results": results,
+    }
 
 
 def normalize_limit_pool_frame(raw: pd.DataFrame | None, source: str, trade_date: str) -> pd.DataFrame:
@@ -238,15 +269,57 @@ def _normalize_date(value: str) -> str:
     return datetime.strptime(str(value), "%Y-%m-%d").strftime("%Y%m%d")
 
 
+def _trade_dates_in_range(start: str, end: str, trade_dates: list[str] | None = None) -> list[str]:
+    if trade_dates is None:
+        trade_dates = _load_cached_trade_dates()
+    normalized = sorted(
+        date
+        for date in (_normalize_date(item) for item in (trade_dates or []))
+        if start <= date <= end
+    )
+    if normalized:
+        return normalized
+    return pd.bdate_range(start=datetime.strptime(start, "%Y%m%d"), end=datetime.strptime(end, "%Y%m%d")).strftime("%Y%m%d").tolist()
+
+
+def _load_cached_trade_dates(cache_path: str | Path = "data/cache/trade_cal.parquet") -> list[str]:
+    path = Path(cache_path)
+    if not path.exists():
+        return []
+    try:
+        frame = pd.read_parquet(path)
+    except Exception:
+        return []
+    if frame.empty or "cal_date" not in frame.columns:
+        return []
+    if "is_open" in frame.columns:
+        frame = frame[pd.to_numeric(frame["is_open"], errors="coerce").fillna(0).astype(int) == 1]
+    return frame["cal_date"].astype(str).tolist()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="采集涨停池/炸板池等龙头雷达研究数据。")
-    parser.add_argument("--date", required=True, help="交易日期，格式 YYYYMMDD")
+    parser.add_argument("--date", help="交易日期，格式 YYYYMMDD")
+    parser.add_argument("--start", help="开始交易日期，格式 YYYYMMDD")
+    parser.add_argument("--end", help="结束交易日期，格式 YYYYMMDD")
     parser.add_argument("--output-root", default="data_research", help="研究数据输出根目录")
+    parser.add_argument("--sleep", type=float, default=0.5, help="批量采集时每个交易日之间的暂停秒数")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.start or args.end:
+        if not args.start or not args.end:
+            raise SystemExit("--start 和 --end 必须同时提供")
+        result = collect_limit_pool_range(args.start, args.end, output_root=args.output_root, sleep_seconds=args.sleep)
+        print(
+            f"采集完成：{result['start_date']}~{result['end_date']} "
+            f"交易日 {result['total_days']} 天，非空 {result['non_empty_days']} 天，总记录 {result['total_rows']} 条"
+        )
+        return 0 if result["non_empty_days"] > 0 else 1
+    if not args.date:
+        raise SystemExit("请提供 --date 或 --start/--end")
     result = collect_limit_pool_for_date(args.date, output_root=args.output_root)
     print(format_quality_report(result))
     return 0 if result["total_rows"] > 0 else 1

@@ -7,8 +7,11 @@ import requests
 import re
 import time
 import math
+import sqlite3
+import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 import config
@@ -19,6 +22,7 @@ import market_analyzer
 from longterm_live_pipeline import build_live_watchlists
 from signal_store import DEFAULT_DB_PATH, SignalRecord, SignalStore
 from strategy_profiles import apply_short_profile
+from web_app.services.dragon_service import build_dragon_observation, enrich_short_pool_with_dragon_sentiment
 
 # ==================== 日志初始化 ====================
 def init_logger():
@@ -35,6 +39,40 @@ def init_logger():
     return logging.getLogger(__name__)
 
 logger = init_logger()
+DEFAULT_HISTORY_DB_PATH = Path("data") / "stock_history.db"
+
+def _patch_tushare_http_errors(pro_client):
+    """让 Tushare 中转站 HTTP 错误显式抛出，避免 502 被 SDK 吞成空表。"""
+    if not hasattr(pro_client, "query"):
+        return pro_client
+    original_query = pro_client.query
+
+    def checked_query(api_name, fields='', **kwargs):
+        http_url = str(getattr(pro_client, "_DataApi__http_url", "") or "").rstrip("/")
+        token = getattr(pro_client, "_DataApi__token", "")
+        timeout = getattr(pro_client, "_DataApi__timeout", config.TUSHARE_CONFIG["timeout"])
+        if not http_url:
+            return original_query(api_name, fields=fields, **kwargs)
+        req_params = {
+            "api_name": api_name,
+            "token": token,
+            "params": kwargs,
+            "fields": fields,
+        }
+        endpoint = f"{http_url}/{api_name}"
+        res = requests.post(endpoint, json=req_params, timeout=timeout)
+        if res.status_code >= 400:
+            raise requests.HTTPError(f"Tushare中转站HTTP {res.status_code}: {endpoint}")
+        if not res.text:
+            raise requests.HTTPError(f"Tushare中转站返回空响应: {endpoint}")
+        result = json.loads(res.text)
+        if result["code"] != 0:
+            raise Exception(result["msg"])
+        data = result["data"]
+        return pd.DataFrame(data["items"], columns=data["fields"])
+
+    pro_client.query = checked_query
+    return pro_client
 
 # ==================== Tushare初始化 ====================
 def init_tushare():
@@ -45,16 +83,23 @@ def init_tushare():
                 "Tushare Token 未配置！\n"
                 "请在 config.py 中设置 TUSHARE_TOKEN，或设置环境变量 TUSHARE_TOKEN"
             )
-        ts.set_token(token)
-        pro = ts.pro_api(timeout=config.TUSHARE_CONFIG["timeout"])
-        pro._DataApi__http_url = 'http://14.nat0.cn:32817'  # 买的便宜Tushare接口的中转站
+        pro = ts.pro_api(token=token, timeout=config.TUSHARE_CONFIG["timeout"])
+        tushare_http_url = config.TUSHARE_CONFIG.get("http_url") or os.environ.get("TUSHARE_HTTP_URL", "")
+        if tushare_http_url:
+            pro._DataApi__http_url = tushare_http_url
+            _patch_tushare_http_errors(pro)
+            logger.info("Tushare接口使用自定义中转站")
         logger.info("✅ Tushare接口初始化成功")
         return pro
     except Exception as e:
         logger.error(f"❌ Tushare初始化失败：{e}", exc_info=True)
         raise
 
-if os.environ.get("LEMON_SKIP_TUSHARE_INIT") == "1":
+if (
+    os.environ.get("LEMON_SKIP_TUSHARE_INIT") == "1"
+    or "--offline" in sys.argv
+    or "--local-data-live" in sys.argv
+):
     pro = None
     logger.info("跳过 Tushare 初始化：等待离线回测注入 LocalDataProxy")
 else:
@@ -122,6 +167,36 @@ def _tushare_query_with_retry(func, *args, max_retries: int = 3, retry_delay: fl
     raise last_exc
 
 
+def _latest_trade_date_from_history_db(history_db_path: str | Path | None = None) -> Optional[str]:
+    """从本地历史行情库读取最新交易日，用于在线 Tushare 暂不可用时兜底。"""
+    path = Path(history_db_path or DEFAULT_HISTORY_DB_PATH)
+    if not path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            row = conn.execute("select max(trade_date) from stock_daily").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.debug(f"本地历史库最新交易日读取失败：{exc}")
+        return None
+    if not row or not row[0]:
+        return None
+    trade_date = str(row[0]).replace("-", "")[:8]
+    return trade_date if len(trade_date) == 8 and trade_date.isdigit() else None
+
+
+def _is_local_data_live_mode() -> bool:
+    """判断当前是否为 Web 日更的本地数据实盘模式。"""
+    return os.environ.get("LEMON_LOCAL_DATA_LIVE") == "1"
+
+
+def _is_backtest_data_mode() -> bool:
+    """LocalDataProxy 可用于回测，也可用于 Web 日更；这里只识别真正回测语义。"""
+    return type(pro).__name__ == 'LocalDataProxy' and not _is_local_data_live_mode()
+
+
 def set_pro(proxy) -> None:
     """
     将全局 pro 替换为任意兼容对象（如 LocalDataProxy）。
@@ -155,40 +230,50 @@ def get_latest_trade_date() -> str:
     end_date = datetime.now().strftime('%Y%m%d')
     start_date = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
     try:
-        cal_df = _tushare_query_with_retry(
-            pro.trade_cal, start_date=start_date, end_date=end_date, fields='cal_date,is_open'
-        )
-    except Exception:
-        # 部分中转接口不支持参数过滤，拉全量后本地过滤
-        cal_df = _tushare_query_with_retry(pro.trade_cal)
-    if cal_df.empty:
-        raise RuntimeError("trade_cal 返回空数据，请检查网络或Token")
-    cal_df = cal_df[(cal_df['cal_date'] >= start_date) & (cal_df['cal_date'] <= end_date)]
-    cal_df = cal_df.sort_values('cal_date', ascending=False)
-    open_dates = cal_df[cal_df['is_open'].astype(int) == 1]['cal_date'].tolist()
-    if not open_dates:
-        raise RuntimeError("近30天无交易日数据")
-
-    # 验证是否有实际行情数据（用全市场daily接口验证，与get_all_stocks逻辑一致）
-    # 注意：上证指数(000001.SH)入库时间早于个股，用指数验证会导致虚报"有数据"但个股实际为空
-    for date in open_dates[:5]:  # 最多回退5个交易日
         try:
-            test_df = _tushare_query_with_retry(
-                pro.daily,
-                ts_code='600000.SH,000001.SZ,600036.SH',  # 用几只主流个股测试，更能代表全市场入库状态
-                trade_date=date,
-                fields='ts_code,close'
+            cal_df = _tushare_query_with_retry(
+                pro.trade_cal, start_date=start_date, end_date=end_date, fields='cal_date,is_open'
             )
-            if not test_df.empty and len(test_df) >= 2:  # 至少2只有数据才认为当天数据入库
-                logger.info(f"✅ 最新交易日：{date}")
-                return date
-        except:
-            continue
+        except Exception as filtered_exc:
+            # 部分中转接口不支持参数过滤，拉全量后本地过滤；若 token 本身失效，会交给外层兜底。
+            try:
+                cal_df = _tushare_query_with_retry(pro.trade_cal)
+            except Exception as full_exc:
+                raise full_exc from filtered_exc
+        if cal_df.empty:
+            raise RuntimeError("trade_cal 返回空数据，请检查网络或Token")
+        cal_df = cal_df[(cal_df['cal_date'] >= start_date) & (cal_df['cal_date'] <= end_date)]
+        cal_df = cal_df.sort_values('cal_date', ascending=False)
+        open_dates = cal_df[cal_df['is_open'].astype(int) == 1]['cal_date'].tolist()
+        if not open_dates:
+            raise RuntimeError("近30天无交易日数据")
 
-    # 如果都没数据，返回第一个
-    latest = open_dates[0]
-    logger.info(f"✅ 最新交易日：{latest}")
-    return latest
+        # 验证是否有实际行情数据（用全市场daily接口验证，与get_all_stocks逻辑一致）
+        # 注意：上证指数(000001.SH)入库时间早于个股，用指数验证会导致虚报"有数据"但个股实际为空
+        for date in open_dates[:5]:  # 最多回退5个交易日
+            try:
+                test_df = _tushare_query_with_retry(
+                    pro.daily,
+                    ts_code='600000.SH,000001.SZ,600036.SH',  # 用几只主流个股测试，更能代表全市场入库状态
+                    trade_date=date,
+                    fields='ts_code,close'
+                )
+                if not test_df.empty and len(test_df) >= 2:  # 至少2只有数据才认为当天数据入库
+                    logger.info(f"✅ 最新交易日：{date}")
+                    return date
+            except Exception:
+                continue
+
+        # 如果都没数据，返回第一个
+        latest = open_dates[0]
+        logger.info(f"✅ 最新交易日：{latest}")
+        return latest
+    except Exception as exc:
+        fallback = _latest_trade_date_from_history_db()
+        if fallback:
+            logger.warning(f"在线交易日获取失败，回退使用本地历史库最新交易日 {fallback}：{exc}")
+            return fallback
+        raise
 
 def get_recent_trade_dates(end_date: str, n: int = 6) -> List[str]:
     """获取最近 n 个交易日列表（含 end_date，降序）"""
@@ -3165,6 +3250,54 @@ def _risk_guard_float(value) -> Optional[float]:
         return None
 
 
+def _apply_live_signal_boost(
+    base_score: float,
+    score_threshold: float,
+    news_boost: float = 0.0,
+    concept_boost: float = 0.0,
+    top_list_bonus: float = 0.0,
+) -> Dict[str, float]:
+    """限制实盘消息面加分，避免低质量候选仅靠新闻被抬入池。"""
+    base_score = float(base_score or 0.0)
+    score_threshold = float(score_threshold or 0.0)
+    raw_positive = (
+        max(float(news_boost or 0.0), 0.0)
+        + max(float(concept_boost or 0.0), 0.0)
+        + max(float(top_list_bonus or 0.0), 0.0)
+    )
+    raw_negative = (
+        min(float(news_boost or 0.0), 0.0)
+        + min(float(concept_boost or 0.0), 0.0)
+        + min(float(top_list_bonus or 0.0), 0.0)
+    )
+
+    positive_live_boost = 0.0
+    if raw_positive > 0 and base_score >= score_threshold - 5.0:
+        positive_live_boost = min(raw_positive * 0.3, 8.0)
+    negative_live_boost = max(raw_negative * 0.4, -8.0) if raw_negative < 0 else 0.0
+    final_score = max(0.0, min(base_score + positive_live_boost + negative_live_boost, 110.0))
+
+    return {
+        "final_score": round(final_score, 2),
+        "positive_live_boost": round(positive_live_boost, 2),
+        "negative_live_boost": round(negative_live_boost, 2),
+        "news_boost_raw": round(float(news_boost or 0.0), 2),
+        "concept_boost_raw": round(float(concept_boost or 0.0), 2),
+        "top_list_bonus_raw": round(float(top_list_bonus or 0.0), 2),
+    }
+
+
+def _short_ai_payload(stock_pool: pd.DataFrame) -> List[Dict]:
+    """生成短线AI输入，去掉内部调试字段。"""
+    if stock_pool is None or stock_pool.empty:
+        return []
+    hidden_fields = {"news_boost_raw", "concept_boost_raw", "top_list_bonus_raw"}
+    return [
+        {k: v for k, v in row.items() if k not in hidden_fields}
+        for row in stock_pool.to_dict("records")
+    ]
+
+
 def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, financial_dict: Dict = None, sector_ma10: Dict = None, hot_sectors: Dict = None, sector_news_boosts: Dict = None, hot_concepts: List = None, market_style: str = 'sideways', is_caution: bool = False, sector_accel: Dict = None, macro_mode: str = 'cautious', score_threshold: int = 45, atr_multiplier: float = 1.5, is_backtest: bool = False, sector_avg_change: Dict = None, short_filter_profile: str = 'baseline') -> pd.DataFrame:
     """
     短线选股 reconstructed v8 baseline。
@@ -3532,10 +3665,27 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
         )
 
         # caution期降分
-        final_score = score + news_sector_boost + concept_boost + top_list_bonus - sector_gate_penalty
+        base_score_after_penalty = score - sector_gate_penalty
         if is_caution:
-            final_score -= 10.0
-        final_score = max(0.0, min(final_score, 110.0))
+            base_score_after_penalty -= 10.0
+        if is_backtest:
+            live_boost_info = {
+                "final_score": max(0.0, min(base_score_after_penalty, 110.0)),
+                "positive_live_boost": 0.0,
+                "negative_live_boost": 0.0,
+                "news_boost_raw": round(news_sector_boost, 2),
+                "concept_boost_raw": round(concept_boost, 2),
+                "top_list_bonus_raw": round(top_list_bonus, 2),
+            }
+        else:
+            live_boost_info = _apply_live_signal_boost(
+                base_score=base_score_after_penalty,
+                score_threshold=score_threshold,
+                news_boost=news_sector_boost,
+                concept_boost=concept_boost,
+                top_list_bonus=top_list_bonus,
+            )
+        final_score = float(live_boost_info["final_score"])
 
         # 兼容旧输出字段（供分析用，不参与评分计算）
         catchup_bonus     = round(sector_momentum_score * 0.15, 1)
@@ -3606,8 +3756,13 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
             "factor_accel": round(accel_score, 2),
             "market_style": market_style,
             "macro_mode": macro_mode,
-            "news_boost": round(news_sector_boost, 1),
+            "news_boost": round(live_boost_info["positive_live_boost"] + live_boost_info["negative_live_boost"], 1),
             "concept_boost": round(concept_boost, 1),
+            "positive_live_boost": live_boost_info["positive_live_boost"],
+            "negative_live_boost": live_boost_info["negative_live_boost"],
+            "news_boost_raw": live_boost_info["news_boost_raw"],
+            "concept_boost_raw": live_boost_info["concept_boost_raw"],
+            "top_list_bonus_raw": live_boost_info["top_list_bonus_raw"],
             "rs_rank": ma_data.get("ret_10d", 0.0),   # 暂存10日涨幅，后面做截面排名回填
             "rs_boost": 0.0,
             "reversal_penalty": 0,
@@ -3668,6 +3823,8 @@ def select_longterm_pool(
     score_threshold: float = 70,   # Z-Score分布下的最低准入分（20~95范围，均值60，70≈前25%）
     longterm_profile: str = 'zscore_v4_1',
     macro_data: Dict = None,
+    macro_mode: str = None,
+    regime_data: Dict = None,
 ) -> pd.DataFrame:
     """
     波段选股 v4.1（中长线，持仓无固定时限，以技术信号为准）。
@@ -3721,6 +3878,12 @@ def select_longterm_pool(
         profit_growth_dict = {}
     if macro_data is None:
         macro_data = {}
+    else:
+        macro_data = dict(macro_data)
+    if regime_data:
+        macro_data.update({k: v for k, v in regime_data.items() if k not in macro_data})
+    if macro_mode and "macro_mode" not in macro_data:
+        macro_data["macro_mode"] = macro_mode
     use_legacy_raw_score = (longterm_profile == 'legacy_raw_score_v1')
     use_v5_quality_guard = (longterm_profile in ('zscore_v5_quality_guard', 'zscore_v7_quality_guard'))
     use_v7_quality_guard = (longterm_profile == 'zscore_v7_quality_guard')
@@ -5452,14 +5615,14 @@ def run_daily_selection(
         market_style=market_style, is_caution=is_caution,
         sector_accel=sector_accel, macro_mode=macro_mode,
         score_threshold=score_threshold, atr_multiplier=atr_multiplier,
-        is_backtest=(type(pro).__name__ == 'LocalDataProxy'),
+        is_backtest=_is_backtest_data_mode(),
         sector_avg_change=_sector_avg_change,
         short_filter_profile=short_filter_profile,
     )
     live_factor_profile = getattr(config, 'SHORT_LIVE_FACTOR_PROFILE', 'original')
     live_style_gate = getattr(config, 'SHORT_LIVE_STYLE_GATE', 'none')
     live_score_order = getattr(config, 'SHORT_LIVE_SCORE_ORDER', 'desc')
-    is_offline_backtest = type(pro).__name__ == 'LocalDataProxy'
+    is_offline_backtest = _is_backtest_data_mode()
     if (
         not is_offline_backtest
         and not stock_pool.empty
@@ -5476,6 +5639,15 @@ def run_daily_selection(
             f"短线实盘基准后处理：profile={live_factor_profile} "
             f"style_gate={live_style_gate}  {before_profile_count}只 → {len(stock_pool)}只"
         )
+    if not is_offline_backtest and not stock_pool.empty:
+        try:
+            dragon_observation = build_dragon_observation(end_date=actual_date)
+            stock_pool = enrich_short_pool_with_dragon_sentiment(stock_pool, dragon_observation)
+            if "dragon_adjustment" in stock_pool.columns:
+                adjusted_count = int((stock_pool["dragon_adjustment"].fillna(0) != 0).sum())
+                logger.info(f"龙头情绪联动：{adjusted_count}只短线候选获得解释性加减分")
+        except Exception as exc:
+            logger.debug(f"龙头情绪联动降级：{exc}")
     result['stock_pool'] = stock_pool
 
     # ── 波段选股：仅在真正牛市状态（BULL_TREND / BULL_PULLBACK）时执行 ──
@@ -5996,6 +6168,12 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
         "style_gate",
         "alert_tier",
         "elite_alert",
+        "dragon_adjustment",
+        "dragon_theme_state",
+        "dragon_theme_name",
+        "dragon_theme_score",
+        "dragon_reason",
+        "dragon_risk",
     ]
     payload = {}
     for col in keep_cols:
@@ -6871,11 +7049,20 @@ def _write_batch_analysis_report(results: List[Dict], output_path: str = None) -
 
 
 if __name__ == "__main__":
-    import sys
-
     # 支持命令行参数：
     #   python main.py analyze watchlist.txt
     #   python main.py analyze 000001,600519 sh600000
+    if "--offline" in sys.argv or "--local-data-live" in sys.argv:
+        cache_dir = "data/cache"
+        if "--cache-dir" in sys.argv:
+            idx = sys.argv.index("--cache-dir")
+            if idx + 1 < len(sys.argv):
+                cache_dir = sys.argv[idx + 1]
+        if "--local-data-live" in sys.argv:
+            os.environ["LEMON_LOCAL_DATA_LIVE"] = "1"
+        from local_data_proxy import LocalDataProxy
+        set_pro(LocalDataProxy(cache_dir=cache_dir))
+
     if len(sys.argv) >= 3 and sys.argv[1] == 'analyze':
         analyze_from_inputs(sys.argv[2:])
     else:

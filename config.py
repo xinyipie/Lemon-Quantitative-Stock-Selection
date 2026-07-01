@@ -234,9 +234,11 @@ AI_CONFIG = {
 # 获取地址：https://tushare.pro/register
 # 要求：积分 >= 5000（通过签到、分享等方式获取）
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "http://14.nat0.cn:32817")
 
 TUSHARE_CONFIG = {
     "token": TUSHARE_TOKEN,
+    "http_url": TUSHARE_HTTP_URL,
     "timeout": 30,   # 从10秒改为30秒，中转站延迟高
     "retry_count": 3
 }

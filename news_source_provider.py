@@ -107,7 +107,8 @@ def fetch_market_news(
                 _merge_record(current, record)
 
     records = [_decorate_news_value(item) for item in merged.values()]
-    records = _filter_recent_records(records, days=days)
+    if providers is None:
+        records = _filter_recent_records(records, days=days)
     records.sort(key=_news_sort_key, reverse=True)
     return records[:limit]
 

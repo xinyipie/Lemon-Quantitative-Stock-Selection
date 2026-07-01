@@ -27,7 +27,7 @@
 <section class="status-strip">
   <div class="status-cell"><span>行情有效日</span><strong>{{ status.latest_trade_date|fmt_date }}</strong></div>
   <div class="status-cell"><span>最近实盘信号日</span><strong>{{ latest_live_short_run.trade_date|fmt_date if latest_live_short_run else 'NA' }}</strong></div>
-  <div class="status-cell"><span>复盘满期日</span><strong>{{ signal_summary.latest_backtest_date|fmt_date }}</strong></div>
+  <div class="status-cell"><span>最新复盘样本日</span><strong>{{ signal_summary.latest_backtest_date|fmt_date }}</strong></div>
   <div class="status-cell"><span>数据状态</span><strong class="{{ freshness.tone if freshness else '' }}">{{ freshness.status_label if freshness else 'NA' }}</strong></div>
   <div class="status-cell"><span>长线 Elite / Watch</span><strong>{{ signal_summary.longterm_elite }} / {{ signal_summary.longterm_watch }}</strong></div>
   <div class="status-cell"><span>日线 / 基础池</span><strong>{{ status.latest_daily_stock_count }} / {{ status.stock_count }}</strong></div>
@@ -35,8 +35,8 @@
 
 <section class="panel update-panel" data-update-status-url="/update/status">
   <div>
-    <h2>一键同步</h2>
-    <p>线上日常优先使用快速同步：只刷新核心行情和今日信号；完整同步用于补历史复盘、长线审计和市场上下文，耗时会更久。</p>
+    <h2>同步中心</h2>
+    <p>日常使用“更新到最新交易日”：先补核心行情，再刷新今日信号、龙头池和市场摘要；“完整重算”用于补短线复盘、长线审计和市场上下文，耗时会更久。复盘样本日只统计已经产生入池样本且后续收益可验证的日期。</p>
     {% if update_status and update_status.message %}
       <div class="filter-summary {{ 'warn' if update_status.alignment_state == 'warn' else '' }}" data-update-message>当前状态：{{ update_status.display_message or update_status.message }}{% if update_status.finished_at %}（完成于 {{ update_status.finished_at }}）{% endif %}</div>
     {% else %}
@@ -46,13 +46,13 @@
   </div>
   <div class="update-actions">
     <form method="post" action="/update/run?mode=daily" data-background-update-form>
-      <button type="submit" data-update-button data-update-mode="daily" data-update-label="快速同步" {% if update_status and update_status.running %}disabled{% endif %}>
-        {% if update_status and update_status.running %}正在同步{% else %}快速同步{% endif %}
+      <button type="submit" data-update-button data-update-mode="daily" data-update-label="更新到最新交易日" {% if update_status and update_status.running %}disabled{% endif %}>
+        {% if update_status and update_status.running %}正在同步{% else %}更新到最新交易日{% endif %}
       </button>
     </form>
     <form method="post" action="/update/run?mode=full" data-background-update-form>
-      <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整同步" {% if update_status and update_status.running %}disabled{% endif %}>
-        完整同步
+      <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算" {% if update_status and update_status.running %}disabled{% endif %}>
+        完整重算
       </button>
     </form>
   </div>
