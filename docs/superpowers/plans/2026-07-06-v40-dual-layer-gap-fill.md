@@ -131,7 +131,8 @@ Add:
                 self._v40_row(
                     "000002",
                     macro_mode="active",
-                    limit_down_count=2,
+                    limit_down_count=8,
+                    sector_ma10_ratio=60.0,
                     factor_pattern=30.0,
                     factor_sector=35.0,
                     volume_ratio=2.0,
@@ -256,18 +257,17 @@ def _apply_consensus_gap_fill_guard(df: pd.DataFrame) -> pd.DataFrame:
         & wyckoff.between(60.0, 75.0, inclusive="both")
         & (change <= 4.5)
     )
-    market_ok = (
-        (limit_up_count >= 60)
-        & (limit_down_count <= 15)
-        & ~sector_ma10_ratio.between(46.0, 70.0, inclusive="both")
-    )
+    broad_heat_ok = limit_up_count >= 60
+    low_friction = limit_down_count <= 12
+    not_overheated_breadth = sector_ma10_ratio <= 90.0
     cautious_exception = (
         macro.eq("cautious")
         & (limit_down_count <= 4)
         & (pattern >= 60.0)
     )
     sector_not_overheated = sector <= 60.0
-    accepted = low_mae_shape & sector_not_overheated & (market_ok | cautious_exception)
+    accepted = low_mae_shape & sector_not_overheated & broad_heat_ok & low_friction & not_overheated_breadth
+    accepted = accepted | (low_mae_shape & sector_not_overheated & cautious_exception)
     out = out.loc[accepted].copy()
     if out.empty:
         return out
