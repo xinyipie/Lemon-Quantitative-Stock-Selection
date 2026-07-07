@@ -1,0 +1,54 @@
+{% set strong_card = strong_recommendation|default({}) %}
+<section class="strong-recommendation-card {{ strong_card.tone or 'neutral' }}">
+  <div class="strong-card-head">
+    <div>
+      <div class="eyebrow">Strong Shortlist</div>
+      <h2>{{ strong_card.title or '强推荐未运行' }}</h2>
+      <p>{{ strong_card.subtitle or '运行实盘选股后，这里会显示高置信短线推荐。' }}</p>
+    </div>
+    <div class="strong-card-meta">
+      <span>信号日</span>
+      <strong>{{ strong_card.trade_date|fmt_date if strong_card.trade_date else 'NA' }}</strong>
+      <small>候选 {{ strong_card.candidate_count or 0 }} / 强推荐 {{ strong_card.strong_count or 0 }}</small>
+    </div>
+  </div>
+
+  {% if strong_card["items"] %}
+  <div class="strong-card-list">
+    {% for item in strong_card["items"] %}
+    <article class="strong-stock-card">
+      <div class="strong-stock-main">
+        <a href="/stock/{{ item.ts_code }}">
+          <strong>{{ item.display_name }}</strong>
+          <span>{{ item.display_code }} · {{ item.industry or '-' }}</span>
+        </a>
+        <div class="strong-badges">
+          {% for badge in item.strong_badges %}
+          <span class="tag ok">{{ badge }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="strong-score-block">
+        <span>强度分</span>
+        <strong title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong>
+      </div>
+      <div class="strong-stock-reason">
+        <strong>{{ item.strong_action }}</strong>
+        <p>{{ item.strong_reason }}</p>
+        <small>{{ item.strong_guard }}</small>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state soft">
+    {{ strong_card.subtitle or '当前没有达到强推荐标准的短线标的。' }}
+  </div>
+  {% endif %}
+
+  <div class="strong-card-notes">
+    {% for item in strong_card.notes or [] %}
+    <span>{{ item }}</span>
+    {% endfor %}
+  </div>
+</section>

@@ -546,11 +546,13 @@ def download_income(pro, force: bool = False):
 # ==================== 按日期批量下载（含断点续传进度显示）====================
 
 def download_daily_range(pro, trade_dates: List[str], force: bool = False,
-                         only_new: bool = False, core_only: bool = False):
+                         only_new: bool = False, core_only: bool = False,
+                         market_core: bool = False):
     """
     批量下载每日数据。
     only_new=True 时只下载新增的三个接口（top_list/top_inst/margin_detail），
     跳过已有的 daily/daily_basic/moneyflow/index_daily。
+    market_core=True 时下载回测核心行情和指数，跳过龙虎榜/融资等扩展日频数据。
     """
     total = len(trade_dates)
     daily_ok = daily_basic_ok = moneyflow_ok = index_ok = 0
@@ -598,7 +600,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                     index_ok += 1
 
         # ── 新增：top_list ──
-        if not core_only:
+        if not core_only and not market_core:
             need_tl = force or not os.path.exists(_daily_path("top_list", date))
             if need_tl:
                 if download_top_list_one_date(pro, date, force):
@@ -651,7 +653,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
 
 def run_download(start_date: str, end_date: str, force: bool = False,
                  skip_financial: bool = False, only_new: bool = False,
-                 core_only: bool = False):
+                 core_only: bool = False, market_core: bool = False):
     """
     执行完整的数据下载流程
 
@@ -662,6 +664,7 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         skip_financial:  True=跳过财务数据（fina_indicator/income），适合只测技术面策略
         only_new:        True=只下载新增的三个接口（top_list/top_inst/margin_detail），
                          已有的 daily/daily_basic/moneyflow/index_daily 全部跳过
+        market_core:     True=十年验证核心行情模式：保留指数，跳过扩展日频和非必要静态数据
     """
     import main as stock_main  # 复用已初始化的 pro 实例
     pro = stock_main.pro
@@ -680,21 +683,23 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         time.sleep(0.5)
         download_stock_basic(pro, force)
         time.sleep(0.5)
-        if not core_only:
+        if not core_only and not market_core:
             download_share_float(pro, start_date, end_date, force)
             time.sleep(0.5)
             download_stk_holdertrade(pro, start_date, end_date, force)
             time.sleep(0.5)
         else:
-            logger.info("  -> core-only：跳过 share_float / stk_holdertrade")
+            mode = "market-core" if market_core else "core-only"
+            logger.info(f"  -> {mode}：跳过 share_float / stk_holdertrade")
 
-        if not skip_financial:
+        if not skip_financial and not market_core:
             download_fina_indicator(pro, force)
             time.sleep(0.5)
             download_income(pro, force)
             time.sleep(0.5)
         else:
-            logger.info("  ↩ 跳过财务数据（--skip-financial）")
+            reason = "--market-core" if market_core else "--skip-financial"
+            logger.info(f"  ↩ 跳过财务数据（{reason}）")
     else:
         logger.info("\n【only-new 模式】跳过静态数据和已有日频数据，只补充新接口")
 
@@ -706,9 +711,21 @@ def run_download(start_date: str, end_date: str, force: bool = False,
     logger.info(f"  共 {len(trade_dates)} 个交易日（含前置缓冲期）")
 
     # ── 阶段3：按日数据 ──
-    label = "新增接口（top_list/top_inst/margin_detail）" if only_new else "行情/换手率/资金流/指数/龙虎榜/融资"
+    if only_new:
+        label = "新增接口（top_list/top_inst/margin_detail）"
+    elif market_core:
+        label = "核心行情/换手率/资金流/指数"
+    else:
+        label = "行情/换手率/资金流/指数/龙虎榜/融资"
     logger.info(f"\n【阶段3】按日下载{label}")
-    results = download_daily_range(pro, trade_dates, force, only_new=only_new, core_only=core_only)
+    results = download_daily_range(
+        pro,
+        trade_dates,
+        force,
+        only_new=only_new,
+        core_only=core_only,
+        market_core=market_core,
+    )
     daily_ok, basic_ok, mf_ok, idx_ok, tl_ok, ti_ok, mg_ok = results
 
     # ── 完成报告 ──
@@ -720,9 +737,10 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         logger.info(f"  daily_basic：{basic_ok}/{len(trade_dates)} 天")
         logger.info(f"  moneyflow：{mf_ok}/{len(trade_dates)} 天")
         logger.info(f"  index_daily：{idx_ok}/{len(trade_dates)} 天")
-    logger.info(f"  top_list：{tl_ok}/{len(trade_dates)} 天  ← 龙虎榜明细（方案D）")
-    logger.info(f"  top_inst：{ti_ok}/{len(trade_dates)} 天  ← 机构席位明细（方案D）")
-    logger.info(f"  margin_detail：{mg_ok}/{len(trade_dates)} 天  ← 融资融券明细（方案E）")
+    if not market_core:
+        logger.info(f"  top_list：{tl_ok}/{len(trade_dates)} 天  ← 龙虎榜明细（方案D）")
+        logger.info(f"  top_inst：{ti_ok}/{len(trade_dates)} 天  ← 机构席位明细（方案D）")
+        logger.info(f"  margin_detail：{mg_ok}/{len(trade_dates)} 天  ← 融资融券明细（方案E）")
     logger.info(f"  缓存目录：{os.path.abspath(CACHE_DIR)}")
     logger.info(f"{'='*60}\n")
 
@@ -739,6 +757,8 @@ def main():
                              '已有数据保持不动，适合在已有回测数据基础上补充新信号')
     parser.add_argument('--core-only', action='store_true',
                         help='线上极速同步：只下载 daily/daily_basic/moneyflow/stock_basic，跳过指数、龙虎榜和融资融券')
+    parser.add_argument('--market-core', action='store_true',
+                        help='十年回测核心同步：下载 daily/daily_basic/moneyflow/index_daily/stock_basic，跳过财务、龙虎榜和融资融券')
     args = parser.parse_args()
 
     run_download(
@@ -748,6 +768,7 @@ def main():
         skip_financial=args.skip_financial,
         only_new=args.only_new,
         core_only=args.core_only,
+        market_core=args.market_core,
     )
 
 

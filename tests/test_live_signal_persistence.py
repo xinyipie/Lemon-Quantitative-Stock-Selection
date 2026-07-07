@@ -66,6 +66,9 @@ class LiveSignalPersistenceTest(unittest.TestCase):
                 "volume_ratio": 3.2,
                 "drawdown_from_high": 9.5,
                 "main_net_inflow": 1200.0,
+                "consensus_profile": "v39",
+                "recommendation_layer": "T1_BUY_CANDIDATE",
+                "entry_timing": "T1",
             }
         )
 
@@ -78,6 +81,9 @@ class LiveSignalPersistenceTest(unittest.TestCase):
         self.assertIn("量比3.20偏热", payload["risk_reasons"])
         self.assertIn("回撤9.5%进入风险区", payload["risk_reasons"])
         self.assertIn("轻仓观察", payload["action_hint"])
+        self.assertEqual(payload["consensus_profile"], "v39")
+        self.assertEqual(payload["recommendation_layer"], "T1_BUY_CANDIDATE")
+        self.assertEqual(payload["entry_timing"], "T1")
 
     def test_short_signal_payload_marks_factor_breakdown_completeness(self):
         complete = pd.Series(

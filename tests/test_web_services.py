@@ -15,6 +15,7 @@ from web_app.services.signal_service import (
     build_default_signal_start,
     build_longterm_pool_status,
     build_longterm_run_funnel,
+    build_strong_recommendation_card,
     get_active_longterm_pool,
     get_longterm_audit_samples,
     get_signal_runs,
@@ -301,6 +302,79 @@ class WebServicesTest(unittest.TestCase):
 
         self.assertEqual(len(recent), 1)
         self.assertEqual(recent[0]["ts_code"], "000001.SZ")
+
+    def test_strong_recommendation_card_only_promotes_v39_or_t1_live_signals(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run(
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    run_id,
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            name="A",
+                            industry="Bank",
+                            rank=1,
+                            score=88,
+                            factors={
+                                "consensus_profile": "v39",
+                                "recommendation_layer": "T1_BUY_CANDIDATE",
+                                "entry_timing": "T1",
+                                "consensus_votes": 3,
+                                "consensus_avg_rank": 1.0,
+                                "stop_loss_price": 9.5,
+                                "target_price": 11.2,
+                                "factor_inflow": 82,
+                                "factor_sector": 75,
+                                "factor_pattern": 70,
+                                "factor_volume_ratio": 60,
+                                "factor_drawdown": 55,
+                                "factor_wyckoff": 58,
+                            },
+                        ),
+                        SignalRecord(
+                            ts_code="000002.SZ",
+                            name="B",
+                            industry="Tech",
+                            rank=2,
+                            score=91,
+                            factors={
+                                "factor_inflow": 80,
+                                "factor_sector": 72,
+                                "factor_pattern": 68,
+                                "factor_volume_ratio": 60,
+                                "factor_drawdown": 55,
+                                "factor_wyckoff": 58,
+                            },
+                        ),
+                    ],
+                )
+            finally:
+                store.close()
+
+            latest_run = get_signal_runs(signal_db, source="live", mode="short", limit=1)[0]
+            live_rows = get_recent_signals(signal_db, history_db=None, limit=10, source="live", mode="short")
+            card = build_strong_recommendation_card(latest_run, live_rows)
+
+        self.assertEqual(card["title"], "\u5f3a\u63a8\u8350 1 \u53ea")
+        self.assertEqual(card["candidate_count"], 2)
+        self.assertEqual(card["strong_count"], 1)
+        self.assertEqual(card["items"][0]["ts_code"], "000001.SZ")
+        self.assertTrue(card["items"][0]["strong_recommendation"])
+        self.assertIn("v39\u5f3a\u4fe1\u53f7", card["items"][0]["strong_badges"])
+        self.assertIn("T1", card["items"][0]["strong_badges"])
+        self.assertIn("9.50", card["items"][0]["strong_guard"])
 
     def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
         with tempfile.TemporaryDirectory() as tmpdir:
