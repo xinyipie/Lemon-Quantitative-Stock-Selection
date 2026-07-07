@@ -33,6 +33,7 @@ from web_app.services.signal_service import (
     build_longterm_pool_status,
     build_longterm_run_funnel,
     build_signal_summary,
+    build_strong_recommendation_card,
     get_active_longterm_pool,
     get_longterm_audit_samples,
     get_longterm_audit_summary,
@@ -112,6 +113,7 @@ def dashboard(request: Request):
     longterm_buckets = split_longterm_pool(longterm_pool)
     longterm_pool_status = build_longterm_pool_status(longterm_pool, longterm_runs)
     decision = build_dashboard_decision(latest_live_short_run, live_signals, longterm_pool, backtest_signals)
+    strong_recommendation = build_strong_recommendation_card(latest_live_short_run, live_signals)
     admission_diagnostics = build_admission_diagnostics(
         latest_live_short_run,
         live_signals,
@@ -144,6 +146,7 @@ def dashboard(request: Request):
             "longterm_pool": longterm_pool,
             "signal_summary": signal_summary,
             "decision": decision,
+            "strong_recommendation": strong_recommendation,
             "admission_diagnostics": admission_diagnostics,
             "freshness": freshness,
             "short_stats": short_stats,
@@ -325,6 +328,21 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         limit=1,
     )
     latest_signal_run = latest_runs[0] if latest_runs else None
+    live_short_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        source="live",
+        mode="short",
+        limit=1,
+    )
+    latest_live_short_run = live_short_runs[0] if live_short_runs else None
+    live_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=10,
+        source="live",
+        mode="short",
+    )
+    strong_recommendation = build_strong_recommendation_card(latest_live_short_run, live_signals)
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     effective_start = start or build_default_signal_start(latest_signal_date, days=default_window_days)
     recent_signals = get_recent_signals(
@@ -348,6 +366,7 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
             "signals": recent_signals,
             "short_stats": short_stats,
             "latest_signal_run": latest_signal_run,
+            "strong_recommendation": strong_recommendation,
             "update_status": read_update_status(),
             "filters": {
                 "q": q,

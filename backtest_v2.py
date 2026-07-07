@@ -36,8 +36,11 @@ from strategy_profiles import (
     SHORT_FACTOR_COLUMNS,
     apply_style_gate,
     available_profiles,
+    available_consensus_profiles,
     available_style_gates,
+    build_consensus_candidates,
     factor_profile_score,
+    normalize_consensus_profile,
     normalize_factor_profile,
     normalize_style_gate,
 )
@@ -225,6 +228,7 @@ class BacktestV2:
         score_order: str = 'desc',
         factor_profile: str = 'original',
         style_gate: str = 'none',
+        consensus_profile: str = 'none',
         short_filter_profile: str = 'baseline',
         conditional_lock_enabled: bool = False,
         conditional_lock_activation_pct: float = 6.0,
@@ -271,6 +275,7 @@ class BacktestV2:
         self.score_order = score_order if score_order in ('desc', 'asc') else 'desc'
         self.factor_profile = normalize_factor_profile(factor_profile)
         self.style_gate = normalize_style_gate(style_gate)
+        self.consensus_profile = normalize_consensus_profile(consensus_profile)
         self.short_filter_profile = short_filter_profile
         self.conditional_lock_enabled = conditional_lock_enabled
         self.conditional_lock_activation_pct = conditional_lock_activation_pct
@@ -423,7 +428,17 @@ class BacktestV2:
                     return [], []
                 # The live strategy score still controls admission; experiment profiles only rerank.
                 raw_candidate_rows = stock_pool[stock_pool[threshold_col] >= score_threshold]
-                candidate_rows = self._apply_style_gate(raw_candidate_rows).sort_values(
+                if self.consensus_profile != 'none':
+                    candidate_rows = build_consensus_candidates(
+                        raw_candidate_rows,
+                        consensus_profile=self.consensus_profile,
+                        min_votes=2,
+                        base_score_col=threshold_col,
+                    )
+                    score_col = 'consensus_score'
+                else:
+                    candidate_rows = self._apply_style_gate(raw_candidate_rows)
+                candidate_rows = candidate_rows.sort_values(
                     score_col,
                     ascending=(self.score_order == 'asc')
                 )
@@ -451,15 +466,28 @@ class BacktestV2:
                         'original_score':  float(row.get('original_score', row.get('score', 0)) or 0),
                         'factor_profile':  self.factor_profile,
                         'style_gate':      self.style_gate,
+                        'consensus_profile': self.consensus_profile,
                     }
                     for col in SHORT_FACTOR_COLUMNS:
+                        if col in row:
+                            item[col] = row.get(col)
+                    for col in (
+                        'consensus_votes',
+                        'consensus_avg_rank',
+                        'consensus_avg_score',
+                        'consensus_profiles',
+                        'consensus_score',
+                        'consensus_layer',
+                        'gap_fill_score',
+                    ):
                         if col in row:
                             item[col] = row.get(col)
                     result.append(item)
                 top_codes = [item['ts_code'] for item in result]
 
                 # 构建IC分析池（全部候选股）
-                for _, row in stock_pool.iterrows():
+                ic_source_pool = candidate_rows if self.consensus_profile != 'none' else stock_pool
+                for _, row in ic_source_pool.iterrows():
                     ic_item = {
                         'ts_code':      stock_main.format_code(row['code']),
                         'score':        float(row.get(score_col, 0) or 0),
@@ -469,8 +497,20 @@ class BacktestV2:
                         'target_price': float(row.get('target_price', 0) or 0),
                         'factor_profile': self.factor_profile,
                         'style_gate': self.style_gate,
+                        'consensus_profile': self.consensus_profile,
                     }
                     for col in SHORT_FACTOR_COLUMNS:
+                        if col in row:
+                            ic_item[col] = row.get(col)
+                    for col in (
+                        'consensus_votes',
+                        'consensus_avg_rank',
+                        'consensus_avg_score',
+                        'consensus_profiles',
+                        'consensus_score',
+                        'consensus_layer',
+                        'gap_fill_score',
+                    ):
                         if col in row:
                             ic_item[col] = row.get(col)
                     ic_pool.append(ic_item)
@@ -478,7 +518,7 @@ class BacktestV2:
                 logger.info(
                     f"  [{actual_date}] 模式:{operation_mode}  TopN={effective_top_n} "
                     f"门槛≥{score_threshold}  排序={self.score_order}  profile={self.factor_profile}  "
-                    f"style_gate={self.style_gate}  过滤{gated_out_count}只  "
+                    f"style_gate={self.style_gate}  consensus={self.consensus_profile}  过滤{gated_out_count}只  "
                     f"选出{len(top_codes)}只：{top_codes}"
                 )
                 return result, ic_pool
@@ -1665,11 +1705,12 @@ def save_and_print(
     trades_df: pd.DataFrame,
     metrics: Dict,
     equity_df: pd.DataFrame,
-    output_dir: str = 'backtest_results'
+    output_dir: str = 'backtest_results',
+    metrics_output: str = None
 ):
     """保存结果文件并打印摘要到控制台"""
     os.makedirs(output_dir, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
 
     # ── 保存逐笔明细 ──
     if not trades_df.empty:
@@ -1703,7 +1744,10 @@ def save_and_print(
 
     # ── 保存指标 JSON ──
     if metrics:
-        metrics_path = os.path.join(output_dir, f'metrics_{ts}.json')
+        metrics_path = metrics_output or os.path.join(output_dir, f'metrics_{ts}.json')
+        metrics_dir = os.path.dirname(metrics_path)
+        if metrics_dir:
+            os.makedirs(metrics_dir, exist_ok=True)
         with open(metrics_path, 'w', encoding='utf-8') as f:
             json.dump(metrics, f, indent=2, ensure_ascii=False)
         logger.info(f"📄 指标已保存：{metrics_path}")
@@ -1830,6 +1874,9 @@ def main():
     parser.add_argument('--style-gate',      type=str,   default='none',
                         choices=list(available_style_gates()),
                         help='短线风格门控实验：none=不过滤；no_momentum=排除momentum；no_active_sideways=排除active+sideways；weak_only=只保留weak_momentum；weak_or_cautious_sideways=弱动量或谨慎sideways；adaptive_quality=保留weak_momentum和高质量sideways')
+    parser.add_argument('--consensus-profile', type=str, default='none',
+                        choices=list(available_consensus_profiles()),
+                        help='short consensus research gate: none=off, v29=v19/v25/v27 at least 2 votes')
     parser.add_argument('--fallback-stop',   type=float, default=None,       help='兜底止损%%（短线默认-7，波段默认-12）')
     parser.add_argument('--fallback-profit', type=float, default=None,       help='兜底止盈%%（短线默认15，波段默认30）')
     parser.add_argument('--trailing-stop',   type=float, default=None,       help='移动止损回撤幅度%%（短线默认7，波段默认10）')
@@ -1852,6 +1899,8 @@ def main():
     parser.add_argument('--no-time-stop',   action='store_true',        help='关闭短线时间止损（用于纯净基准回测）')
     parser.add_argument('--offline',    action='store_true',            help='离线模式：从本地 Parquet 缓存读取数据（需先运行 data_downloader.py）')
     parser.add_argument('--cache-dir',  type=str,   default='data/cache', help='离线缓存目录（默认 data/cache）')
+    parser.add_argument('--metrics-output', type=str, default=None,
+                        help='可选：将指标 JSON 写入指定路径，便于批量实验准确收集结果')
     args = parser.parse_args()
 
     default_start, default_end = _default_date_range()
@@ -1953,6 +2002,7 @@ def main():
                 score_order=args.score_order,
                 factor_profile=args.factor_profile,
                 style_gate=args.style_gate,
+                consensus_profile=args.consensus_profile,
                 short_filter_profile=args.short_filter_profile,
                 conditional_lock_enabled=args.conditional_lock,
                 conditional_lock_activation_pct=args.conditional_lock_activation,
@@ -1962,7 +2012,7 @@ def main():
             bt.short_time_stop = use_short_time_stop  # 控制短线时间止损开关
 
         trades_df, metrics, equity_df = bt.run()
-        save_and_print(trades_df, metrics, equity_df)
+        save_and_print(trades_df, metrics, equity_df, metrics_output=args.metrics_output)
     finally:
         if args.offline:
             stock_main.restore_pro()

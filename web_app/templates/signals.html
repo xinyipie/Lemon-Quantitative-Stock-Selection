@@ -28,6 +28,8 @@
   <div class="metric secondary-metric"><span>机会/风险比</span><strong>{% if short_stats and short_stats.opportunity_risk_ratio is not none %}{{ "%.2f"|format(short_stats.opportunity_risk_ratio) }}{% else %}-{% endif %}</strong></div>
 </section>
 
+{% include "partials/strong_recommendation_card.html" %}
+
 <form class="filter-bar" action="/signals" method="get">
   <input name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
   <input name="start" value="{{ filters.get('start', '') }}" placeholder="开始日期 20260101">

@@ -969,6 +969,110 @@ def build_dashboard_decision(
     }
 
 
+def build_strong_recommendation_card(
+    latest_live_short_run: dict | None,
+    live_signals: list[dict],
+    limit: int = 2,
+) -> dict:
+    """Build the high-confidence short recommendation card for home and short pages."""
+    latest_date = str((latest_live_short_run or {}).get("trade_date") or "")
+    same_day = [
+        item for item in (live_signals or [])
+        if not latest_date or str(item.get("trade_date") or "") == latest_date
+    ]
+    candidates = [_decorate_strong_recommendation_item(item) for item in same_day]
+    strong_items = [
+        item for item in candidates
+        if item["strong_recommendation"]
+    ]
+    strong_items.sort(
+        key=lambda item: (
+            item["strong_priority"],
+            _num(item.get("score")) or 0,
+            -int(item.get("rank") or 999),
+        ),
+        reverse=True,
+    )
+    selected = strong_items[: max(limit, 1)]
+
+    if selected:
+        title = f"强推荐 {len(selected)} 只"
+        subtitle = "v39高置信少推层已放行，仍以人工确认和止损纪律为准。"
+        tone = "ok"
+    elif latest_live_short_run:
+        title = "今日无强推荐"
+        subtitle = "最新实盘已运行，但 v39 强推荐层没有放行标的。空着也是策略的一部分。"
+        tone = "neutral"
+    else:
+        title = "强推荐未运行"
+        subtitle = "运行 main.py 或日常同步后，这里会显示最新 v39 强推荐卡。"
+        tone = "warn"
+
+    return {
+        "title": title,
+        "subtitle": subtitle,
+        "tone": tone,
+        "trade_date": latest_date,
+        "items": selected,
+        "candidate_count": len(same_day),
+        "strong_count": len(strong_items),
+        "notes": [
+            "正式层只看 v39/T1 高置信信号",
+            "T3/T5 保留观察，不直接进入强推荐",
+            "没有强推荐时不硬推股票",
+        ],
+    }
+
+
+def _decorate_strong_recommendation_item(item: dict) -> dict:
+    decorated = dict(item)
+    factors = decorated.get("factors") or {}
+    consensus_profile = str(factors.get("consensus_profile") or decorated.get("profile") or "").lower()
+    recommendation_layer = str(factors.get("recommendation_layer") or "").upper()
+    entry_timing = str(factors.get("entry_timing") or "")
+    is_v39 = "v39" in consensus_profile
+    is_t1 = recommendation_layer == "T1_BUY_CANDIDATE" or entry_timing == "T1"
+    is_clean = not decorated.get("current_risk_blocked") and decorated.get("confidence_label") != "暂不跟"
+    strong = bool(is_clean and (is_v39 or is_t1))
+
+    badges = []
+    if is_v39:
+        badges.append("v39强信号")
+    if is_t1:
+        badges.append("T1")
+    votes = factors.get("consensus_votes")
+    avg_rank = factors.get("consensus_avg_rank")
+    if votes is not None:
+        badges.append(f"共识{int(float(votes))}票")
+    if avg_rank is not None:
+        badges.append(f"均排{float(avg_rank):.2f}")
+    if decorated.get("confidence_label"):
+        badges.append(decorated["confidence_label"])
+
+    decorated["strong_recommendation"] = strong
+    decorated["strong_priority"] = (2 if is_v39 else 0) + (1 if is_t1 else 0)
+    decorated["strong_badges"] = badges[:5]
+    decorated["strong_action"] = factors.get("observation_action") or "强推荐候选，等待人工确认买点"
+    decorated["strong_reason"] = factors.get("observation_reason") or decorated.get("recommend_reason") or "-"
+    decorated["strong_guard"] = _strong_recommendation_guard(decorated)
+    return decorated
+
+
+def _strong_recommendation_guard(item: dict) -> str:
+    factors = item.get("factors") or {}
+    stop = _num(factors.get("stop_loss_price"))
+    target = _num(factors.get("target_price"))
+    parts = []
+    if stop is not None:
+        parts.append(f"止损 {float(stop):.2f}")
+    if target is not None:
+        parts.append(f"目标 {float(target):.2f}")
+    action_hint = (item.get("score_explain") or {}).get("action_hint")
+    if action_hint:
+        parts.append(action_hint)
+    return "；".join(parts) if parts else "次日不确认就放弃，不为交易数量硬买。"
+
+
 def _factor_payload_status(item: dict) -> str:
     factors = item.get("factors") or {}
     explicit = str(factors.get("factor_payload_status") or "").strip()

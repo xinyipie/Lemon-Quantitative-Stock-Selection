@@ -88,6 +88,7 @@ class TestRunnerConfig(unittest.TestCase):
         self.assertEqual(config.SHORT_LIVE_FACTOR_PROFILE, "profile_v9_sector_quality_guard")
         self.assertEqual(config.SHORT_LIVE_STYLE_GATE, "adaptive_quality_v6")
         self.assertEqual(config.SHORT_LIVE_SCORE_ORDER, "desc")
+        self.assertEqual(config.SHORT_LIVE_CONSENSUS_PROFILE, "v39")
 
     def test_live_report_records_longterm_watchlist_state(self):
         self.assertTrue(config.ENABLE_LONGTERM_LIVE)

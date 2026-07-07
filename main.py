@@ -21,7 +21,7 @@ import news_analyzer
 import market_analyzer
 from longterm_live_pipeline import build_live_watchlists
 from signal_store import DEFAULT_DB_PATH, SignalRecord, SignalStore
-from strategy_profiles import apply_short_profile
+from strategy_profiles import apply_live_short_postprocess
 from web_app.services.dragon_service import build_dragon_observation, enrich_short_pool_with_dragon_sentiment
 
 # ==================== 日志初始化 ====================
@@ -5365,6 +5365,7 @@ def run_daily_selection(
         'atr_multiplier':      1.5,            # ATR止损系数
         'sentiment_data':      {},
         'stock_pool':          pd.DataFrame(),
+        'short_observation_pool': pd.DataFrame(),
         'longterm_pool':       pd.DataFrame(),
     }
 
@@ -5619,25 +5620,53 @@ def run_daily_selection(
         sector_avg_change=_sector_avg_change,
         short_filter_profile=short_filter_profile,
     )
+    if not stock_pool.empty:
+        stock_pool = stock_pool.copy()
+        sector_total = len(sector_ma10) if sector_ma10 else 0
+        sector_above = sum(1 for v in sector_ma10.values() if v) if sector_ma10 else 0
+        stock_pool["market_state"] = market_state
+        stock_pool["market_style"] = market_style
+        stock_pool["macro_mode"] = macro_mode
+        stock_pool["operation_mode"] = operation_mode
+        stock_pool["regime"] = regime
+        stock_pool["market_index_change"] = float(index_change)
+        stock_pool["sector_ma10_above"] = int(sector_above)
+        stock_pool["sector_ma10_total"] = int(sector_total)
+        stock_pool["sector_ma10_ratio"] = (
+            float(sector_above / sector_total * 100) if sector_total else 0.0
+        )
+        stock_pool["limit_up_count"] = int(sentiment_data.get("limit_up_count", 0) or 0)
+        stock_pool["limit_down_count"] = int(sentiment_data.get("limit_down_count", 0) or 0)
+        stock_pool["limit_up_down_ratio"] = float(sentiment_data.get("ratio", 0.0) or 0.0)
+        stock_pool["market_sentiment"] = str(sentiment_data.get("sentiment", "") or "")
+
     live_factor_profile = getattr(config, 'SHORT_LIVE_FACTOR_PROFILE', 'original')
     live_style_gate = getattr(config, 'SHORT_LIVE_STYLE_GATE', 'none')
     live_score_order = getattr(config, 'SHORT_LIVE_SCORE_ORDER', 'desc')
+    live_consensus_profile = getattr(config, 'SHORT_LIVE_CONSENSUS_PROFILE', 'none')
     is_offline_backtest = _is_backtest_data_mode()
     if (
         not is_offline_backtest
         and not stock_pool.empty
-        and (live_factor_profile != 'original' or live_style_gate != 'none')
+        and (
+            live_factor_profile != 'original'
+            or live_style_gate != 'none'
+            or live_consensus_profile != 'none'
+        )
     ):
         before_profile_count = len(stock_pool)
-        stock_pool = apply_short_profile(
+        stock_pool = apply_live_short_postprocess(
             stock_pool,
             factor_profile=live_factor_profile,
             style_gate=live_style_gate,
             score_order=live_score_order,
-        ).head(20).reset_index(drop=True)
+            consensus_profile=live_consensus_profile,
+            max_rows=20,
+        )
         logger.info(
             f"短线实盘基准后处理：profile={live_factor_profile} "
-            f"style_gate={live_style_gate}  {before_profile_count}只 → {len(stock_pool)}只"
+            f"style_gate={live_style_gate} consensus={live_consensus_profile}  "
+            f"{before_profile_count}只 → {len(stock_pool)}只"
         )
     if not is_offline_backtest and not stock_pool.empty:
         try:
@@ -5648,6 +5677,9 @@ def run_daily_selection(
                 logger.info(f"龙头情绪联动：{adjusted_count}只短线候选获得解释性加减分")
         except Exception as exc:
             logger.debug(f"龙头情绪联动降级：{exc}")
+    if not stock_pool.empty:
+        stock_pool = classify_short_entry_timing(stock_pool, actual_date)
+        result['short_observation_pool'] = stock_pool.copy()
     result['stock_pool'] = stock_pool
 
     # ── 波段选股：仅在真正牛市状态（BULL_TREND / BULL_PULLBACK）时执行 ──
@@ -5812,6 +5844,11 @@ def main():
             item['factor_drawdown']   = qdata.get('factor_drawdown', '-')
             item['factor_volume_ratio'] = qdata.get('factor_volume_ratio', '-')
             item['factor_inflow']     = qdata.get('factor_inflow', '-')
+            item['recommendation_layer'] = qdata.get('recommendation_layer', '')
+            item['entry_timing']      = qdata.get('entry_timing', '')
+            item['observation_action']= qdata.get('observation_action', '')
+            item['observation_reason']= qdata.get('observation_reason', '')
+            item['observation_version']= qdata.get('observation_version', '')
             # 新增字段
             item['wyckoff_score']     = qdata.get('wyckoff_score', '-')
             item['accel_score']       = qdata.get('accel_score', '-')
@@ -5945,6 +5982,7 @@ def main():
 
     # 保存实盘选股记录（用于事后IC验证）
     _save_live_selections(trade_date, stock_pool, longterm_watch_pool, sel.get('regime', 'BULL_TREND'))
+    _save_short_observation_log(trade_date, sel.get('short_observation_pool', stock_pool))
     _persist_signal_snapshot(
         trade_date,
         stock_pool,
@@ -6174,6 +6212,18 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
         "dragon_theme_score",
         "dragon_reason",
         "dragon_risk",
+        "consensus_profile",
+        "consensus_votes",
+        "consensus_avg_rank",
+        "consensus_avg_score",
+        "consensus_profiles",
+        "consensus_score",
+        "consensus_layer",
+        "recommendation_layer",
+        "entry_timing",
+        "observation_action",
+        "observation_reason",
+        "observation_version",
     ]
     payload = {}
     for col in keep_cols:
@@ -6423,6 +6473,131 @@ def _format_main_inflow(value) -> str:
     return f"{sign}{amount}（{direction}）"
 
 
+def _short_entry_observation_reason(row: pd.Series, layer: str) -> str:
+    """生成短线观察层的可回溯原因，便于事后验证 T1/T3 判断。"""
+    score = _safe_float(row.get('score', 0))
+    pattern = _safe_float(row.get('factor_pattern', 0))
+    sector = _safe_float(row.get('factor_sector', 0))
+    sector_ratio = _safe_float(row.get('sector_ma10_ratio', 0))
+    limit_down = int(_safe_float(row.get('limit_down_count', 0)))
+    market_style = str(row.get('market_style', '') or '')
+    macro_mode = str(row.get('macro_mode', '') or '')
+    main_inflow = _safe_float(row.get('main_net_inflow', 0))
+
+    parts = [
+        f"score={score:.1f}",
+        f"pattern={pattern:.1f}",
+        f"sector={sector:.1f}",
+        f"sector_ma10={sector_ratio:.0f}%",
+        f"limit_down={limit_down}",
+    ]
+    if market_style:
+        parts.append(f"style={market_style}")
+    if macro_mode:
+        parts.append(f"macro={macro_mode}")
+    if main_inflow:
+        parts.append(f"main_inflow={main_inflow:.0f}万")
+
+    prefix = {
+        'T1_BUY_CANDIDATE': 'T1：当前强度、形态和板块共振同时达标',
+        'T3_WAIT_CONFIRM': 'T3：板块/形态具备潜力，等待回踩后企稳确认',
+        'NO_BUY_OBSERVE_ONLY': '不买：关键因子不足，仅记录观察',
+    }.get(layer, '观察')
+    return f"{prefix}（{', '.join(parts)}）"
+
+
+def classify_short_entry_timing(stock_pool: pd.DataFrame, trade_date: str = '') -> pd.DataFrame:
+    """
+    短线观察层：给正式短线候选打上 T1 / T3 / 不买标签。
+
+    这层只做记录和解释，不改变正式候选池、不生成交易执行指令。
+    """
+    if stock_pool is None or stock_pool.empty:
+        return stock_pool
+
+    df = stock_pool.copy()
+    score = pd.to_numeric(df.get('score', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+    pattern = pd.to_numeric(df.get('factor_pattern', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+    sector = pd.to_numeric(df.get('factor_sector', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+    sector_ratio = pd.to_numeric(df.get('sector_ma10_ratio', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+    limit_down = pd.to_numeric(df.get('limit_down_count', pd.Series(0, index=df.index)), errors='coerce').fillna(0)
+    market_style = df.get('market_style', pd.Series('', index=df.index)).fillna('').astype(str)
+    macro_mode = df.get('macro_mode', pd.Series('', index=df.index)).fillna('').astype(str)
+
+    # T1 偏向“今天就够强”：总分、形态、板块共振、跌停风险同时过线。
+    t1_mask = (
+        (score >= 60)
+        & (pattern >= 60)
+        & (sector >= 30)
+        & (limit_down <= 4)
+        & market_style.isin(['momentum', 'weak_momentum', 'sideways', ''])
+    )
+    # T3 偏向“先观察”：共振不错但当前强度尚未完全确认，等未来几天企稳。
+    t3_mask = (
+        ~t1_mask
+        & (pattern >= 50)
+        & (sector >= 30)
+        & (sector_ratio >= 70)
+        & (limit_down <= 6)
+        & macro_mode.isin(['active', 'cautious', ''])
+    )
+
+    df['observation_date'] = trade_date
+    df['recommendation_layer'] = 'NO_BUY_OBSERVE_ONLY'
+    df.loc[t3_mask, 'recommendation_layer'] = 'T3_WAIT_CONFIRM'
+    df.loc[t1_mask, 'recommendation_layer'] = 'T1_BUY_CANDIDATE'
+    df['entry_timing'] = df['recommendation_layer'].map({
+        'T1_BUY_CANDIDATE': 'T1',
+        'T3_WAIT_CONFIRM': 'T3',
+        'NO_BUY_OBSERVE_ONLY': 'NO_BUY',
+    })
+    df['observation_action'] = df['recommendation_layer'].map({
+        'T1_BUY_CANDIDATE': '正式候选，可按原策略人工确认',
+        'T3_WAIT_CONFIRM': '观察候选，等待推荐后约3个交易日再确认',
+        'NO_BUY_OBSERVE_ONLY': '仅记录，不建议买入',
+    })
+    df['observation_reason'] = [
+        _short_entry_observation_reason(row, layer)
+        for (_, row), layer in zip(df.iterrows(), df['recommendation_layer'])
+    ]
+    df['observation_version'] = 'short_entry_observe_v1'
+    return df
+
+
+def _save_short_observation_log(trade_date: str, observation_pool: pd.DataFrame) -> None:
+    """保存短线 T1/T3 观察日志，后续用真实行情验证。"""
+    if observation_pool is None or observation_pool.empty:
+        return
+
+    out_dir = os.path.join(config.REPORTS_DIR, 'live_observation')
+    os.makedirs(out_dir, exist_ok=True)
+    daily_path = os.path.join(out_dir, f"short_observation_{trade_date}.csv")
+    log_path = os.path.join(out_dir, "short_observation_log.csv")
+
+    keep_cols = [
+        'observation_date', 'code', 'name', 'industry', 'close', 'change', 'score',
+        'recommendation_layer', 'entry_timing', 'observation_action',
+        'observation_reason', 'observation_version',
+        'market_style', 'macro_mode', 'market_state', 'operation_mode', 'regime',
+        'market_index_change', 'sector_ma10_ratio', 'limit_up_count',
+        'limit_down_count', 'limit_up_down_ratio', 'market_sentiment',
+        'factor_profile', 'style_gate', 'original_score', 'experiment_score',
+        'factor_sector', 'factor_pattern', 'factor_drawdown',
+        'factor_volume_ratio', 'factor_inflow', 'volume_ratio',
+        'main_net_inflow', 'drawdown_from_high', 'stop_loss_price', 'target_price',
+        'dragon_phase', 'dragon_adjustment',
+    ]
+    existing_cols = [col for col in keep_cols if col in observation_pool.columns]
+    save_df = observation_pool[existing_cols].copy()
+    save_df.to_csv(daily_path, index=False, encoding='utf-8-sig')
+
+    log_df = save_df.copy()
+    log_df['saved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    write_header = not os.path.exists(log_path)
+    log_df.to_csv(log_path, mode='a', header=write_header, index=False, encoding='utf-8-sig')
+    logger.info(f"🧪 短线T1/T3观察日志已保存：{len(save_df)} 条 → {daily_path}")
+
+
 def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: List[Dict], sentiment_data: Dict = None, macro_mode: str = 'cautious', macro_data: Dict = None, regime: str = 'BULL_TREND', regime_data: Dict = None, position_multiplier: float = 1.0, market_style: str = '', include_longterm: bool = False):
     report_path = os.path.join(config.REPORTS_DIR, f"report_{trade_date}.txt")
 
@@ -6596,6 +6771,15 @@ def _write_daily_report(trade_date: str, ai_analysis: List[Dict], ai_longterm: L
             lines.extend(_format_short_decision_card(item, len(short_top3)))
             lines.append(f"      {_short_score_transition_label(item, item.get('original_score', item.get('score_base', 0)), score)}\n")
             lines.append('\n')
+            entry_timing = item.get('entry_timing', '')
+            observation_action = item.get('observation_action', '')
+            observation_reason = item.get('observation_reason', '')
+            if entry_timing:
+                lines.append("      【T1/T3观察层】\n")
+                lines.append(f"      节奏标签：{entry_timing}  |  {observation_action}\n")
+                if observation_reason:
+                    lines.append(f"      记录原因：{observation_reason}\n")
+                lines.append("      注：观察层只用于复盘验证，不是自动交易指令。\n\n")
             lines.extend(_format_short_execution_plan(item, len(short_top3)))
             lines.append('\n')
 

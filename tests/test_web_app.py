@@ -30,6 +30,7 @@ class WebAppTest(unittest.TestCase):
         self.assertNotIn("/update/run?mode=dragon", response.text)
         self.assertNotIn("/update/run?mode=radar", response.text)
         self.assertLess(response.text.find("/update/run?mode=daily"), response.text.find("/update/run?mode=full"))
+        self.assertIn("Strong Shortlist", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("data-background-update-form", response.text)
         self.assertIn("stock:updatePending", response.text)
@@ -115,6 +116,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("初筛通过", response.text)
         self.assertIn("可信度", response.text)
         self.assertIn("short_v9_final", response.text)
+        self.assertIn("Strong Shortlist", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("stock:updatePending", response.text)
 

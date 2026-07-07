@@ -84,6 +84,8 @@
   <div class="metric"><span>平均MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
 </section>
 
+{% include "partials/strong_recommendation_card.html" %}
+
 <section class="decision-panel {{ decision.tone }}">
   <div>
     <div class="eyebrow">Latest Decision</div>
