@@ -1024,6 +1024,55 @@ def build_strong_recommendation_card(
     }
 
 
+def build_observation_candidate_card(
+    latest_observe_run: dict | None,
+    observe_signals: list[dict],
+    limit: int = 2,
+) -> dict:
+    """Build the separate short observation card; these are not strong recommendations."""
+    latest_date = str((latest_observe_run or {}).get("trade_date") or "")
+    same_day = [
+        item for item in (observe_signals or [])
+        if not latest_date or str(item.get("trade_date") or "") == latest_date
+    ]
+    candidates = [_decorate_observation_candidate_item(item) for item in same_day]
+    candidates.sort(
+        key=lambda item: (
+            _num((item.get("factors") or {}).get("observe_score")) or _num(item.get("score")) or 0,
+            -int(item.get("rank") or 999),
+        ),
+        reverse=True,
+    )
+    selected = candidates[: max(limit, 1)]
+
+    if selected:
+        title = f"短线观察候选 {len(selected)} 只"
+        subtitle = "best_balance 扩展层仅用于跟踪验证，不等同 v39 强推荐。"
+        tone = "observe"
+    elif latest_observe_run:
+        title = "今日无观察候选"
+        subtitle = "观察层已运行，但没有通过 best_balance 扩展规则的标的。"
+        tone = "neutral"
+    else:
+        title = "观察候选未运行"
+        subtitle = "运行实盘选股后，这里会显示与强推荐分离的观察候选。"
+        tone = "neutral"
+
+    return {
+        "title": title,
+        "subtitle": subtitle,
+        "tone": tone,
+        "trade_date": latest_date,
+        "items": selected,
+        "candidate_count": len(same_day),
+        "notes": [
+            "观察候选不进入强推荐统计",
+            "最多 Top2，先看真实 T+1/T+3/T+5",
+            "确认变弱就放弃，不为补数量硬推",
+        ],
+    }
+
+
 def _decorate_strong_recommendation_item(item: dict) -> dict:
     decorated = dict(item)
     factors = decorated.get("factors") or {}
@@ -1055,6 +1104,33 @@ def _decorate_strong_recommendation_item(item: dict) -> dict:
     decorated["strong_action"] = factors.get("observation_action") or "强推荐候选，等待人工确认买点"
     decorated["strong_reason"] = factors.get("observation_reason") or decorated.get("recommend_reason") or "-"
     decorated["strong_guard"] = _strong_recommendation_guard(decorated)
+    return decorated
+
+
+def _decorate_observation_candidate_item(item: dict) -> dict:
+    decorated = dict(item)
+    factors = decorated.get("factors") or {}
+    lane = str(factors.get("observe_lane") or "")
+    badges = ["观察"]
+    lane_labels = {
+        "strong_t1_shadow": "强信号相邻",
+        "weak_momentum_breadth": "弱动量共振",
+        "sideways_breadth": "震荡共振",
+    }
+    if lane in lane_labels:
+        badges.append(lane_labels[lane])
+    observe_profile = factors.get("observe_profile")
+    if observe_profile:
+        badges.append(str(observe_profile))
+    entry_timing = factors.get("entry_timing")
+    if entry_timing:
+        badges.append(str(entry_timing))
+
+    decorated["observe_badges"] = badges[:5]
+    decorated["observe_action"] = factors.get("observation_action") or "观察候选，等待盘面确认"
+    decorated["observe_reason"] = factors.get("observation_reason") or decorated.get("recommend_reason") or "-"
+    decorated["observe_score"] = _num(factors.get("observe_score")) or _num(decorated.get("score")) or 0
+    decorated["observe_guard"] = "仅跟踪验证；没有次日确认不升级为强推荐"
     return decorated
 
 

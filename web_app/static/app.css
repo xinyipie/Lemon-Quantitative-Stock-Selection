@@ -579,6 +579,7 @@ th {
 .strong-recommendation-card.ok { border-left-color: var(--red); }
 .strong-recommendation-card.neutral { border-left-color: var(--blue); }
 .strong-recommendation-card.warn { border-left-color: var(--amber); }
+.strong-recommendation-card.observe { border-left-color: var(--green); }
 
 .strong-card-head {
   display: grid;
@@ -675,6 +676,15 @@ th {
 .strong-score-block strong {
   color: var(--red);
   font-size: 24px;
+}
+
+.observe-score-block {
+  border-color: #cfe4ea;
+  background: #f2fafb;
+}
+
+.observe-score-block strong {
+  color: var(--blue);
 }
 
 .strong-stock-reason {

@@ -32,6 +32,7 @@ from web_app.services.signal_service import (
     build_default_signal_start,
     build_longterm_pool_status,
     build_longterm_run_funnel,
+    build_observation_candidate_card,
     build_signal_summary,
     build_strong_recommendation_card,
     get_active_longterm_pool,
@@ -99,6 +100,24 @@ def dashboard(request: Request):
     latest_live_short_run = live_short_runs[0] if live_short_runs else None
     if latest_live_short_run and int(latest_live_short_run.get("signal_count") or 0) == 0:
         live_signals = []
+    observe_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=10,
+        source="live_observe",
+        profile="short_live_observe_best_balance",
+        mode="short",
+    )
+    observe_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        mode="short",
+        source="live_observe",
+        profile="short_live_observe_best_balance",
+        limit=3,
+    )
+    latest_observe_run = observe_runs[0] if observe_runs else None
+    if latest_observe_run and int(latest_observe_run.get("signal_count") or 0) == 0:
+        observe_signals = []
     backtest_signals = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
@@ -114,6 +133,7 @@ def dashboard(request: Request):
     longterm_pool_status = build_longterm_pool_status(longterm_pool, longterm_runs)
     decision = build_dashboard_decision(latest_live_short_run, live_signals, longterm_pool, backtest_signals)
     strong_recommendation = build_strong_recommendation_card(latest_live_short_run, live_signals)
+    observation_candidates = build_observation_candidate_card(latest_observe_run, observe_signals)
     admission_diagnostics = build_admission_diagnostics(
         latest_live_short_run,
         live_signals,
@@ -147,6 +167,7 @@ def dashboard(request: Request):
             "signal_summary": signal_summary,
             "decision": decision,
             "strong_recommendation": strong_recommendation,
+            "observation_candidates": observation_candidates,
             "admission_diagnostics": admission_diagnostics,
             "freshness": freshness,
             "short_stats": short_stats,
@@ -342,7 +363,26 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         source="live",
         mode="short",
     )
+    observe_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=10,
+        source="live_observe",
+        profile="short_live_observe_best_balance",
+        mode="short",
+    )
+    observe_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        source="live_observe",
+        profile="short_live_observe_best_balance",
+        mode="short",
+        limit=1,
+    )
+    latest_observe_run = observe_runs[0] if observe_runs else None
+    if latest_observe_run and int(latest_observe_run.get("signal_count") or 0) == 0:
+        observe_signals = []
     strong_recommendation = build_strong_recommendation_card(latest_live_short_run, live_signals)
+    observation_candidates = build_observation_candidate_card(latest_observe_run, observe_signals)
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     effective_start = start or build_default_signal_start(latest_signal_date, days=default_window_days)
     recent_signals = get_recent_signals(
@@ -367,6 +407,7 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
             "short_stats": short_stats,
             "latest_signal_run": latest_signal_run,
             "strong_recommendation": strong_recommendation,
+            "observation_candidates": observation_candidates,
             "update_status": read_update_status(),
             "filters": {
                 "q": q,

@@ -21,7 +21,7 @@ import news_analyzer
 import market_analyzer
 from longterm_live_pipeline import build_live_watchlists
 from signal_store import DEFAULT_DB_PATH, SignalRecord, SignalStore
-from strategy_profiles import apply_live_short_postprocess
+from strategy_profiles import apply_live_short_postprocess, build_live_observation_candidates
 from web_app.services.dragon_service import build_dragon_observation, enrich_short_pool_with_dragon_sentiment
 
 # ==================== 日志初始化 ====================
@@ -5366,6 +5366,7 @@ def run_daily_selection(
         'sentiment_data':      {},
         'stock_pool':          pd.DataFrame(),
         'short_observation_pool': pd.DataFrame(),
+        'short_observe_pool':  pd.DataFrame(),
         'longterm_pool':       pd.DataFrame(),
     }
 
@@ -5640,6 +5641,7 @@ def run_daily_selection(
         stock_pool["limit_up_down_ratio"] = float(sentiment_data.get("ratio", 0.0) or 0.0)
         stock_pool["market_sentiment"] = str(sentiment_data.get("sentiment", "") or "")
 
+    raw_short_pool = stock_pool.copy() if not stock_pool.empty else pd.DataFrame()
     live_factor_profile = getattr(config, 'SHORT_LIVE_FACTOR_PROFILE', 'original')
     live_style_gate = getattr(config, 'SHORT_LIVE_STYLE_GATE', 'none')
     live_score_order = getattr(config, 'SHORT_LIVE_SCORE_ORDER', 'desc')
@@ -5668,6 +5670,27 @@ def run_daily_selection(
             f"style_gate={live_style_gate} consensus={live_consensus_profile}  "
             f"{before_profile_count}只 → {len(stock_pool)}只"
         )
+    short_observe_pool = pd.DataFrame()
+    if (
+        not is_offline_backtest
+        and bool(getattr(config, 'ENABLE_SHORT_LIVE_OBSERVE_LAYER', False))
+        and not raw_short_pool.empty
+    ):
+        strong_codes = []
+        if not stock_pool.empty:
+            strong_code_col = "ts_code" if "ts_code" in stock_pool.columns else "code" if "code" in stock_pool.columns else None
+            if strong_code_col:
+                strong_codes = stock_pool[strong_code_col].dropna().astype(str).tolist()
+        short_observe_pool = build_live_observation_candidates(
+            raw_short_pool,
+            profile=getattr(config, 'SHORT_LIVE_OBSERVE_PROFILE', 'best_balance'),
+            top_n=int(getattr(config, 'SHORT_LIVE_OBSERVE_TOPN', 2) or 0),
+            exclude_codes=strong_codes,
+        )
+        logger.info(
+            f"短线观察候选层：profile={getattr(config, 'SHORT_LIVE_OBSERVE_PROFILE', 'best_balance')} "
+            f"{len(raw_short_pool)}只 → {len(short_observe_pool)}只"
+        )
     if not is_offline_backtest and not stock_pool.empty:
         try:
             dragon_observation = build_dragon_observation(end_date=actual_date)
@@ -5680,6 +5703,9 @@ def run_daily_selection(
     if not stock_pool.empty:
         stock_pool = classify_short_entry_timing(stock_pool, actual_date)
         result['short_observation_pool'] = stock_pool.copy()
+    if not short_observe_pool.empty:
+        short_observe_pool = classify_short_entry_timing(short_observe_pool, actual_date)
+    result['short_observe_pool'] = short_observe_pool
     result['stock_pool'] = stock_pool
 
     # ── 波段选股：仅在真正牛市状态（BULL_TREND / BULL_PULLBACK）时执行 ──
@@ -5986,6 +6012,7 @@ def main():
     _persist_signal_snapshot(
         trade_date,
         stock_pool,
+        sel.get('short_observe_pool'),
         longterm_watch_pool if include_longterm else None,
         longterm_elite_pool if include_longterm else None,
     )
@@ -6060,6 +6087,7 @@ def _save_live_selections(trade_date: str, stock_pool: pd.DataFrame,
 def _persist_signal_snapshot(
     trade_date: str,
     stock_pool: pd.DataFrame,
+    short_observe_pool: Optional[pd.DataFrame],
     longterm_watch: Optional[pd.DataFrame],
     longterm_elite: Optional[pd.DataFrame],
     db_path=DEFAULT_DB_PATH,
@@ -6073,6 +6101,20 @@ def _persist_signal_snapshot(
             profile=getattr(config, "SHORT_LIVE_FACTOR_PROFILE", "short"),
             records=_signal_records_from_df(stock_pool, pool_type="short_top", score_col="score"),
         )
+        if bool(getattr(config, "ENABLE_SHORT_LIVE_OBSERVE_LAYER", False)):
+            observe_profile = getattr(config, "SHORT_LIVE_OBSERVE_PROFILE", "best_balance")
+            _persist_one_signal_pool(
+                store,
+                trade_date=trade_date,
+                mode="short",
+                profile=f"short_live_observe_{observe_profile}",
+                records=_signal_records_from_df(
+                    short_observe_pool,
+                    pool_type="short_observe",
+                    score_col="observe_score",
+                ),
+                source="live_observe",
+            )
         if longterm_watch is not None:
             _persist_one_signal_pool(
                 store,
@@ -6137,8 +6179,9 @@ def _persist_one_signal_pool(
     mode: str,
     profile: str,
     records: List[SignalRecord],
+    source: str = "live",
 ) -> None:
-    run_id = store.record_run(trade_date=trade_date, mode=mode, profile=profile, source="live", label="daily")
+    run_id = store.record_run(trade_date=trade_date, mode=mode, profile=profile, source=source, label="daily")
     store.update_pool(run_id=run_id, trade_date=trade_date, mode=mode, profile=profile, records=records)
 
 
@@ -6219,6 +6262,9 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
         "consensus_profiles",
         "consensus_score",
         "consensus_layer",
+        "observe_profile",
+        "observe_lane",
+        "observe_score",
         "recommendation_layer",
         "entry_timing",
         "observation_action",

@@ -12,6 +12,7 @@ from strategy_profiles import (
     available_profiles,
     available_style_gates,
     build_consensus_candidates,
+    build_live_observation_candidates,
     factor_profile_score,
     normalize_consensus_profile,
 )
@@ -2584,6 +2585,77 @@ class StyleGateTest(unittest.TestCase):
         self.assertEqual(["high_score", "low_score"], result["code"].tolist())
         self.assertEqual(["original"], result["factor_profile"].unique().tolist())
         self.assertEqual(["none"], result["style_gate"].unique().tolist())
+
+    def test_live_observation_candidates_use_best_balance_without_strong_duplicates(self):
+        df = pd.DataFrame(
+            [
+                self.make_row(
+                    code="strong_rank",
+                    score=92,
+                    factor_inflow=100,
+                    factor_wyckoff=68,
+                    factor_sector=40,
+                    factor_pattern=65,
+                    volume_ratio=2.1,
+                    drawdown_from_high=5.0,
+                    change=3.0,
+                    macro_mode="active",
+                    regime="BULL_TREND",
+                    limit_up_count=80,
+                    limit_down_count=2,
+                    sector_ma10_ratio=92,
+                    market_index_change=0.1,
+                    market_style="weak_momentum",
+                ),
+                self.make_row(
+                    code="weak_breadth",
+                    score=88,
+                    factor_inflow=82,
+                    factor_wyckoff=62,
+                    factor_sector=48,
+                    factor_pattern=58,
+                    volume_ratio=2.0,
+                    drawdown_from_high=4.0,
+                    change=2.2,
+                    macro_mode="active",
+                    regime="BULL_TREND",
+                    limit_up_count=70,
+                    limit_down_count=2,
+                    sector_ma10_ratio=94,
+                    market_index_change=0.1,
+                    market_style="weak_momentum",
+                ),
+                self.make_row(
+                    code="weak_breadth_2",
+                    score=84,
+                    factor_inflow=80,
+                    factor_wyckoff=60,
+                    factor_sector=45,
+                    factor_pattern=55,
+                    volume_ratio=1.9,
+                    drawdown_from_high=4.5,
+                    change=1.8,
+                    macro_mode="active",
+                    regime="BULL_TREND",
+                    limit_up_count=70,
+                    limit_down_count=2,
+                    sector_ma10_ratio=93,
+                    market_index_change=0.1,
+                    market_style="weak_momentum",
+                ),
+            ]
+        )
+
+        result = build_live_observation_candidates(
+            df,
+            profile="best_balance",
+            top_n=2,
+            exclude_codes=["strong_rank"],
+        )
+
+        self.assertEqual(["weak_breadth_2"], result["code"].tolist())
+        self.assertEqual(["best_balance"], result["observe_profile"].unique().tolist())
+        self.assertEqual(["OBSERVE_CANDIDATE"], result["recommendation_layer"].unique().tolist())
 
 
 if __name__ == "__main__":

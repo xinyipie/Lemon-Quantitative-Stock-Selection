@@ -44,6 +44,9 @@ SHORT_FACTOR_COLUMNS = [
     "consensus_score",
     "consensus_layer",
     "gap_fill_score",
+    "observe_profile",
+    "observe_lane",
+    "observe_score",
 ]
 
 VALID_FACTOR_PROFILES = (
@@ -1572,6 +1575,118 @@ def apply_live_short_postprocess(
     if max_rows is not None:
         out = out.head(max_rows)
     return out.reset_index(drop=True)
+
+
+def build_live_observation_candidates(
+    df: pd.DataFrame,
+    profile: str = "best_balance",
+    top_n: int = 2,
+    exclude_codes: Iterable[str] | None = None,
+    score_col: str = "score",
+) -> pd.DataFrame:
+    """构建短线观察候选层；该层只用于跟踪，不升级为强推荐。"""
+    if df.empty or top_n <= 0:
+        return df.iloc[0:0].copy()
+
+    profile = (profile or "none").lower()
+    if profile not in {"best_balance"}:
+        return df.iloc[0:0].copy()
+
+    key_col = "ts_code" if "ts_code" in df.columns else "code" if "code" in df.columns else None
+    excluded = {str(code) for code in (exclude_codes or []) if code}
+
+    lanes: list[pd.DataFrame] = []
+    strong_shadow = build_consensus_candidates(
+        df,
+        consensus_profile="v39",
+        min_votes=2,
+        base_score_col=score_col,
+    )
+    if not strong_shadow.empty:
+        strong_shadow = strong_shadow.copy()
+        strong_shadow["observe_lane"] = "strong_t1_shadow"
+        strong_shadow["observe_lane_priority"] = 3
+        lanes.append(strong_shadow)
+
+    base = apply_short_profile(
+        df,
+        factor_profile="profile_v9_sector_quality_guard",
+        style_gate="adaptive_quality_v6",
+        score_order="desc",
+        score_col=score_col,
+    )
+    if not base.empty:
+        market_style = base.get("market_style", pd.Series("", index=base.index)).fillna("").astype(str)
+        sector_ma10_ratio = _num_series(base, "sector_ma10_ratio", 0.0)
+        factor_sector = _num_series(base, "factor_sector", 0.0)
+
+        expansion_mask = (
+            market_style.eq("weak_momentum")
+            & (sector_ma10_ratio >= 90.0)
+            & (factor_sector >= 30.0)
+        )
+        readiness_mask = (
+            market_style.eq("sideways")
+            & (sector_ma10_ratio >= 90.0)
+            & (factor_sector >= 35.0)
+        )
+        for lane_name, priority, mask in (
+            ("weak_momentum_breadth", 2, expansion_mask),
+            ("sideways_breadth", 1, readiness_mask),
+        ):
+            lane = base.loc[mask].copy()
+            if lane.empty:
+                continue
+            lane["observe_lane"] = lane_name
+            lane["observe_lane_priority"] = priority
+            lanes.append(lane)
+
+    if not lanes:
+        return df.iloc[0:0].copy()
+
+    out = pd.concat(lanes, ignore_index=True, sort=False)
+    if excluded:
+        exclude_mask = pd.Series(False, index=out.index)
+        for col in ("code", "ts_code"):
+            if col in out.columns:
+                exclude_mask = exclude_mask | out[col].astype(str).isin(excluded)
+        out = out[~exclude_mask].copy()
+    if out.empty:
+        return out.reset_index(drop=True)
+
+    score = _num_series(out, "experiment_score", 0.0) if "experiment_score" in out.columns else _num_series(out, score_col, 0.0)
+    pattern = _num_series(out, "factor_pattern", 50.0)
+    sector = _num_series(out, "factor_sector", 50.0)
+    inflow = _num_series(out, "factor_inflow", 50.0)
+    volume_ratio = _num_series(out, "volume_ratio", 2.0)
+    avg_rank = _num_series(out, "consensus_avg_rank", 3.0)
+    lane_priority = _num_series(out, "observe_lane_priority", 0.0)
+    out["observe_score"] = (
+        lane_priority * 100.0
+        + score
+        + (pattern - 50.0) * 0.25
+        + (sector - 50.0) * 0.15
+        + (inflow - 50.0) * 0.10
+        - (volume_ratio - 2.0).abs() * 2.0
+        - avg_rank * 0.5
+    ).round(4)
+    out["observe_profile"] = profile
+    out["recommendation_layer"] = "OBSERVE_CANDIDATE"
+    out["observation_version"] = "short_live_observe_best_balance_v1"
+    out["observation_action"] = "观察候选，等待盘面确认"
+    out["observation_reason"] = out["observe_lane"].map(
+        {
+            "strong_t1_shadow": "与强信号相邻，保留观察记录",
+            "weak_momentum_breadth": "弱动量窗口中板块共振很强",
+            "sideways_breadth": "震荡市中板块共振很强",
+        }
+    ).fillna("短线观察候选")
+
+    if key_col:
+        out = out.sort_values("observe_score", ascending=False)
+        out = out.drop_duplicates(subset=[key_col], keep="first")
+
+    return out.sort_values("observe_score", ascending=False).head(top_n).reset_index(drop=True)
 
 
 def _apply_consensus_market_acceptance_guard(df: pd.DataFrame) -> pd.DataFrame:

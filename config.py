@@ -131,6 +131,9 @@ SHORT_LIVE_FACTOR_PROFILE = "profile_v9_sector_quality_guard"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
 SHORT_LIVE_CONSENSUS_PROFILE = "v39"  # v39=高置信少推，作为首页/短线页强推荐层
+ENABLE_SHORT_LIVE_OBSERVE_LAYER = True  # 观察候选层单独入库/展示，不稀释 v39 强推荐
+SHORT_LIVE_OBSERVE_PROFILE = "best_balance"
+SHORT_LIVE_OBSERVE_TOPN = 2
 ENABLE_LONGTERM_LIVE = True  # Web看板经营期启用长线观察池扫描；只记录池状态，不做交易执行
 LONGTERM_LIVE_PROFILE = "longterm_quality_lifecycle_v18_market_sync"  # 长线实盘启用时使用当前验证的市场同步观察池
 LONGTERM_LIVE_TOPN = 3

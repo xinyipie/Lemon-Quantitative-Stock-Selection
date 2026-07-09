@@ -1,0 +1,54 @@
+{% set observe_card = observation_candidates|default({}) %}
+<section class="strong-recommendation-card observe {{ observe_card.tone or 'neutral' }}">
+  <div class="strong-card-head">
+    <div>
+      <div class="eyebrow">Observe Candidates</div>
+      <h2>{{ observe_card.title or '观察候选未运行' }}</h2>
+      <p>{{ observe_card.subtitle or '运行实盘选股后，这里会显示与强推荐分离的观察候选。' }}</p>
+    </div>
+    <div class="strong-card-meta">
+      <span>信号日</span>
+      <strong>{{ observe_card.trade_date|fmt_date if observe_card.trade_date else 'NA' }}</strong>
+      <small>候选 {{ observe_card.candidate_count or 0 }} / 非强推荐</small>
+    </div>
+  </div>
+
+  {% if observe_card["items"] %}
+  <div class="strong-card-list">
+    {% for item in observe_card["items"] %}
+    <article class="strong-stock-card observe-stock-card">
+      <div class="strong-stock-main">
+        <a href="/stock/{{ item.ts_code }}">
+          <strong>{{ item.display_name }}</strong>
+          <span>{{ item.display_code }} · {{ item.industry or '-' }}</span>
+        </a>
+        <div class="strong-badges">
+          {% for badge in item.observe_badges %}
+          <span class="tag neutral">{{ badge }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="strong-score-block observe-score-block">
+        <span>观察分</span>
+        <strong title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.observe_score or 0) }}</strong>
+      </div>
+      <div class="strong-stock-reason">
+        <strong>{{ item.observe_action }}</strong>
+        <p>{{ item.observe_reason }}</p>
+        <small>{{ item.observe_guard }}</small>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state soft">
+    {{ observe_card.subtitle or '当前没有达到观察候选标准的短线标的。' }}
+  </div>
+  {% endif %}
+
+  <div class="strong-card-notes">
+    {% for item in observe_card.notes or [] %}
+    <span>{{ item }}</span>
+    {% endfor %}
+  </div>
+</section>

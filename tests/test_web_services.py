@@ -15,6 +15,7 @@ from web_app.services.signal_service import (
     build_default_signal_start,
     build_longterm_pool_status,
     build_longterm_run_funnel,
+    build_observation_candidate_card,
     build_strong_recommendation_card,
     get_active_longterm_pool,
     get_longterm_audit_samples,
@@ -375,6 +376,57 @@ class WebServicesTest(unittest.TestCase):
         self.assertIn("v39\u5f3a\u4fe1\u53f7", card["items"][0]["strong_badges"])
         self.assertIn("T1", card["items"][0]["strong_badges"])
         self.assertIn("9.50", card["items"][0]["strong_guard"])
+
+    def test_observation_candidate_card_is_separate_from_strong_recommendations(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                run_id = store.record_run(
+                    "20260706",
+                    mode="short",
+                    profile="short_live_observe_best_balance",
+                    source="live_observe",
+                    label="daily",
+                )
+                store.update_pool(
+                    run_id,
+                    "20260706",
+                    mode="short",
+                    profile="short_live_observe_best_balance",
+                    records=[
+                        SignalRecord(
+                            ts_code="000003.SZ",
+                            name="C",
+                            industry="Tech",
+                            rank=1,
+                            score=188.5,
+                            pool_type="short_observe",
+                            factors={
+                                "observe_profile": "best_balance",
+                                "observe_lane": "weak_momentum_breadth",
+                                "observe_score": 188.5,
+                                "recommendation_layer": "OBSERVE_CANDIDATE",
+                                "observation_action": "观察候选，等待盘面确认",
+                                "observation_reason": "弱动量窗口中板块共振很强",
+                            },
+                        )
+                    ],
+                )
+            finally:
+                store.close()
+
+            latest_run = get_signal_runs(signal_db, source="live_observe", mode="short", limit=1)[0]
+            rows = get_recent_signals(signal_db, history_db=None, limit=10, source="live_observe", mode="short")
+            card = build_observation_candidate_card(latest_run, rows)
+            strong_card = build_strong_recommendation_card(latest_run, rows)
+
+        self.assertEqual(card["title"], "短线观察候选 1 只")
+        self.assertEqual(card["items"][0]["ts_code"], "000003.SZ")
+        self.assertIn("观察", card["items"][0]["observe_badges"])
+        self.assertIn("弱动量共振", card["items"][0]["observe_badges"])
+        self.assertEqual(card["items"][0]["observe_score"], 188.5)
+        self.assertEqual(strong_card["strong_count"], 0)
 
     def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
         with tempfile.TemporaryDirectory() as tmpdir:

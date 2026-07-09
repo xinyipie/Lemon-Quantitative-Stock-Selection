@@ -21,6 +21,19 @@ class LiveSignalPersistenceTest(unittest.TestCase):
             short_pool = pd.DataFrame(
                 [{"code": "000001", "name": "短A", "industry": "银行", "score": 56, "factor_profile": "profile_v9_sector_quality_guard"}]
             )
+            short_observe = pd.DataFrame(
+                [
+                    {
+                        "code": "000004",
+                        "name": "observe",
+                        "industry": "AI",
+                        "score": 62,
+                        "observe_score": 188.5,
+                        "observe_profile": "best_balance",
+                        "recommendation_layer": "OBSERVE_CANDIDATE",
+                    }
+                ]
+            )
             long_watch = pd.DataFrame(
                 [{"ts_code": "000002.SZ", "name": "长B", "industry": "AI", "compression_score": 82, "pool_type": "longterm_watch"}]
             )
@@ -31,6 +44,7 @@ class LiveSignalPersistenceTest(unittest.TestCase):
             main._persist_signal_snapshot(
                 trade_date="20260612",
                 stock_pool=short_pool,
+                short_observe_pool=short_observe,
                 longterm_watch=long_watch,
                 longterm_elite=long_elite,
                 db_path=db_path,
@@ -50,6 +64,7 @@ class LiveSignalPersistenceTest(unittest.TestCase):
                 ("short", "profile_v9_sector_quality_guard", "000001.SZ", "short_top"),
                 ("longterm", "longterm_watch", "000002.SZ", "longterm_watch"),
                 ("longterm", "longterm_elite", "000003.SZ", "longterm_elite"),
+                ("short", "short_live_observe_best_balance", "000004.SZ", "short_observe"),
             ],
         )
 

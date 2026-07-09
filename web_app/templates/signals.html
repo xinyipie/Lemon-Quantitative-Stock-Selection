@@ -29,6 +29,7 @@
 </section>
 
 {% include "partials/strong_recommendation_card.html" %}
+{% include "partials/observation_candidate_card.html" %}
 
 <form class="filter-bar" action="/signals" method="get">
   <input name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
