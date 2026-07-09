@@ -31,6 +31,45 @@
 {% include "partials/strong_recommendation_card.html" %}
 {% include "partials/observation_candidate_card.html" %}
 
+<section class="panel live-push-history-panel">
+  <div class="panel-head">
+    <div>
+      <h2>短线实盘推送历史</h2>
+      <p>最近 30 条真实实盘推送记录，只包含强推荐和观察候选，不混入回测样本。</p>
+    </div>
+  </div>
+  {% if live_push_history %}
+  <table class="dense-table live-push-history-table">
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>层级</th>
+        <th>股票</th>
+        <th>行业</th>
+        <th>分数</th>
+        <th>入场</th>
+        <th>原因</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in live_push_history %}
+      <tr>
+        <td>{{ item.trade_date|fmt_date }}</td>
+        <td><span class="live-layer-badge {{ item.history_layer_tone }}">{{ item.history_layer_label }}</span></td>
+        <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+        <td>{{ item.industry or '-' }}</td>
+        <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
+        <td>{{ item.history_entry_timing or '-' }}</td>
+        <td class="live-history-reason">{{ item.history_reason }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state soft">暂无实盘推送历史。</div>
+  {% endif %}
+</section>
+
 <form class="filter-bar" action="/signals" method="get">
   <input name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
   <input name="start" value="{{ filters.get('start', '') }}" placeholder="开始日期 20260101">

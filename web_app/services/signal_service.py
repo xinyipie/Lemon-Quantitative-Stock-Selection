@@ -1073,6 +1073,43 @@ def build_observation_candidate_card(
     }
 
 
+def get_short_live_push_history(
+    signal_db: str | Path = DEFAULT_DB_PATH,
+    history_db: str | Path | None = DEFAULT_HISTORY_DB_PATH,
+    limit: int = 30,
+) -> list[dict]:
+    """Return recent real short live pushes, excluding backtest review rows."""
+    rows = get_recent_signals(
+        signal_db,
+        history_db=history_db,
+        limit=limit,
+        source=["live", "live_observe"],
+        mode="short",
+    )
+    return [_decorate_short_live_push_history_item(item) for item in rows[: max(limit, 0)]]
+
+
+def _decorate_short_live_push_history_item(item: dict) -> dict:
+    decorated = dict(item)
+    factors = decorated.get("factors") or {}
+    source = str(decorated.get("source") or "")
+    if source == "live_observe":
+        decorated["history_layer_label"] = "观察候选"
+        decorated["history_layer_tone"] = "observe"
+    else:
+        decorated["history_layer_label"] = "强推荐"
+        decorated["history_layer_tone"] = "strong"
+
+    decorated["history_entry_timing"] = str(factors.get("entry_timing") or "-")
+    decorated["history_reason"] = (
+        factors.get("observation_reason")
+        or decorated.get("recommend_reason")
+        or decorated.get("reason")
+        or "-"
+    )
+    return decorated
+
+
 def _decorate_strong_recommendation_item(item: dict) -> dict:
     decorated = dict(item)
     factors = decorated.get("factors") or {}

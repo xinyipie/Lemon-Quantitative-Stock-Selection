@@ -41,6 +41,7 @@ from web_app.services.signal_service import (
     get_longterm_events,
     get_longterm_runs,
     get_recent_signals,
+    get_short_live_push_history,
     get_signal_runs,
     get_stock_signals,
     summarize_short_signal_performance,
@@ -383,6 +384,11 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         observe_signals = []
     strong_recommendation = build_strong_recommendation_card(latest_live_short_run, live_signals)
     observation_candidates = build_observation_candidate_card(latest_observe_run, observe_signals)
+    live_push_history = get_short_live_push_history(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=30,
+    )
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     effective_start = start or build_default_signal_start(latest_signal_date, days=default_window_days)
     recent_signals = get_recent_signals(
@@ -408,6 +414,7 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
             "latest_signal_run": latest_signal_run,
             "strong_recommendation": strong_recommendation,
             "observation_candidates": observation_candidates,
+            "live_push_history": live_push_history,
             "update_status": read_update_status(),
             "filters": {
                 "q": q,

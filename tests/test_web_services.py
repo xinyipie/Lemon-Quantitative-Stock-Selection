@@ -24,6 +24,7 @@ from web_app.services.signal_service import (
     get_longterm_events,
     get_longterm_runs,
     get_recent_signals,
+    get_short_live_push_history,
     summarize_short_signal_performance,
     summarize_stock_strategy_history,
 )
@@ -427,6 +428,90 @@ class WebServicesTest(unittest.TestCase):
         self.assertIn("弱动量共振", card["items"][0]["observe_badges"])
         self.assertEqual(card["items"][0]["observe_score"], 188.5)
         self.assertEqual(strong_card["strong_count"], 0)
+
+    def test_short_live_push_history_includes_live_layers_and_excludes_backtest(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                live_run = store.record_run(
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    live_run,
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            name="A",
+                            industry="Bank",
+                            rank=1,
+                            score=88,
+                            factors={
+                                "consensus_profile": "v39",
+                                "entry_timing": "T1",
+                                "observation_reason": "v39 strong",
+                            },
+                        )
+                    ],
+                )
+                observe_run = store.record_run(
+                    "20260705",
+                    mode="short",
+                    profile="short_live_observe_best_balance",
+                    source="live_observe",
+                    label="daily",
+                )
+                store.update_pool(
+                    observe_run,
+                    "20260705",
+                    mode="short",
+                    profile="short_live_observe_best_balance",
+                    records=[
+                        SignalRecord(
+                            ts_code="000002.SZ",
+                            name="B",
+                            industry="Tech",
+                            rank=1,
+                            score=188.5,
+                            pool_type="short_observe",
+                            factors={
+                                "observe_profile": "best_balance",
+                                "entry_timing": "T3",
+                                "observation_reason": "observe reason",
+                            },
+                        )
+                    ],
+                )
+                backtest_run = store.record_run(
+                    "20260704",
+                    mode="short",
+                    profile="short_v9_final",
+                    source="backtest_ic_short",
+                )
+                store.update_pool(
+                    backtest_run,
+                    "20260704",
+                    mode="short",
+                    profile="short_v9_final",
+                    records=[SignalRecord(ts_code="000003.SZ", name="C", score=77)],
+                )
+            finally:
+                store.close()
+
+            history = get_short_live_push_history(signal_db, history_db=None, limit=30)
+
+        self.assertEqual([item["ts_code"] for item in history], ["000001.SZ", "000002.SZ"])
+        self.assertEqual([item["history_layer_label"] for item in history], ["强推荐", "观察候选"])
+        self.assertEqual([item["history_entry_timing"] for item in history], ["T1", "T3"])
+        self.assertEqual(history[0]["history_reason"], "v39 strong")
+        self.assertEqual(history[1]["history_reason"], "observe reason")
 
     def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
         with tempfile.TemporaryDirectory() as tmpdir:
