@@ -513,6 +513,56 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(history[0]["history_reason"], "v39 strong")
         self.assertEqual(history[1]["history_reason"], "observe reason")
 
+    def test_short_live_push_history_labels_legacy_live_records_without_strong_payload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            signal_db = Path(tmpdir) / "signals.db"
+            store = SignalStore(signal_db)
+            try:
+                live_run = store.record_run(
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    source="live",
+                    label="daily",
+                )
+                store.update_pool(
+                    live_run,
+                    "20260706",
+                    mode="short",
+                    profile="profile_v9_sector_quality_guard",
+                    records=[
+                        SignalRecord(
+                            ts_code="000001.SZ",
+                            name="strong",
+                            rank=1,
+                            score=88,
+                            factors={
+                                "consensus_profile": "v39",
+                                "entry_timing": "T1",
+                                "observation_reason": "v39 strong",
+                            },
+                        ),
+                        SignalRecord(
+                            ts_code="000002.SZ",
+                            name="legacy",
+                            rank=2,
+                            score=66,
+                            factors={"factor_profile": "profile_v9_sector_quality_guard"},
+                        ),
+                    ],
+                )
+            finally:
+                store.close()
+
+            history = get_short_live_push_history(signal_db, history_db=None, limit=30)
+
+        by_code = {item["ts_code"]: item for item in history}
+        self.assertEqual(by_code["000001.SZ"]["history_layer_label"], "强推荐")
+        self.assertEqual(by_code["000001.SZ"]["history_layer_tone"], "strong")
+        self.assertEqual(by_code["000002.SZ"]["history_layer_label"], "正式推送")
+        self.assertEqual(by_code["000002.SZ"]["history_layer_tone"], "live")
+        self.assertEqual(by_code["000002.SZ"]["history_reason"], "旧版实盘记录，因子不完整，仅用于历史追踪。")
+
     def test_recent_and_stock_signals_merge_live_with_backtest_review_for_same_stock_day(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             signal_db = Path(tmpdir) / "signals.db"

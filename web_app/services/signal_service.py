@@ -1097,16 +1097,18 @@ def _decorate_short_live_push_history_item(item: dict) -> dict:
         decorated["history_layer_label"] = "观察候选"
         decorated["history_layer_tone"] = "observe"
     else:
-        decorated["history_layer_label"] = "强推荐"
-        decorated["history_layer_tone"] = "strong"
+        consensus_profile = str(factors.get("consensus_profile") or decorated.get("profile") or "").lower()
+        recommendation_layer = str(factors.get("recommendation_layer") or "").upper()
+        entry_timing = str(factors.get("entry_timing") or "")
+        is_strong = "v39" in consensus_profile or recommendation_layer == "T1_BUY_CANDIDATE" or entry_timing == "T1"
+        decorated["history_layer_label"] = "强推荐" if is_strong else "正式推送"
+        decorated["history_layer_tone"] = "strong" if is_strong else "live"
 
     decorated["history_entry_timing"] = str(factors.get("entry_timing") or "-")
-    decorated["history_reason"] = (
-        factors.get("observation_reason")
-        or decorated.get("recommend_reason")
-        or decorated.get("reason")
-        or "-"
-    )
+    reason = factors.get("observation_reason") or decorated.get("recommend_reason") or decorated.get("reason") or "-"
+    if decorated["history_layer_tone"] == "live" and decorated.get("factor_payload_status") == "incomplete":
+        reason = "旧版实盘记录，因子不完整，仅用于历史追踪。"
+    decorated["history_reason"] = reason
     return decorated
 
 

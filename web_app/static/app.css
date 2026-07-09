@@ -523,6 +523,12 @@ th {
   color: var(--blue);
 }
 
+.live-layer-badge.live {
+  border-color: #d9e0ea;
+  background: #f6f8fb;
+  color: #405166;
+}
+
 .live-history-reason {
   color: #384455;
   line-height: 1.45;
