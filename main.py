@@ -2284,6 +2284,29 @@ def get_stock_industry_rs_scores(
     return result
 
 
+class FinancialDataQualityError(ValueError):
+    """历史财务数据无法证明在截面日期前已公开。"""
+
+
+def _filter_announced_rows(
+    df: pd.DataFrame,
+    trade_date: str,
+    dataset_name: str,
+) -> pd.DataFrame:
+    """历史截面只保留已公告记录；公告日期缺失时拒绝降级使用。"""
+    if not trade_date or df is None or df.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    if 'ann_date' not in df.columns:
+        raise FinancialDataQualityError(
+            f"{dataset_name} 缺少 ann_date，无法保证历史截面无未来数据"
+        )
+
+    announced = df['ann_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+    valid_format = announced.str.fullmatch(r'\d{8}', na=False)
+    known_by_cutoff = valid_format & (announced <= str(trade_date))
+    return df.loc[known_by_cutoff].copy()
+
+
 def get_net_profit_growth_batch(
     codes: List[str],
     trade_date: str = '',
@@ -2356,12 +2379,12 @@ def get_net_profit_growth_batch(
         if is_offline or cache_loaded:
             df_all = df_all[df_all['ts_code'].isin(set(ts_codes))]
 
-        # 时间截面约束（防未来函数）
-        if trade_date and 'ann_date' in df_all.columns:
-            df_all = df_all[
-                df_all['ann_date'].notna() &
-                (df_all['ann_date'].astype(str) <= trade_date)
-            ]
+        # 时间截面约束（防未来函数）：历史数据缺公告日期时直接拒绝使用。
+        df_all = _filter_announced_rows(
+            df_all,
+            trade_date,
+            'fina_indicator(netprofit_yoy)',
+        )
 
         df_all = df_all.sort_values('end_date', ascending=False)
 
@@ -2450,16 +2473,12 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
             # 离线全量读取时，过滤到候选股范围
             if is_offline:
                 df_fina = df_fina[df_fina['ts_code'].isin(set(ts_codes))]
-            # 时间截面约束：只使用截至 trade_date 已公告的财报
-            # 避免回测时用到尚未发布的未来财报（Look-Ahead Bias）
-            # 注意：旧版 parquet 可能无 ann_date 列（下载时未包含），此时跳过截面约束
-            if trade_date and 'ann_date' in df_fina.columns:
-                df_fina = df_fina[
-                    df_fina['ann_date'].notna() &
-                    (df_fina['ann_date'].astype(str) <= trade_date)
-                ]
-            elif trade_date and 'ann_date' not in df_fina.columns:
-                logger.warning("fina_indicator 缺少 ann_date 列，时间截面约束已跳过（建议重新下载 parquet）")
+            # 时间截面约束：历史数据缺公告日期时直接拒绝使用。
+            df_fina = _filter_announced_rows(
+                df_fina,
+                trade_date,
+                'fina_indicator',
+            )
             # 每只股票取已公告中最新一期（end_date最大）
             df_fina = df_fina.sort_values('end_date', ascending=False).drop_duplicates('ts_code').reset_index(drop=True)
         else:
@@ -2498,15 +2517,12 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
             # 离线全量读取时，过滤到候选股范围
             if is_offline:
                 df_income = df_income[df_income['ts_code'].isin(set(ts_codes))]
-            # 同样做时间截面约束
-            # 注意：旧版 parquet 可能无 ann_date 列，此时跳过截面约束
-            if trade_date and 'ann_date' in df_income.columns:
-                df_income = df_income[
-                    df_income['ann_date'].notna() &
-                    (df_income['ann_date'].astype(str) <= trade_date)
-                ]
-            elif trade_date and 'ann_date' not in df_income.columns:
-                logger.warning("income 缺少 ann_date 列，时间截面约束已跳过（建议重新下载 parquet）")
+            # 同样做时间截面约束，禁止无公告日期缓存进入历史回测。
+            df_income = _filter_announced_rows(
+                df_income,
+                trade_date,
+                'income',
+            )
             df_income = df_income.sort_values('end_date', ascending=False)
         else:
             df_income = pd.DataFrame()
@@ -2559,6 +2575,27 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
     except Exception as e:
         logger.error(f"❌ 财务数据获取失败：{e}", exc_info=True)
         return {}
+
+
+def _merge_longterm_financial_data(
+    stocks: pd.DataFrame,
+    existing: Dict[str, Dict],
+    trade_date: str,
+) -> Dict[str, Dict]:
+    """补齐波段宽池财务数据，仅对短线池尚未覆盖的代码做一次批量请求。"""
+    merged = dict(existing or {})
+    if stocks is None or stocks.empty or 'code' not in stocks.columns:
+        return merged
+
+    codes = list(dict.fromkeys(stocks['code'].astype(str).str.zfill(6).tolist()))
+    missing_codes = [code for code in codes if code not in merged]
+    if not missing_codes:
+        return merged
+
+    logger.info(f"📊 补齐波段宽池财务数据：新增{len(missing_codes)}只...")
+    supplemental = get_financial_data_batch(missing_codes, trade_date=trade_date)
+    merged.update(supplemental)
+    return merged
 
 
 def _detect_limit_up_event(grp: pd.DataFrame) -> Optional[Dict]:
@@ -5325,7 +5362,7 @@ def run_daily_selection(
     enable_news: bool = True,
     include_longterm: bool = True,
     short_filter_profile: str = 'baseline',
-    longterm_profile: str = 'zscore_v4_1',
+    longterm_profile: str = '',
 ) -> Dict:
     """
     完整的单日选股流程，实盘和回测共用同一套逻辑。
@@ -5335,7 +5372,7 @@ def run_daily_selection(
         trade_date:   指定交易日期 YYYYMMDD（回测传历史日期，实盘传 None 或最新日期）
         enable_news:  是否拉取实时新闻（回测时传 False，节省时间且无意义）
         include_longterm: 是否执行波段选股（短线回测传 False，避免混入口径和拖慢速度）
-        longterm_profile: 波段评分实验版本，默认当前v4.1；legacy_raw_score_v1用于复刻2.0备份版
+        longterm_profile: 波段评分版本；空值时使用 config 中的正式长线观察 profile
 
     Returns:
         {
@@ -5348,6 +5385,8 @@ def run_daily_selection(
             'longterm_pool':  pd.DataFrame, 波段候选股
         }
     """
+    longterm_profile = longterm_profile or config.get_official_longterm_profile()
+
     result = {
         'trade_date':          trade_date,
         'market_state':        'normal',
@@ -5763,9 +5802,16 @@ def run_daily_selection(
             lt_stocks['code'].tolist(), trade_date=actual_date
         )
 
+        # 波段使用更宽的候选池，必须补齐短线基础池之外股票的财务数据。
+        longterm_financial_dict = _merge_longterm_financial_data(
+            lt_stocks,
+            financial_dict,
+            actual_date,
+        )
+
         longterm_pool = select_longterm_pool(
             lt_stocks, ma_dict_lt, actual_date,
-            financial_dict=financial_dict,   # 注：仅含短线候选股财务数据；波段新增股ROE=None时跳过财务过滤
+            financial_dict=longterm_financial_dict,
             sector_ma10=sector_ma10,
             hot_sectors=hot_sectors,
             industry_rs=industry_rs,

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
+import config
 from strategy_profiles import (
     SHORT_FACTOR_COLUMNS,
     apply_style_gate,
@@ -233,6 +234,7 @@ class BacktestV2:
         conditional_lock_enabled: bool = False,
         conditional_lock_activation_pct: float = 6.0,
         conditional_lock_trailing_pct: float = 4.8,
+        max_positions: Optional[int] = None,
     ):
         """
         Args:
@@ -266,6 +268,7 @@ class BacktestV2:
         self.end_date = end_date
         self.hold_days = hold_days
         self.top_n = top_n
+        self.max_positions = max(1, int(max_positions or top_n))
         self.fallback_stop_pct   = fallback_stop_pct
         self.fallback_profit_pct = fallback_profit_pct
         self.trailing_stop_pct   = trailing_stop_pct
@@ -309,8 +312,8 @@ class BacktestV2:
         return factor_profile_score(row, self.factor_profile, base_score_col)
 
     def _position_weight(self) -> float:
-        """单笔交易在组合净值中的固定槽位权重；短线沿用 TopN 等权口径。"""
-        return 1.0 / max(self.top_n, 1)
+        """单笔交易使用固定组合槽位，所有在途仓位合计不超过100%。"""
+        return 1.0 / max(self.max_positions, 1)
 
     def _filter_selected_items_for_portfolio(
         self,
@@ -318,8 +321,85 @@ class BacktestV2:
         all_trades: List[Dict],
         buy_date: str,
     ) -> List[Dict]:
-        """短线不做跨日持仓槽位限制；波段子类会覆写。"""
-        return selected_items
+        """只使用空闲槽位开仓，并禁止同一股票在持有期内重复入选。"""
+        max_positions = max(1, int(getattr(self, 'max_positions', self.top_n)))
+        open_trades = [
+            trade for trade in all_trades
+            if str(trade.get('buy_date', '')) <= buy_date <= str(trade.get('sell_date', ''))
+        ]
+        held_codes = {str(trade.get('ts_code', '')) for trade in open_trades}
+
+        occupied_slots = set()
+        for trade in open_trades:
+            slot = trade.get('portfolio_slot')
+            if isinstance(slot, int) and 0 <= slot < max_positions:
+                occupied_slots.add(slot)
+                continue
+            for fallback_slot in range(max_positions):
+                if fallback_slot not in occupied_slots:
+                    occupied_slots.add(fallback_slot)
+                    break
+
+        free_slots = [slot for slot in range(max_positions) if slot not in occupied_slots]
+        allowed = []
+        for item in selected_items:
+            ts_code = str(item.get('ts_code', ''))
+            if ts_code in held_codes or not free_slots:
+                continue
+            accepted = dict(item)
+            accepted['portfolio_slot'] = free_slots.pop(0)
+            allowed.append(accepted)
+            held_codes.add(ts_code)
+        return allowed
+
+    def _build_mark_to_market_equity(
+        self,
+        all_trades: List[Dict],
+        price_cache: Dict[str, pd.DataFrame],
+    ) -> pd.DataFrame:
+        """按固定槽位和每日收盘价重建净值，空闲槽位保持现金。"""
+        max_positions = max(1, int(getattr(self, 'max_positions', self.top_n)))
+        slot_values = {slot: 1.0 for slot in range(max_positions)}
+        entry_values: Dict[int, float] = {}
+        active_trades: Dict[int, Dict] = {}
+        trades_by_buy_date: Dict[str, List[Dict]] = {}
+        for trade in all_trades:
+            trades_by_buy_date.setdefault(str(trade.get('buy_date', '')), []).append(trade)
+
+        buy_cost_ratio = COMMISSION_BUY + SLIPPAGE_BUY
+        equity_curve = []
+        for date in self.all_trade_dates:
+            for trade in trades_by_buy_date.get(date, []):
+                slot = int(trade.get('portfolio_slot', 0) or 0)
+                if slot not in slot_values or slot in active_trades:
+                    continue
+                entry_values[slot] = slot_values[slot]
+                active_trades[slot] = trade
+
+            for slot, trade in list(active_trades.items()):
+                entry_value = entry_values[slot]
+                if str(trade.get('sell_date', '')) == date:
+                    realized_ret = float(trade.get('profit_after_fee', 0.0) or 0.0)
+                    slot_values[slot] = entry_value * (1.0 + realized_ret / 100.0)
+                    active_trades.pop(slot, None)
+                    entry_values.pop(slot, None)
+                    continue
+
+                day_df = price_cache.get(date)
+                if day_df is None or day_df.empty or 'ts_code' not in day_df.columns:
+                    continue
+                row = day_df[day_df['ts_code'] == trade.get('ts_code')]
+                if row.empty:
+                    continue
+                close = float(row.iloc[0].get('close', 0.0) or 0.0)
+                buy_price = float(trade.get('buy_price', 0.0) or 0.0)
+                if close > 0 and buy_price > 0:
+                    slot_values[slot] = entry_value * (close / buy_price) * (1.0 - buy_cost_ratio)
+
+            nav = sum(slot_values.values()) / max_positions * 100.0
+            equity_curve.append({'date': date, 'nav': round(nav, 4)})
+
+        return pd.DataFrame(equity_curve)
 
     def _conditional_trailing_pct(
         self,
@@ -1160,6 +1240,7 @@ class BacktestV2:
                     trade['select_close']   = item.get('select_close',   0)
                     trade['signal_target_price'] = item.get('target_price', 0)
                     trade['signal_stop_price']   = item.get('stop_loss_price', 0)
+                    trade['portfolio_slot'] = item.get('portfolio_slot', 0)
                     for col in self.candidate_factor_columns:
                         if col in item:
                             trade[col] = item.get(col)
@@ -1187,39 +1268,9 @@ class BacktestV2:
             if not self._is_offline:
                 time.sleep(0.5)
 
-        # ── 步骤5：按平仓日重建净值曲线（动态等权仓位模型）──
-        #
-        # 仓位模型说明：
-        #   每个买入日实际买入 N 只（由分数门槛决定，无固定top_n上限）。
-        #   每只等权分配 1/N 的资金（N = 当日实际买入数量）。
-        #   同一天可能有来自不同买入日的多笔平仓，
-        #   每笔收益按其在总资金中的占比（weight）加权后更新净值。
-        #   若当日买入0只（无股过门槛），该日不占用资金，净值不变。
-
-        # Reconstructed baseline equity model:
-        # each valid trade uses the planned fixed slot weight 1/top_n.
-        daily_weighted_returns: Dict[str, List[tuple]] = {}
-        weight_per_stock = self._position_weight()
-
-        for trade in all_trades:
-            sell_date = trade['sell_date']
-            ret       = trade['profit_after_fee']
-            weight    = weight_per_stock
-            daily_weighted_returns.setdefault(sell_date, []).append((ret, weight))
-
-        nav = 100.0
-        equity_curve = []
-        for date in self.all_trade_dates:
-            weighted_list = daily_weighted_returns.get(date, [])
-            if weighted_list:
-                # 当日净值变动 = Σ(各笔收益% × 仓位权重)
-                delta = sum(ret * w for ret, w in weighted_list)
-                nav = nav * (1 + delta / 100)
-            equity_curve.append({'date': date, 'nav': round(nav, 4)})
-
         # ── 整理结果 ──
         trades_df = pd.DataFrame(all_trades)
-        equity_df = pd.DataFrame(equity_curve)
+        equity_df = self._build_mark_to_market_equity(all_trades, price_cache)
 
         # ── IC分析：填充前瞻收益并输出 ──
         if ic_records:
@@ -1465,7 +1516,7 @@ class BacktestLongterm(BacktestV2):
         use_market_timing: bool = True,
         min_open_ratio: float = 0.995,
         initial_capital: float = 100_000.0,
-        longterm_profile: str = 'zscore_v4_1',
+        longterm_profile: Optional[str] = None,
         max_positions: int = 15,
     ):
         super().__init__(
@@ -1487,7 +1538,7 @@ class BacktestLongterm(BacktestV2):
         # 时间动量止损（防止慢放血）
         self.time_stop_days = time_stop_days
         self.time_stop_threshold = time_stop_threshold
-        self.longterm_profile = longterm_profile
+        self.longterm_profile = longterm_profile or config.get_official_longterm_profile()
         self.max_positions = max(1, int(max_positions))
         self.ic_report_title = "波段候选评分预测能力"
         self.ic_csv_prefix = "ic_longterm"
@@ -1503,38 +1554,12 @@ class BacktestLongterm(BacktestV2):
         all_trades: List[Dict],
         buy_date: str,
     ) -> List[Dict]:
-        """波段只在有空槽位时开新仓，并避免同一股票持有期重复入选。"""
-        open_trades = [
-            trade for trade in all_trades
-            if str(trade.get('buy_date', '')) <= buy_date < str(trade.get('sell_date', ''))
-        ]
-        held_codes = {str(trade.get('ts_code', '')) for trade in open_trades}
-        available_slots = max(self.max_positions - len(open_trades), 0)
-        if available_slots <= 0:
-            logger.info(
-                f"  波段组合：{buy_date} 已满仓 {len(open_trades)}/{self.max_positions}，跳过新开仓"
-            )
-            return []
-
-        allowed = []
-        skipped_duplicate = 0
-        for item in selected_items:
-            ts_code = str(item.get('ts_code', ''))
-            if ts_code in held_codes:
-                skipped_duplicate += 1
-                continue
-            allowed.append(item)
-            held_codes.add(ts_code)
-            available_slots -= 1
-            if available_slots <= 0:
-                break
-
-        if skipped_duplicate or len(allowed) < len(selected_items):
-            logger.info(
-                f"  波段组合：{buy_date} 可开{len(allowed)}只，"
-                f"重复持仓跳过{skipped_duplicate}只，当前持仓{len(open_trades)}/{self.max_positions}"
-            )
-        return allowed
+        """波段沿用统一组合槽位和重复持仓约束。"""
+        return super()._filter_selected_items_for_portfolio(
+            selected_items,
+            all_trades,
+            buy_date,
+        )
 
     def _longterm_row_to_item(self, row: pd.Series) -> Dict:
         """把 longterm_pool 的一行转换成回测和候选质量日志共用的结构。"""
@@ -1852,9 +1877,9 @@ def _default_date_range() -> Tuple[str, str]:
     return start.strftime('%Y%m%d'), end.strftime('%Y%m%d')
 
 
-def main():
-    _setup_logger()
-
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """构建回测命令行参数，正式默认值与实盘策略配置保持一致。"""
+    official_short = config.get_official_short_profile()
     parser = argparse.ArgumentParser(description='A股策略回测 v2')
     parser.add_argument('--mode',          type=str,   default='short',
                         choices=['short', 'longterm'],
@@ -1868,13 +1893,13 @@ def main():
     parser.add_argument('--score-order',     type=str,   default='desc',
                         choices=['desc', 'asc'],
                         help='短线评分排序方向：desc=高分优先（默认），asc=低分优先，用于验证评分是否反向')
-    parser.add_argument('--factor-profile',  type=str,   default='original',
+    parser.add_argument('--factor-profile',  type=str,   default=official_short['factor_profile'],
                         choices=list(available_profiles()),
                         help='短线回测实验评分：original=原始评分；diagnostic_v1=子因子诊断重排；profile_v2=分风格短线逻辑评分；profile_v3=路径质量评分；profile_v4=弱市防守评分；profile_v5=sideways风险门控评分')
-    parser.add_argument('--style-gate',      type=str,   default='none',
+    parser.add_argument('--style-gate',      type=str,   default=official_short['style_gate'],
                         choices=list(available_style_gates()),
                         help='短线风格门控实验：none=不过滤；no_momentum=排除momentum；no_active_sideways=排除active+sideways；weak_only=只保留weak_momentum；weak_or_cautious_sideways=弱动量或谨慎sideways；adaptive_quality=保留weak_momentum和高质量sideways')
-    parser.add_argument('--consensus-profile', type=str, default='none',
+    parser.add_argument('--consensus-profile', type=str, default=official_short['consensus_profile'],
                         choices=list(available_consensus_profiles()),
                         help='short consensus research gate: none=off, v29=v19/v25/v27 at least 2 votes')
     parser.add_argument('--fallback-stop',   type=float, default=None,       help='兜底止损%%（短线默认-7，波段默认-12）')
@@ -1888,7 +1913,7 @@ def main():
     parser.add_argument('--short-filter-profile', type=str, default='baseline',
                         choices=['baseline', 'sector_penalty_light', 'sector_penalty_strict'],
                         help='短线候选池硬过滤实验：baseline=原硬过滤，sector_penalty_*=板块不符改扣分')
-    parser.add_argument('--longterm-profile', type=str, default='zscore_v4_1',
+    parser.add_argument('--longterm-profile', type=str, default=config.get_official_longterm_profile(),
                         choices=['zscore_v4_1', 'zscore_v5_quality_guard', 'zscore_v7_quality_guard', 'repair_v1', 'repair_v2_balanced', 'repair_v3_midband', 'repair_v3_defensive_gate', 'repair_v4_market_admission', 'longterm_quality_trend_v1', 'longterm_quality_trend_v2', 'longterm_quality_trend_v3', 'longterm_quality_trend_v4_ranked_pool', 'longterm_quality_trend_v5_dual_pool', 'longterm_quality_trend_v6_clean_pool', 'longterm_quality_trend_v7_winner_profile', 'longterm_quality_trend_v8_timing_gate', 'longterm_quality_trend_v9_market_admission', 'longterm_quality_trend_v10_quality_position_guard', 'longterm_quality_trend_v10_relaxed_quality_position_guard', 'longterm_quality_trend_v11_balanced_pool', 'longterm_quality_trend_v12_base_reset_pool', 'longterm_quality_trend_v13_observation_pool', 'longterm_quality_trend_v14_large_quiet_pool', 'longterm_quality_trend_v15_confirmed_bull_pool', 'longterm_quality_lifecycle_v16', 'longterm_quality_lifecycle_v17_late_cycle_guard', 'longterm_quality_lifecycle_v18_market_sync', 'legacy_raw_score_v1'],
                         help='波段评分实验：zscore_v4_1=当前Z-Score评分；legacy_raw_score_v1=复刻2.0备份版原始五维评分')
     parser.add_argument('--conditional-lock', action='store_true',           help='启用短线弱质票条件化移动止损收紧实验')
@@ -1901,7 +1926,12 @@ def main():
     parser.add_argument('--cache-dir',  type=str,   default='data/cache', help='离线缓存目录（默认 data/cache）')
     parser.add_argument('--metrics-output', type=str, default=None,
                         help='可选：将指标 JSON 写入指定路径，便于批量实验准确收集结果')
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    _setup_logger()
+    args = _build_arg_parser().parse_args()
 
     default_start, default_end = _default_date_range()
     start_date = args.start or default_start

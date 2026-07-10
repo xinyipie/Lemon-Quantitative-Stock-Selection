@@ -144,6 +144,20 @@ LONGTERM_ELITE_MIN_INDUSTRY_RS = 8
 LONGTERM_ELITE_DRAWDOWN_MIN = 7
 LONGTERM_ELITE_DRAWDOWN_MAX = 15
 
+
+def get_official_short_profile():
+    """返回正式短线策略使用的评分、风格和共识配置。"""
+    return {
+        'factor_profile': SHORT_LIVE_FACTOR_PROFILE,
+        'style_gate': SHORT_LIVE_STYLE_GATE,
+        'consensus_profile': SHORT_LIVE_CONSENSUS_PROFILE,
+    }
+
+
+def get_official_longterm_profile():
+    """返回正式波段观察池使用的策略版本。"""
+    return LONGTERM_LIVE_PROFILE
+
 # ==================== AI配置（通义千问） ====================
 # 配置说明：
 # 1. 优先从环境变量读取（推荐，更安全）
