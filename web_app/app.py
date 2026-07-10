@@ -24,6 +24,7 @@ from web_app.services.sector_service import (
     build_strategy_overlap,
 )
 from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
+from web_app.services.ui_service import display_source_label, format_date_input, format_optional
 from web_app.services.dragon_service import build_dragon_observation
 from web_app.services.signal_service import (
     build_admission_diagnostics,
@@ -66,6 +67,9 @@ def _fmt_date(value):
 
 
 templates.env.filters["fmt_date"] = _fmt_date
+templates.env.filters["fmt_optional"] = format_optional
+templates.env.filters["fmt_date_input"] = format_date_input
+templates.env.filters["display_source_label"] = display_source_label
 
 _SECTOR_PAGE_CACHE_TTL_SECONDS = 120
 _sector_page_cache: dict[tuple, tuple[float, dict]] = {}
