@@ -55,6 +55,7 @@ cleanup.bat
 # Local assistant files
 .claudeignore
 CLAUDE.md
+.worktrees/
 
 # Build artifacts
 build/
