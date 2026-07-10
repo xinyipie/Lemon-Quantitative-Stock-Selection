@@ -50,7 +50,7 @@
         {% if update_status and update_status.running %}正在同步{% else %}更新到最新交易日{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=full" data-background-update-form>
+    <form method="post" action="/update/run?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
       <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算" {% if update_status and update_status.running %}disabled{% endif %}>
         完整重算
       </button>

@@ -36,6 +36,15 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("stock:updatePending", response.text)
         self.assertIn("window.location.reload()", response.text)
 
+    def test_dashboard_has_accessible_responsive_shell(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('aria-label="主导航"', response.text)
+        self.assertIn('aria-controls="primary-navigation"', response.text)
+        self.assertIn('class="mobile-nav-toggle"', response.text)
+        self.assertIn('data-confirm-message=', response.text)
+
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
             start_update.return_value = {"state": "running", "started": True}

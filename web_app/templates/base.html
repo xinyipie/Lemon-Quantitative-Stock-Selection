@@ -4,18 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260701-dragon-columns">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260710-ui-overhaul">
 </head>
 <body>
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark">QS</div>
-      <div>
-        <div class="brand-title">策略工作台</div>
-        <div class="brand-subtitle">Research Console</div>
+    <div class="sidebar-top">
+      <div class="brand">
+        <div class="brand-mark">QS</div>
+        <div>
+          <div class="brand-title">策略工作台</div>
+          <div class="brand-subtitle">Research Console</div>
+        </div>
       </div>
+      <button class="mobile-nav-toggle" type="button" aria-controls="primary-navigation" aria-expanded="false">菜单</button>
     </div>
-    <nav>
+    <nav id="primary-navigation" aria-label="主导航">
       <a class="{{ 'active' if active_nav == 'dashboard' else '' }}" href="/">工作台</a>
       <a class="{{ 'active' if active_nav == 'signals' else '' }}" href="/signals">短线复盘</a>
       <a class="{{ 'active' if active_nav == 'dragon' else '' }}" href="/dragon">热门龙头</a>
@@ -31,6 +34,16 @@
   </main>
   <script>
   (() => {
+    const navToggle = document.querySelector(".mobile-nav-toggle");
+    const primaryNavigation = document.querySelector("#primary-navigation");
+    if (navToggle && primaryNavigation) {
+      navToggle.addEventListener("click", () => {
+        const expanded = navToggle.getAttribute("aria-expanded") === "true";
+        navToggle.setAttribute("aria-expanded", String(!expanded));
+        primaryNavigation.dataset.open = String(!expanded);
+      });
+    }
+
     const forms = document.querySelectorAll("[data-background-update-form]");
     const panels = document.querySelectorAll("[data-update-status-url]");
     if (!forms.length && !panels.length) return;
@@ -111,6 +124,7 @@
     forms.forEach((form) => {
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (form.dataset.confirmMessage && !window.confirm(form.dataset.confirmMessage)) return;
         window.sessionStorage.setItem(pendingKey, "1");
         reloadWhenFinished = true;
         form.querySelectorAll("[data-update-button], button[type='submit']").forEach((button) => {
