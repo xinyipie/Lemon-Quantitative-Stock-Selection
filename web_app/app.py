@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import pickle
 import time
 from pathlib import Path
 
@@ -79,6 +80,14 @@ templates.env.filters["display_source_label"] = display_source_label
 
 _SECTOR_PAGE_CACHE_TTL_SECONDS = 120
 _sector_page_cache: dict[tuple, tuple[float, dict]] = {}
+_SECTOR_PAGE_DISK_CACHE = Path("data") / "web_sector_page_cache.pkl"
+_SECTOR_PAGE_CACHE_VERSION = 1
+_SECTOR_BUILDERS = (
+    build_sector_radar,
+    build_concept_news_radar,
+    build_market_radar_decision,
+    build_strategy_overlap,
+)
 
 
 def _wants_json(request: Request) -> bool:
@@ -243,30 +252,85 @@ def db_status(request: Request):
 
 @app.get("/sectors")
 def sectors(request: Request, end: str = ""):
-    payload = _get_sector_page_payload(end)
+    normalized_end = normalize_date_input(end)
+    payload = _get_sector_page_payload(
+        normalized_end,
+        use_persisted_cache=request.url.hostname != "testserver",
+    )
     return templates.TemplateResponse(
         request,
         "sectors.html",
         {
             "request": request,
             **payload,
-            "filters": {"end": end},
+            "filters": {"end": normalized_end},
             "update_status": read_update_status(),
             "active_nav": "sectors",
         },
     )
 
 
-def _get_sector_page_payload(end: str = "") -> dict:
+def _get_sector_page_payload(end: str = "", use_persisted_cache: bool = True) -> dict:
     key = _sector_page_cache_key(end)
     cached = _sector_page_cache.get(key)
     now = time.monotonic()
     if cached and now - cached[0] < _SECTOR_PAGE_CACHE_TTL_SECONDS:
         return cached[1]
 
+    disk_key = _sector_page_disk_cache_key(end)
+    if use_persisted_cache and _using_default_sector_builders():
+        persisted = load_sector_page_cache(_SECTOR_PAGE_DISK_CACHE, disk_key)
+        if persisted is not None:
+            _sector_page_cache[key] = (now, persisted)
+            return persisted
+
     payload = _build_sector_page_payload(end)
     _sector_page_cache[key] = (now, payload)
+    if use_persisted_cache and _using_default_sector_builders():
+        save_sector_page_cache(_SECTOR_PAGE_DISK_CACHE, disk_key, payload)
     return payload
+
+
+def _sector_page_disk_cache_key(end: str = "") -> tuple:
+    return (str(end or "latest"), f"v{_SECTOR_PAGE_CACHE_VERSION}")
+
+
+def _using_default_sector_builders() -> bool:
+    return _SECTOR_BUILDERS == (
+        build_sector_radar,
+        build_concept_news_radar,
+        build_market_radar_decision,
+        build_strategy_overlap,
+    )
+
+
+def load_sector_page_cache(path: Path, key: tuple) -> dict | None:
+    """读取版本与查询键均匹配的雷达页面缓存，损坏时静默降级。"""
+    try:
+        cached = pickle.loads(Path(path).read_bytes())
+    except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
+        return None
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("version") != _SECTOR_PAGE_CACHE_VERSION or tuple(cached.get("key") or ()) != tuple(key):
+        return None
+    payload = cached.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
+def save_sector_page_cache(path: Path, key: tuple, payload: dict) -> None:
+    """原子写入雷达页面缓存，不让中断写入污染下次启动。"""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    data = {
+        "version": _SECTOR_PAGE_CACHE_VERSION,
+        "key": tuple(key),
+        "created_at": time.time(),
+        "payload": payload,
+    }
+    temporary.write_bytes(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+    temporary.replace(target)
 
 
 def _sector_page_cache_key(end: str = "") -> tuple:
@@ -284,15 +348,10 @@ def _build_sector_page_payload(end: str = "") -> dict:
     concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
     decision = build_market_radar_decision(radar, concept_news)
     strategy_overlap = build_strategy_overlap(DEFAULT_SIGNAL_DB_PATH, radar, concept_news)
-    latest_radar_snapshot = None
-    brief = decision.get("research_brief") if isinstance(decision, dict) else None
-    if isinstance(brief, dict) and brief:
-        radar_date = str(radar.get("end_date") or end or "").replace("-", "")[:8]
-        try:
-            save_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH, radar_date, brief, decision)
-            latest_radar_snapshot = get_latest_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH)
-        except Exception:
-            latest_radar_snapshot = None
+    try:
+        latest_radar_snapshot = get_latest_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH)
+    except Exception:
+        latest_radar_snapshot = None
     return {
         "radar": radar,
         "concept_news": concept_news,

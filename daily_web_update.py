@@ -132,11 +132,13 @@ def refresh_market_radar_snapshot(
         print(f"> refresh_market_radar_snapshot --date {radar_date or 'latest'}")
         return None
 
-    from market_radar.store import save_market_radar_snapshot
+    from market_radar.store import get_latest_market_radar_snapshot, save_market_radar_snapshot
+    from web_app.app import _SECTOR_PAGE_DISK_CACHE, _sector_page_disk_cache_key, save_sector_page_cache
     from web_app.services.sector_service import (
         build_concept_news_radar,
         build_market_radar_decision,
         build_sector_radar,
+        build_strategy_overlap,
     )
 
     end_date = normalize_date(radar_date) if radar_date else None
@@ -150,6 +152,18 @@ def refresh_market_radar_snapshot(
 
     snapshot_date = normalize_date(str(radar.get("end_date") or end_date or today_text()))
     row_id = save_market_radar_snapshot(signal_db, snapshot_date, brief, decision)
+    strategy_overlap = build_strategy_overlap(signal_db, radar, concept_news)
+    save_sector_page_cache(
+        _SECTOR_PAGE_DISK_CACHE,
+        _sector_page_disk_cache_key(radar_date or ""),
+        {
+            "radar": radar,
+            "concept_news": concept_news,
+            "decision": decision,
+            "strategy_overlap": strategy_overlap,
+            "latest_radar_snapshot": get_latest_market_radar_snapshot(signal_db),
+        },
+    )
     print(f"市场雷达快照已更新：date={snapshot_date} row_id={row_id}")
     return row_id
 

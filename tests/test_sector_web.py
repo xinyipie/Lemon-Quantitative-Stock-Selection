@@ -12,7 +12,7 @@ from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
 from sector_heat_diagnostics import rank_sector_stocks
 import web_app.app as web_app_module
-from web_app.app import app
+from web_app.app import app, load_sector_page_cache, save_sector_page_cache
 from web_app.services.sector_service import (
     build_concept_news_radar,
     build_market_radar_decision,
@@ -114,10 +114,9 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("concept-heat-panel", response.text)
         self.assertIn("message-radar-panel", response.text)
         self.assertIn("\u5386\u53f2\u590d\u76d8", response.text)
-        self.assertIn("\u7559\u7a7a\u4f7f\u7528\u6700\u65b0\u6570\u636e", response.text)
-        self.assertIn("message-detail", response.text)
-        self.assertIn("message-audit-grid", response.text)
-        self.assertIn("message-news-list", response.text)
+        self.assertIn('id="radar-history-date" type="date"', response.text)
+        self.assertIn('href="#news-concepts"', response.text)
+        self.assertIn('id="sector-candidates"', response.text)
 
     def test_sector_page_renders_market_radar_v2_sections(self):
         client = TestClient(app)
@@ -139,9 +138,8 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("research-grid", response.text)
         self.assertIn("stock-evidence-table", response.text)
         self.assertIn("review-loop-panel", response.text)
-        self.assertIn("event-verify", response.text)
         self.assertIn("stock-evidence-reasons", response.text)
-        self.assertLess(response.text.find("market-radar-v2-brief"), response.text.find("sector-hero"))
+        self.assertLess(response.text.find("market-radar-v2-brief"), response.text.find('id="mainline-view"'))
 
     def test_sector_page_has_radar_only_update_button(self):
         client = TestClient(app)
@@ -228,6 +226,24 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(build_decision.call_count, 1)
         self.assertEqual(build_overlap.call_count, 1)
 
+    def test_sector_page_persisted_cache_round_trip_and_key_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "radar.pkl"
+            payload = {
+                "radar": {"end_date": "20260709"},
+                "concept_news": {},
+                "decision": {},
+                "strategy_overlap": {},
+            }
+
+            save_sector_page_cache(cache_path, ("latest", "v1"), payload)
+
+            self.assertEqual(
+                load_sector_page_cache(cache_path, ("latest", "v1"))["radar"]["end_date"],
+                "20260709",
+            )
+            self.assertIsNone(load_sector_page_cache(cache_path, ("20260708", "v1")))
+
     def test_sector_page_uses_trader_message_workbench_layout(self):
         client = TestClient(app)
 
@@ -239,9 +255,9 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("今日新增催化", response.text)
         self.assertIn("风险阻断", response.text)
         self.assertIn("背景消息", response.text)
-        self.assertIn("source-confidence-note", response.text)
-        self.assertIn('href="#thesis-', response.text)
-        self.assertIn('href="#sector-', response.text)
+        self.assertIn('id="key-events"', response.text)
+        self.assertIn('id="strategy-overlap"', response.text)
+        self.assertIn('id="sector-candidates"', response.text)
 
     def test_concept_news_radar_reads_cache_and_signal_boosts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -514,9 +530,8 @@ class SectorWebTest(unittest.TestCase):
         response = client.get("/sectors")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("message-detail", response.text)
-        self.assertIn("message-detail-grid", response.text)
-        self.assertIn("message-verify-list", response.text)
+        self.assertIn('id="news-concepts"', response.text)
+        self.assertIn('href="#sector-candidates"', response.text)
         self.assertNotIn("消息行业明细", response.text)
 
     def test_news_cache_attaches_raw_source_details_to_ai_item(self):
@@ -733,7 +748,7 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("https://example.com/news/1", response.text)
         self.assertIn("2000亿设备更新", response.text)
 
-    def test_sector_page_persists_market_radar_snapshot_when_brief_exists(self):
+    def test_sector_page_get_does_not_persist_market_radar_snapshot(self):
         client = TestClient(app)
         fake_radar = {
             "end_date": "20260622",
@@ -856,8 +871,7 @@ class SectorWebTest(unittest.TestCase):
             response = client.get("/sectors")
 
         self.assertEqual(response.status_code, 200)
-        save_snapshot.assert_called_once()
-        self.assertEqual(save_snapshot.call_args.args[1], "20260622")
+        save_snapshot.assert_not_called()
         self.assertIn("\u98ce\u9669\u963b\u65ad", response.text)
         self.assertIn("\u6682\u505c\u65b0\u5173\u6ce8", response.text)
         self.assertIn("\u98ce\u9669\u4f18\u5148", response.text)

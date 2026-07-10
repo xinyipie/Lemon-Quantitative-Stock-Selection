@@ -9,7 +9,8 @@
   </div>
   <div class="radar-header-actions">
     <form class="command-search" action="/sectors" method="get">
-      <input name="end" value="{{ filters.end }}" placeholder="结束日期，如 20260616；留空 = 使用历史库最新交易日">
+      <label class="sr-only" for="radar-date">雷达数据日期</label>
+      <input id="radar-date" type="date" name="end" value="{{ filters.end|fmt_date_input }}">
       <button type="submit">查看</button>
     </form>
     <form class="radar-refresh-form" action="/sectors/update" method="post" data-background-update-form>
@@ -50,11 +51,21 @@
   <details class="radar-history-filter">
     <summary>历史复盘</summary>
     <form class="command-search compact" action="/sectors" method="get">
-      <input name="end" value="{{ filters.end }}" placeholder="输入 YYYYMMDD 查看历史快照；留空使用最新数据">
+      <label class="sr-only" for="radar-history-date">历史复盘日期</label>
+      <input id="radar-history-date" type="date" name="end" value="{{ filters.end|fmt_date_input }}">
       <button type="submit">查看历史</button>
     </form>
   </details>
 </section>
+<nav class="page-section-nav" aria-label="市场雷达页面分区">
+  <a href="#research-brief">研究简报</a>
+  <a href="#key-events">关键事件</a>
+  <a href="#mainline-view">主线判断</a>
+  <a href="#strategy-overlap">策略共振</a>
+  <a href="#news-concepts">消息概念</a>
+  <a href="#sector-candidates">板块候选</a>
+  <a href="#risk-sectors">风险提醒</a>
+</nav>
 {% macro render_event_card(event) -%}
 <article class="event-decision-card {{ event.impact_tone or 'neutral' }}">
   <div class="event-decision-head">
@@ -94,7 +105,7 @@
 </article>
 {%- endmacro %}
 
-<section class="market-radar-v2-brief radar-summary-bar panel {{ brief.data_quality.tone if brief.data_quality else decision.tone }}">
+<section id="research-brief" class="market-radar-v2-brief radar-summary-bar panel {{ brief.data_quality.tone if brief.data_quality else decision.tone }}">
   <div class="panel-head">
     <div>
       <h2>研究员简报</h2>
@@ -142,7 +153,7 @@
 </section>
 
 <section class="radar-workbench">
-  <section class="panel event-watchlist-panel event-workbench-main redesigned">
+<section id="key-events" class="panel event-watchlist-panel event-workbench-main redesigned">
     {% set event_groups = brief.event_groups or {} %}
     {% set trade_groups = brief.trade_event_groups or {} %}
     <div class="panel-head">
@@ -354,7 +365,7 @@
   </section>
 </section>
 
-<section class="sector-hero {{ radar.summary.tone }}">
+<section id="mainline-view" class="sector-hero {{ radar.summary.tone }}">
   <div>
     <span>行业状态</span>
     <h2>{{ radar.summary.headline }}</h2>
@@ -364,7 +375,7 @@
     {% endif %}
   </div>
   <div class="sector-hero-facts">
-    <div><span>最强健康主线</span><strong>{{ radar.summary.top_sector }}</strong><small>{{ radar.summary.top_stage }} · {{ "%.1f"|format(radar.summary.top_score) }}分</small></div>
+    <div><span>最强健康主线</span><strong>{{ radar.summary.get('top_sector', '-') }}</strong><small>{{ radar.summary.get('top_stage', '-') }} · {{ "%.1f"|format(radar.summary.get('top_score', 0)) }}分</small></div>
     <div><span>健康主线</span><strong>{{ radar.summary.healthy_count }}</strong><small>当前展示 {{ radar.summary.healthy_display_count }} 个 · 低位启动/趋势延续/弱修复</small></div>
     <div><span>风险板块</span><strong>{{ radar.summary.risky_count }}</strong><small>当前展示 {{ radar.summary.risky_display_count }} 个 · 过热高潮/退潮中</small></div>
   </div>
@@ -417,7 +428,7 @@
     <div class="filter-summary">{{ decision.source_note }}</div>
   </section>
 
-  <section class="panel strategy-overlap-panel">
+<section id="strategy-overlap" class="panel strategy-overlap-panel">
     <div class="panel-head">
       <div>
         <h2>策略共振观察</h2>
@@ -479,7 +490,7 @@
   </section>
 </section>
 
-<section class="market-context-grid message-layout">
+<section id="news-concepts" class="market-context-grid message-layout">
   <section class="panel message-radar-panel">
     <div class="panel-head">
       <div>
@@ -661,7 +672,7 @@
   </section>
 </section>
 
-<section class="panel">
+<section id="sector-candidates" class="panel">
   <div class="panel-head">
     <div>
       <h2>健康主线</h2>
