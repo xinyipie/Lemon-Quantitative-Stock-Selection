@@ -30,7 +30,7 @@ def query_stock_history(
             select trade_date, close, pct_chg from stock_daily
             where ts_code = ?
             order by trade_date desc
-            limit 90
+            limit 120
             """,
             (ts_code,),
         ).fetchall()
@@ -40,6 +40,7 @@ def query_stock_history(
         latest_moneyflow = _query_latest_by_trade_date(conn, "stock_moneyflow", ts_code)
         latest_finance = _query_latest_finance(conn, ts_code)
         returns = _calc_trailing_returns(daily_rows)
+        price_history = _build_price_history(daily_rows)
     finally:
         conn.close()
 
@@ -54,9 +55,37 @@ def query_stock_history(
         "latest_moneyflow": latest_moneyflow,
         "latest_finance": latest_finance,
         "returns": returns,
+        "price_history": price_history,
         "signal_state": signal_state,
         "latest_trade_date": latest_trade_date,
     }
+
+
+def _build_price_history(desc_rows: list[sqlite3.Row]) -> list[dict]:
+    """生成按日期正序排列的价格与均线序列，供页面只读展示。"""
+    rows = [dict(row) for row in reversed(desc_rows)]
+    closes = [_safe_float(row.get("close")) for row in rows]
+    result = []
+    for index, row in enumerate(rows):
+        result.append(
+            {
+                "trade_date": row.get("trade_date"),
+                "close": closes[index],
+                "pct_chg": _safe_float(row.get("pct_chg")),
+                "ma20": _rolling_average(closes, index, 20),
+                "ma60": _rolling_average(closes, index, 60),
+            }
+        )
+    return result
+
+
+def _rolling_average(values: list[float | None], index: int, window: int) -> float | None:
+    if index + 1 < window:
+        return None
+    scoped = values[index + 1 - window : index + 1]
+    if any(value is None for value in scoped):
+        return None
+    return round(sum(scoped) / window, 4)
 
 
 def format_stock_report(result: dict) -> str:

@@ -312,6 +312,59 @@ button {
 .table-shell > table { min-width: 760px; }
 .table-shell th { position: sticky; top: 0; z-index: 2; }
 
+.stock-trend-chart svg {
+  display: block;
+  width: 100%;
+  height: clamp(220px, 30vw, 320px);
+}
+
+.chart-axis {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-close { stroke: var(--accent); }
+.chart-ma20 { stroke: #f0b35a; }
+.chart-ma60 { stroke: #ad8cff; }
+
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.chart-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: currentColor;
+}
+
+.chart-legend .close { color: var(--accent); }
+.chart-legend .ma20 { color: #f0b35a; }
+.chart-legend .ma60 { color: #ad8cff; }
+
+.chart-range {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.stock-signal-table .reason { min-width: 220px; }
+
 .pagination {
   display: flex;
   flex-wrap: wrap;

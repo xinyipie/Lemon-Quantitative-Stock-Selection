@@ -141,6 +141,12 @@ class HistoryToolsTest(unittest.TestCase):
         self.assertEqual(result["latest_basic"]["pe_ttm"], 8.0)
         self.assertEqual(result["latest_moneyflow"]["net_mf_amount"], 2500.0)
         self.assertEqual(result["signal_state"]["state"], "active")
+        self.assertEqual(len(result["price_history"]), 81)
+        self.assertEqual(result["price_history"][0]["trade_date"], "20250101")
+        self.assertEqual(result["price_history"][-1]["trade_date"], "20250322")
+        self.assertIsNone(result["price_history"][18]["ma20"])
+        self.assertAlmostEqual(result["price_history"][19]["ma20"], 12.85, places=2)
+        self.assertIsNotNone(result["price_history"][-1]["ma60"])
         self.assertIn("平安银行", report)
         self.assertIn("近10日", report)
 

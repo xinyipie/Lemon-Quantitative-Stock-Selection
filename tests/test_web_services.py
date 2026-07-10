@@ -7,7 +7,7 @@ import pandas as pd
 
 from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
-from web_app.services.history_service import get_db_status, get_stock_detail
+from web_app.services.history_service import build_stock_chart, get_db_status, get_stock_detail
 from web_app.services.signal_service import (
     build_admission_diagnostics,
     build_dashboard_decision,
@@ -59,6 +59,21 @@ class WebServicesTest(unittest.TestCase):
         self.assertEqual(status["tables"]["stock_daily"]["rows"], 2)
         self.assertEqual(status["tables"]["stock_daily"]["status_label"], "OK")
         self.assertEqual(detail["stock"]["name"], "平安银行")
+        self.assertIn("close_path", detail["price_chart"])
+        self.assertEqual(detail["price_chart"]["point_count"], 2)
+
+    def test_build_stock_chart_keeps_zero_values_and_missing_moving_averages(self):
+        chart = build_stock_chart(
+            [
+                {"trade_date": "20250101", "close": 0.0, "ma20": None, "ma60": None},
+                {"trade_date": "20250102", "close": 2.0, "ma20": 1.0, "ma60": None},
+            ]
+        )
+
+        self.assertEqual(chart["point_count"], 2)
+        self.assertTrue(chart["close_path"].startswith("M "))
+        self.assertTrue(chart["ma20_path"].startswith("M "))
+        self.assertEqual(chart["ma60_path"], "")
 
     def test_history_status_marks_lagging_market_tables(self):
         with tempfile.TemporaryDirectory() as tmpdir:

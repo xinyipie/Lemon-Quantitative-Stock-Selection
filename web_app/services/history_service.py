@@ -23,7 +23,54 @@ def get_stock_detail(
 ) -> dict:
     detail = query_stock_history(code, history_db=history_db, signal_db=signal_db)
     detail["verdict"] = build_stock_verdict(detail)
+    detail["price_chart"] = build_stock_chart(detail.get("price_history") or [])
     return detail
+
+
+def build_stock_chart(rows: list[dict], width: int = 900, height: int = 260) -> dict:
+    """把价格序列转换为可直接绘制的 SVG 路径，不引入前端图表依赖。"""
+    padding_x = 28
+    padding_y = 22
+    series = {
+        "close": [(_num(row.get("close")), index) for index, row in enumerate(rows)],
+        "ma20": [(_num(row.get("ma20")), index) for index, row in enumerate(rows)],
+        "ma60": [(_num(row.get("ma60")), index) for index, row in enumerate(rows)],
+    }
+    values = [value for points in series.values() for value, _ in points if value is not None]
+    if not values:
+        return {"point_count": len(rows), "close_path": "", "ma20_path": "", "ma60_path": ""}
+
+    low = min(values)
+    high = max(values)
+    spread = high - low or 1.0
+    x_span = max(width - padding_x * 2, 1)
+    y_span = max(height - padding_y * 2, 1)
+    denominator = max(len(rows) - 1, 1)
+
+    def path(points: list[tuple[float | None, int]]) -> str:
+        commands = []
+        drawing = False
+        for value, index in points:
+            if value is None:
+                drawing = False
+                continue
+            x = padding_x + index / denominator * x_span
+            y = padding_y + (high - value) / spread * y_span
+            commands.append(f"{'L' if drawing else 'M'} {x:.1f} {y:.1f}")
+            drawing = True
+        return " ".join(commands)
+
+    return {
+        "view_box": f"0 0 {width} {height}",
+        "point_count": len(rows),
+        "close_path": path(series["close"]),
+        "ma20_path": path(series["ma20"]),
+        "ma60_path": path(series["ma60"]),
+        "min_value": low,
+        "max_value": high,
+        "start_date": rows[0].get("trade_date") if rows else None,
+        "end_date": rows[-1].get("trade_date") if rows else None,
+    }
 
 
 def build_stock_verdict(detail: dict) -> dict:
