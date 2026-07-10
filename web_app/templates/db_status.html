@@ -18,19 +18,33 @@
   <div class="panel-head">
     <div>
       <h2>数据更新入口</h2>
-      <p>页面只读，不会自动拉取数据。盘后想把历史库、短线复盘、长线池同步到最新，优先跑下面这一条。</p>
+      <p>日常更新会补齐核心行情并刷新页面数据；完整重算耗时更久，适合补历史复盘和审计。</p>
+    </div>
+    <div class="update-actions">
+      <form method="post" action="/update/run?mode=daily" data-background-update-form>
+        <button type="submit" data-update-button data-update-mode="daily" data-update-label="更新到最新交易日">更新到最新交易日</button>
+      </form>
+      <form method="post" action="/update/run?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
+        <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算">完整重算</button>
+      </form>
     </div>
   </div>
-  <div class="hint-list compact">
-    <span><code>python daily_web_update.py --mode full --end 最新交易日</code></span>
-    <span><code>python main.py</code> 会写入当日实盘信号</span>
-    <span>跑完后重启或刷新 Web 服务</span>
-  </div>
+  <div class="filter-summary" data-update-message>当前状态：{{ update_status.message if update_status and update_status.message else '尚未运行一键更新。' }}</div>
+  <pre class="update-error" data-update-error hidden></pre>
+  <details class="detail-fold">
+    <summary>高级操作</summary>
+    <div class="hint-list compact">
+      <span><code>python daily_web_update.py --mode full --end 最新交易日</code></span>
+      <span><code>python main.py</code> 会写入当日实盘信号</span>
+      <span>命令行适合排障和批量补历史数据</span>
+    </div>
+  </details>
 </section>
 
 <div class="panel">
   <div class="panel-title">表覆盖</div>
-  <table>
+  <div class="table-shell" role="region" aria-label="数据库表覆盖" tabindex="0">
+  <table class="dense-table">
     <thead><tr><th>表</th><th>行数</th><th>日期范围</th><th>状态</th></tr></thead>
     <tbody>
     {% for name, info in status.tables.items() %}
@@ -43,5 +57,6 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}

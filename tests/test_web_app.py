@@ -93,6 +93,14 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("数据库状态", response.text)
         self.assertIn("python daily_web_update.py --mode full --end 最新交易日", response.text)
 
+    def test_db_page_offers_web_sync_and_advanced_cli_details(self):
+        response = self.client.get("/db")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('action="/update/run?mode=daily"', response.text)
+        self.assertIn("高级操作", response.text)
+        self.assertNotIn("页面只读，不会自动拉取数据", response.text)
+
     def test_stock_page_renders_for_code(self):
         response = self.client.get("/stock/000001")
         self.assertEqual(response.status_code, 200)
@@ -124,10 +132,32 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("AI状态", response.text)
         self.assertIn("初筛通过", response.text)
         self.assertIn("可信度", response.text)
-        self.assertIn("short_v9_final", response.text)
         self.assertIn("Strong Shortlist", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("stock:updatePending", response.text)
+
+    def test_signals_page_paginates_and_preserves_filters(self):
+        fake_signals = [
+            {
+                "trade_date": "20260709",
+                "ts_code": f"{index:06d}.SZ",
+                "display_name": f"样本{index}",
+                "display_code": f"{index:06d}",
+                "industry": "银行",
+                "score": 60,
+                "performance": {},
+            }
+            for index in range(120)
+        ]
+        with patch("web_app.app.get_signal_runs", return_value=[]), patch(
+            "web_app.app.get_recent_signals", side_effect=[[], [], fake_signals]
+        ), patch("web_app.app.get_short_live_push_history", return_value=[]):
+            response = self.client.get("/signals?page=2&start=2026-01-01&industry=银行")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("第 2 / 3 页", response.text)
+        self.assertIn('type="date"', response.text)
+        self.assertIn('class="table-shell"', response.text)
 
     def test_signals_page_uses_latest_run_date_when_no_new_signals(self):
         with patch("web_app.app.get_signal_runs") as get_runs, patch("web_app.app.get_recent_signals") as get_signals:

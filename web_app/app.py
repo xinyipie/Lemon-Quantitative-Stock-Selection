@@ -24,7 +24,13 @@ from web_app.services.sector_service import (
     build_strategy_overlap,
 )
 from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
-from web_app.services.ui_service import display_source_label, format_date_input, format_optional
+from web_app.services.ui_service import (
+    display_source_label,
+    format_date_input,
+    format_optional,
+    normalize_date_input,
+    paginate_items,
+)
 from web_app.services.dragon_service import build_dragon_observation
 from web_app.services.signal_service import (
     build_admission_diagnostics,
@@ -226,7 +232,12 @@ def db_status(request: Request):
     return templates.TemplateResponse(
         request,
         "db_status.html",
-        {"request": request, "status": status, "active_nav": "db"},
+        {
+            "request": request,
+            "status": status,
+            "update_status": read_update_status(),
+            "active_nav": "db",
+        },
     )
 
 
@@ -343,7 +354,14 @@ def stock_detail(request: Request, code: str):
 
 
 @app.get("/signals")
-def signals(request: Request, q: str = "", start: str = "", end: str = "", industry: str = ""):
+def signals(
+    request: Request,
+    q: str = "",
+    start: str = "",
+    end: str = "",
+    industry: str = "",
+    page: str = "1",
+):
     default_window_days = 100
     review_sources = ["backtest_ic_short", "live"]
     review_profiles = ["short_v9_final", "profile_v9_sector_quality_guard"]
@@ -394,8 +412,10 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         limit=30,
     )
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
-    effective_start = start or build_default_signal_start(latest_signal_date, days=default_window_days)
-    recent_signals = get_recent_signals(
+    normalized_start = normalize_date_input(start)
+    normalized_end = normalize_date_input(end)
+    effective_start = normalized_start or build_default_signal_start(latest_signal_date, days=default_window_days)
+    all_signals = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=300,
@@ -404,16 +424,19 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
         mode="short",
         query=q or None,
         start=effective_start or None,
-        end=end or None,
+        end=normalized_end or None,
         industry=industry or None,
     )
-    short_stats = summarize_short_signal_performance(recent_signals)
+    short_stats = summarize_short_signal_performance(all_signals, limit=300)
+    recent_signals, page_info = paginate_items(all_signals, page, page_size=50)
     return templates.TemplateResponse(
         request,
         "signals.html",
         {
             "request": request,
             "signals": recent_signals,
+            "all_signals": all_signals,
+            "page_info": page_info,
             "short_stats": short_stats,
             "latest_signal_run": latest_signal_run,
             "strong_recommendation": strong_recommendation,
@@ -422,8 +445,8 @@ def signals(request: Request, q: str = "", start: str = "", end: str = "", indus
             "update_status": read_update_status(),
             "filters": {
                 "q": q,
-                "start": start,
-                "end": end,
+                "start": normalized_start,
+                "end": normalized_end,
                 "industry": industry,
                 "effective_start": effective_start,
                 "default_window_days": default_window_days,

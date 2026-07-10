@@ -33,6 +33,22 @@
   <div class="status-cell"><span>日线 / 基础池</span><strong>{{ status.latest_daily_stock_count }} / {{ status.stock_count }}</strong></div>
 </section>
 
+<section class="decision-panel {{ decision.tone }} dashboard-primary-decision">
+  <div>
+    <div class="eyebrow">Today's Decision</div>
+    <h2>今日决策（最近运行决策）：{{ decision.level }}</h2>
+    <p>{{ decision.stance }}</p>
+    <div class="hint-list compact">
+      {% for item in decision.reasons %}<span>{{ item }}</span>{% endfor %}
+    </div>
+  </div>
+  <div class="action-list">
+    {% for item in decision.next_actions %}
+    <a href="{{ item.href }}"><strong>{{ item.label }}</strong><span>{{ item.hint }}</span></a>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="panel update-panel" data-update-status-url="/update/status">
   <div>
     <h2>同步中心</h2>
@@ -84,29 +100,16 @@
   <div class="metric"><span>平均MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
 </section>
 
-{% include "partials/strong_recommendation_card.html" %}
-{% include "partials/observation_candidate_card.html" %}
-
-<section class="decision-panel {{ decision.tone }}">
-  <div>
-    <div class="eyebrow">Latest Decision</div>
-    <h2>最近运行决策：{{ decision.level }}</h2>
-    <p>{{ decision.stance }}</p>
-    <div class="hint-list compact">
-      {% for item in decision.reasons %}
-      <span>{{ item }}</span>
-      {% endfor %}
-    </div>
-  </div>
-  <div class="action-list">
-    {% for item in decision.next_actions %}
-    <a href="{{ item.href }}">
-      <strong>{{ item.label }}</strong>
-      <span>{{ item.hint }}</span>
-    </a>
-    {% endfor %}
-  </div>
-</section>
+{% if strong_recommendation["items"] or observation_candidates["items"] %}
+  {% include "partials/strong_recommendation_card.html" %}
+  {% include "partials/observation_candidate_card.html" %}
+{% else %}
+<details class="panel detail-fold empty-signal-details">
+  <summary>查看强推荐与观察层扫描详情</summary>
+  {% include "partials/strong_recommendation_card.html" %}
+  {% include "partials/observation_candidate_card.html" %}
+</details>
+{% endif %}
 
 {% if daily_brief and daily_brief.doc %}
 <section class="panel ai-brief-panel">

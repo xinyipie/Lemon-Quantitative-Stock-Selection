@@ -13,16 +13,16 @@
 {% include "partials/update_status_panel.html" %}
 
 <section class="status-strip">
-  <div class="status-cell"><span>本页记录</span><strong>{{ signals|length }}</strong></div>
+  <div class="status-cell"><span>筛选结果 / 本页</span><strong>{{ page_info.total }} / {{ signals|length }}</strong></div>
   <div class="status-cell"><span>最新运行</span><strong>{{ latest_signal_run.trade_date|fmt_date if latest_signal_run else 'NA' }}</strong></div>
   <div class="status-cell"><span>来源</span><strong>回测 + 实盘</strong></div>
-  <div class="status-cell"><span>策略</span><strong>short_v9_final</strong></div>
+  <div class="status-cell"><span>策略</span><strong>v9 底层 + v39 强推荐</strong></div>
   <div class="status-cell"><span>最新状态</span><strong>{{ latest_signal_run.status_label if latest_signal_run else '未运行' }}</strong></div>
 </section>
 
 <section class="metric-grid short-review-metrics">
-  <div class="metric primary-metric"><span>5日胜率</span><strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong><small>基于 {{ short_stats.closed_count if short_stats else 0 }} 个已满期样本</small></div>
-  <div class="metric primary-metric"><span>平均5日收益</span><strong class="{% if short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d > 0 %}market-up{% elif short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d < 0 %}market-down{% endif %}">{% if short_stats and short_stats.avg_ret_5d is not none %}{{ "%+.2f"|format(short_stats.avg_ret_5d) }}%{% else %}-{% endif %}</strong><small>当前表内共 {{ short_stats.count if short_stats else 0 }} 条</small></div>
+  <div class="metric primary-metric"><span>5日胜率</span><strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong><small>当前筛选最多 300 条，{{ short_stats.closed_count if short_stats else 0 }} 个已满期样本</small></div>
+  <div class="metric primary-metric"><span>平均5日收益</span><strong class="{% if short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d > 0 %}market-up{% elif short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d < 0 %}market-down{% endif %}">{% if short_stats and short_stats.avg_ret_5d is not none %}{{ "%+.2f"|format(short_stats.avg_ret_5d) }}%{% else %}-{% endif %}</strong><small>统计样本 {{ short_stats.count if short_stats else 0 }} 条</small></div>
   <div class="metric secondary-metric"><span>盘中机会 MFE</span><strong>{% if short_stats and short_stats.avg_mfe is not none %}{{ "%+.2f"|format(short_stats.avg_mfe) }}%{% else %}-{% endif %}</strong></div>
   <div class="metric secondary-metric"><span>盘中风险 MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
   <div class="metric secondary-metric"><span>机会/风险比</span><strong>{% if short_stats and short_stats.opportunity_risk_ratio is not none %}{{ "%.2f"|format(short_stats.opportunity_risk_ratio) }}{% else %}-{% endif %}</strong></div>
@@ -39,6 +39,7 @@
     </div>
   </div>
   {% if live_push_history %}
+  <div class="table-shell" role="region" aria-label="短线实盘推送历史" tabindex="0">
   <table class="dense-table live-push-history-table">
     <thead>
       <tr>
@@ -65,16 +66,21 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
   <div class="empty-state soft">暂无实盘推送历史。</div>
   {% endif %}
 </section>
 
 <form class="filter-bar" action="/signals" method="get">
-  <input name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
-  <input name="start" value="{{ filters.get('start', '') }}" placeholder="开始日期 20260101">
-  <input name="end" value="{{ filters.get('end', '') }}" placeholder="结束日期 20260615">
-  <input name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
+  <label class="sr-only" for="signal-query">股票代码或中文名</label>
+  <label class="sr-only" for="signal-start">开始日期</label>
+  <label class="sr-only" for="signal-end">结束日期</label>
+  <label class="sr-only" for="signal-industry">行业</label>
+  <input id="signal-query" name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
+  <input id="signal-start" type="date" name="start" value="{{ filters.get('start', '')|fmt_date_input }}">
+  <input id="signal-end" type="date" name="end" value="{{ filters.get('end', '')|fmt_date_input }}">
+  <input id="signal-industry" name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
   <button type="submit">筛选</button>
   <a class="ghost-button" href="/signals">重置</a>
 </form>
@@ -104,6 +110,7 @@
       <p>没有展示的交易日，表示短线 v9 当天没有产生可入库的 Top3 信号，或当前筛选条件没有命中。</p>
     </div>
   </div>
+  <div class="table-shell" role="region" aria-label="历史 Top3 信号" tabindex="0">
   <table class="dense-table review-table">
     <thead>
       <tr>
@@ -152,5 +159,13 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
+  <nav class="pagination" aria-label="短线复盘分页">
+    <span>第 {{ page_info.page }} / {{ page_info.total_pages }} 页 · 第 {{ page_info.start_index }}-{{ page_info.end_index }} 条，共 {{ page_info.total }} 条</span>
+    <div class="pagination-actions">
+      {% if page_info.page > 1 %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page - 1) }}">上一页</a>{% endif %}
+      {% if page_info.page < page_info.total_pages %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page + 1) }}">下一页</a>{% endif %}
+    </div>
+  </nav>
 </div>
 {% endblock %}
