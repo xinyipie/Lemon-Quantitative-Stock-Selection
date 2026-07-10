@@ -1,6 +1,30 @@
 {% extends "base.html" %}
 {% block title %}热门龙头观察池{% endblock %}
 {% block content %}
+{% macro render_dragon_card(item) -%}
+<article class="dragon-card">
+  <div class="dragon-card-top">
+    <div>
+      <a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong></a>
+      <span>{{ item.ts_code }} · {{ item.industry }}</span>
+    </div>
+    <b>{{ "%.1f"|format(item.score) }}</b>
+  </div>
+  <div class="dragon-badges">
+    {% if item.lifecycle %}<span class="tag success-tag">{{ item.lifecycle }}</span>{% endif %}
+    {% for badge in item.badges %}<span class="tag soft-tag">{{ badge }}</span>{% endfor %}
+  </div>
+  <p class="dragon-action">{{ item.action }}</p>
+  <dl class="dragon-facts">
+    <div><dt>题材</dt><dd>{{ item.theme_name }}</dd></div>
+    <div><dt>题材分</dt><dd>{{ "%.1f"|format(item.theme_score) }}</dd></div>
+    <div><dt>换手</dt><dd>{{ item.turnover_rate }}</dd></div>
+    <div><dt>首封</dt><dd>{{ item.first_limit_time }}</dd></div>
+    <div><dt>开板</dt><dd>{{ item.open_count }}</dd></div>
+    <div><dt>连板</dt><dd>{{ item.limit_days }}</dd></div>
+  </dl>
+</article>
+{%- endmacro %}
 <header class="page-header dragon-header">
   <div>
     <div class="eyebrow">Dragon Leader Lab</div>
@@ -76,33 +100,18 @@
     </div>
     {% if observation.display_groups[key] %}
       <div class="dragon-card-list">
-      {% for item in observation.display_groups[key] %}
-        <article class="dragon-card">
-          <div class="dragon-card-top">
-            <div>
-              <a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong></a>
-              <span>{{ item.ts_code }} · {{ item.industry }}</span>
-            </div>
-            <b>{{ "%.1f"|format(item.score) }}</b>
-          </div>
-          <div class="dragon-badges">
-            {% if item.lifecycle %}<span class="tag success-tag">{{ item.lifecycle }}</span>{% endif %}
-            {% for badge in item.badges %}
-              <span class="tag soft-tag">{{ badge }}</span>
-            {% endfor %}
-          </div>
-          <p class="dragon-action">{{ item.action }}</p>
-          <dl class="dragon-facts">
-            <div><dt>题材</dt><dd>{{ item.theme_name }}</dd></div>
-            <div><dt>题材分</dt><dd>{{ "%.1f"|format(item.theme_score) }}</dd></div>
-            <div><dt>换手</dt><dd>{{ item.turnover_rate }}</dd></div>
-            <div><dt>首封</dt><dd>{{ item.first_limit_time }}</dd></div>
-            <div><dt>开板</dt><dd>{{ item.open_count }}</dd></div>
-            <div><dt>连板</dt><dd>{{ item.limit_days }}</dd></div>
-          </dl>
-        </article>
+      {% for item in observation.display_groups[key][:3] %}
+        {{ render_dragon_card(item) }}
       {% endfor %}
       </div>
+      {% if observation.display_groups[key]|length > 3 %}
+      <details class="dragon-more detail-fold">
+        <summary>查看更多候选（{{ observation.display_groups[key]|length - 3 }}）</summary>
+        <div class="dragon-card-list">
+          {% for item in observation.display_groups[key][3:] %}{{ render_dragon_card(item) }}{% endfor %}
+        </div>
+      </details>
+      {% endif %}
     {% else %}
       <div class="empty-state">暂无候选。</div>
     {% endif %}

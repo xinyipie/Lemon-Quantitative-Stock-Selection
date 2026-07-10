@@ -2654,12 +2654,11 @@ code {
 
 .dragon-display-grid .dragon-column > .dragon-card-list {
   grid-template-columns: 1fr;
-  max-height: 690px;
-  overflow-y: auto;
-  padding-right: 4px;
   align-items: start;
-  overscroll-behavior: contain;
 }
+
+.dragon-more { margin-top: 10px; }
+.dragon-more > .dragon-card-list { margin-top: 10px; }
 
 .dragon-display-grid .dragon-card {
   min-height: 210px;

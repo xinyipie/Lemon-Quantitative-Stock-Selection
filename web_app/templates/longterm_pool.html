@@ -9,6 +9,12 @@
   </div>
 </header>
 
+<nav class="page-section-nav" aria-label="长线池页面分区">
+  <a href="#current-pool">当前池</a>
+  <a href="#lifecycle">生命周期</a>
+  <a href="#history-audit">历史验证</a>
+</nav>
+
 {% include "partials/update_status_panel.html" %}
 
 <section class="status-strip">
@@ -19,7 +25,7 @@
   <div class="status-cell"><span>最近运行状态</span><strong>{{ runs[0].status_label if runs else '未运行' }}</strong></div>
 </section>
 
-<section class="longterm-state-card {{ pool_status.tone if pool_status else 'neutral' }}">
+<section id="current-pool" class="longterm-state-card {{ pool_status.tone if pool_status else 'neutral' }}">
   <div>
     <span>今日长线结论</span>
     <h2>{{ pool_status.title if pool_status else '当前长线池：NA' }}</h2>
@@ -144,14 +150,14 @@
   {% endif %}
 </section>
 
-<section class="panel">
+<section id="lifecycle" class="panel">
   <div class="panel-head">
     <div>
       <h2>生命周期事件</h2>
       <p>记录股票何时新入池、升级强提醒、降级观察或移出池。这里解释池子为什么变多、变少或变空。</p>
     </div>
   </div>
-  <table class="dense-table">
+  <div class="table-shell" role="region" aria-label="长线生命周期事件" tabindex="0"><table class="dense-table">
     <thead><tr><th>日期</th><th>事件</th><th>状态变化</th><th>股票</th><th>策略版本</th><th>分数变化</th><th>说明</th></tr></thead>
     <tbody>
     {% for item in events %}
@@ -168,17 +174,17 @@
     <tr><td colspan="7">暂无生命周期事件。若最近运行无入池标的，这里为空是正常的。</td></tr>
     {% endfor %}
     </tbody>
-  </table>
+  </table></div>
 </section>
 
-<section class="panel">
+<section id="history-audit" class="panel">
   <div class="panel-head">
     <div>
       <h2>历史长线池验证</h2>
       <p>这里是半年度总览，不受下方入池日期筛选影响；用于判断长线池规则在不同阶段的整体质量。</p>
     </div>
   </div>
-  <table class="dense-table">
+  <div class="table-shell" role="region" aria-label="历史长线池验证" tabindex="0"><table class="dense-table">
     <thead><tr><th>阶段</th><th>策略版本</th><th>样本数</th><th>日期范围</th><th>80日均收益</th><th>80日胜率</th><th>跑赢比例</th><th>来源文件</th></tr></thead>
     <tbody>
     {% for item in audit_summary.runs %}
@@ -196,7 +202,7 @@
     <tr><td colspan="8">暂无历史长线池审计数据。导入 reports/longterm_pool_quality_*.csv 后会显示。</td></tr>
     {% endfor %}
     </tbody>
-  </table>
+  </table></div>
 </section>
 
 <section class="panel">
@@ -207,8 +213,10 @@
     </div>
   </div>
   <form class="filter-bar compact-filter" action="/longterm" method="get">
-    <input name="start" value="{{ filters.get('start', '') if filters else '' }}" placeholder="开始入池日 20250101">
-    <input name="end" value="{{ filters.get('end', '') if filters else '' }}" placeholder="结束入池日 20260615">
+    <label class="sr-only" for="longterm-start">开始入池日</label>
+    <label class="sr-only" for="longterm-end">结束入池日</label>
+    <input id="longterm-start" type="date" name="start" value="{{ (filters.get('start', '') if filters else '')|fmt_date_input }}">
+    <input id="longterm-end" type="date" name="end" value="{{ (filters.get('end', '') if filters else '')|fmt_date_input }}">
     <button type="submit">筛选</button>
     <a class="ghost-button" href="/longterm">重置</a>
   </form>
@@ -221,7 +229,7 @@
       / 实际入池日 {{ sample_filter_summary.actual_start|fmt_date }} - {{ sample_filter_summary.actual_end|fmt_date }}
       {% endif %}
     {% else %}
-      最近 {{ audit_samples|length }} 条
+      最近 {{ page_info.total }} 条
     {% endif %}
   </div>
   <div class="hint-list compact">
@@ -229,7 +237,7 @@
     <span>核心逻辑：市场同步 + 质量趋势 + 健康回调</span>
     <span>MAE越深，说明持有过程越痛苦</span>
   </div>
-  <table class="dense-table">
+  <div class="table-shell" role="region" aria-label="历史长线样本明细" tabindex="0"><table class="dense-table">
     <thead><tr><th>入池日</th><th>阶段</th><th>股票</th><th>行业</th><th>分数</th><th>当前/阶段收益</th><th>观察风险</th><th>10日</th><th>40日</th><th>80日</th><th>最大回撤</th><th>超额收益<br><span class="muted">vs 沪深300</span></th><th>生命周期</th></tr></thead>
     <tbody>
     {% for item in audit_samples %}
@@ -252,13 +260,20 @@
     <tr><td colspan="13">暂无历史样本。</td></tr>
     {% endfor %}
     </tbody>
-  </table>
+  </table></div>
+  <nav class="pagination" aria-label="长线样本分页">
+    <span>第 {{ page_info.page }} / {{ page_info.total_pages }} 页 · 第 {{ page_info.start_index }}-{{ page_info.end_index }} 条，共 {{ page_info.total }} 条</span>
+    <div class="pagination-actions">
+      {% if page_info.page > 1 %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page - 1) }}">上一页</a>{% endif %}
+      {% if page_info.page < page_info.total_pages %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page + 1) }}">下一页</a>{% endif %}
+    </div>
+  </nav>
 </section>
 
 <section class="panel">
   <div class="panel-head"><h2>全部 active 长线记录</h2></div>
   {% if pool %}
-  <table class="dense-table">
+  <div class="table-shell" role="region" aria-label="全部 active 长线记录" tabindex="0"><table class="dense-table">
     <thead><tr><th>股票</th><th>行业</th><th>策略版本</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
     <tbody>
     {% for item in pool %}
@@ -275,7 +290,7 @@
     </tr>
     {% endfor %}
     </tbody>
-  </table>
+  </table></div>
   {% else %}
   <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
   {% endif %}

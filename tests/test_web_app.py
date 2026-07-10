@@ -200,6 +200,22 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("20260201", response.text)
         self.assertIn("20260228", response.text)
 
+    def test_longterm_page_has_section_navigation_and_pagination(self):
+        samples = [{"select_date": "20260709", "ts_code": f"{index:06d}.SZ"} for index in range(120)]
+        with patch("web_app.app.get_active_longterm_pool", return_value=[]), patch(
+            "web_app.app.get_longterm_runs", return_value=[]
+        ), patch("web_app.app.get_longterm_events", return_value=[]), patch(
+            "web_app.app.get_longterm_audit_summary", return_value={"runs": []}
+        ), patch("web_app.app.get_longterm_audit_samples", return_value=samples):
+            response = self.client.get("/longterm?page=2")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="#current-pool"', response.text)
+        self.assertIn('href="#lifecycle"', response.text)
+        self.assertIn('href="#history-audit"', response.text)
+        self.assertIn('class="pagination"', response.text)
+        self.assertIn("第 2 / 3 页", response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

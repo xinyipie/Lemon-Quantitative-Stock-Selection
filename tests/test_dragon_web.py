@@ -236,6 +236,11 @@ class DragonWebTest(unittest.TestCase):
                 "low_turnover_decapatated": "14.1%",
             },
         }
+        original = payload["display_groups"]["priority"][0]
+        payload["display_groups"]["priority"] = [
+            {**original, "name": f"Alpha{index}", "ts_code": f"00000{index}.SZ"}
+            for index in range(1, 5)
+        ]
         with patch("web_app.app.build_dragon_observation", return_value=payload):
             response = TestClient(app).get("/dragon")
 
@@ -252,6 +257,8 @@ class DragonWebTest(unittest.TestCase):
         self.assertIn("data-background-update-form", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("更新行情并刷新龙头池", response.text)
+        self.assertIn("查看更多候选", response.text)
+        self.assertIn('class="panel-title-row"', response.text)
 
     def test_dragon_update_button_starts_dragon_refresh_and_returns_to_page(self):
         with patch("web_app.app.start_web_update") as start_update:

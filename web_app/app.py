@@ -496,22 +496,25 @@ def signal_explanation(request: Request, trade_date: str, ts_code: str, refresh:
 
 
 @app.get("/longterm")
-def longterm_pool(request: Request, start: str = "", end: str = ""):
+def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1"):
     pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
     buckets = split_longterm_pool(pool)
     runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=12)
     events = get_longterm_events(DEFAULT_SIGNAL_DB_PATH, history_db=DEFAULT_HISTORY_DB_PATH, limit=30)
     audit_summary = get_longterm_audit_summary(DEFAULT_SIGNAL_DB_PATH, limit=12)
-    sample_limit = 1000 if (start or end) else 100
-    audit_samples = get_longterm_audit_samples(
+    normalized_start = normalize_date_input(start)
+    normalized_end = normalize_date_input(end)
+    sample_limit = 1000 if (normalized_start or normalized_end) else 100
+    all_audit_samples = get_longterm_audit_samples(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=sample_limit,
-        start=start or None,
-        end=end or None,
+        start=normalized_start or None,
+        end=normalized_end or None,
     )
-    sample_filters = {"start": start, "end": end, "sample_limit": sample_limit}
-    sample_filter_summary = summarize_longterm_audit_sample_filter(audit_samples, sample_filters)
+    sample_filters = {"start": normalized_start, "end": normalized_end, "sample_limit": sample_limit}
+    sample_filter_summary = summarize_longterm_audit_sample_filter(all_audit_samples, sample_filters)
+    audit_samples, page_info = paginate_items(all_audit_samples, page, page_size=50)
     run_funnel = build_longterm_run_funnel(runs, pool)
     pool_status = build_longterm_pool_status(pool, runs)
     return templates.TemplateResponse(
@@ -525,6 +528,8 @@ def longterm_pool(request: Request, start: str = "", end: str = ""):
             "events": events,
             "audit_summary": audit_summary,
             "audit_samples": audit_samples,
+            "all_audit_samples": all_audit_samples,
+            "page_info": page_info,
             "run_funnel": run_funnel,
             "pool_status": pool_status,
             "filters": sample_filters,
