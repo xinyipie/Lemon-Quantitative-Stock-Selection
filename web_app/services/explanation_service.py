@@ -29,7 +29,8 @@ SYSTEM_EXPLANATION_ANALYST = (
     "你是专业但克制的A股量化信号解释员。你的任务不是鼓吹买入，而是把系统已有数据解释清楚。"
     "必须面向普通用户，用短句、结论先行、风险明确的中文表达。"
     "只能基于输入JSON中的事实解释，不得编造新闻、政策、财务或盘口细节。"
-    "禁止使用必涨、稳赚、满仓、梭哈、无脑买入等表达。"
+    "禁止使用必涨、稳赚、满仓、梭哈、无脑买入、轻仓、考虑买入、建议买入等交易指令表达。"
+    "观察计划只能描述需要验证的条件，不得给出仓位或买卖建议。"
     "输出必须是合法JSON对象，不要markdown，不要代码块。"
 )
 
@@ -78,13 +79,14 @@ def get_or_create_signal_explanation(
     input_hash = _input_hash(facts)
     cached = None if force else _read_cached(cache_key, signal_db, allow_fallback=not bool(cfg.get("api_key")))
     if cached:
-        return {"source": "cache", "doc": cached, "signal": signal}
+        return {"source": "cache", "doc": sanitize_observation_copy(cached), "signal": signal}
 
     doc = _call_ai_document(facts, cfg, post or requests.post)
     source = "ai"
     if not doc:
         doc = build_fallback_explanation(signal)
         source = "fallback"
+    doc = sanitize_observation_copy(doc)
     _write_cache(cache_key, signal, doc, source, signal_db, model=cfg.get("model", ""), input_hash=input_hash)
     return {"source": source, "doc": doc, "signal": signal}
 
@@ -292,7 +294,7 @@ def build_fallback_explanation(signal: dict) -> dict:
         f"{name}这条记录属于{quality}，{confidence_clause}规则原因是：{rule_summary}。事后结果为{outcome}，过程表现是{process}。"
         f"它更适合用于理解系统当时为什么关注，而不是直接复制为买入指令。"
     )
-    return {
+    return sanitize_observation_copy({
         "title": f"{name} {code} 信号解释",
         "summary": summary,
         "positives": positives[:3],
@@ -301,7 +303,32 @@ def build_fallback_explanation(signal: dict) -> dict:
         "invalidation": "若次日不能站稳关键位、放量下跌或继续冲高回落，应放弃该信号。",
         "style": "短线观察",
         "confidence_note": "本解释只基于本地信号和复盘数据，不构成收益承诺或交易指令。",
+    })
+
+
+def sanitize_observation_copy(doc: dict) -> dict:
+    """移除解释文档中的仓位和买卖指令，保留研究观察语义。"""
+    replacements = {
+        "轻仓观察": "继续观察",
+        "轻仓参与": "继续观察",
+        "考虑买入": "观察条件是否成立",
+        "建议买入": "建议继续观察",
+        "逢低买入": "观察回落后的承接",
     }
+
+    def clean(value):
+        if isinstance(value, str):
+            result = value
+            for source, target in replacements.items():
+                result = result.replace(source, target)
+            return result
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items()}
+        return value
+
+    return clean(dict(doc or {}))
 
 
 def _find_signal(

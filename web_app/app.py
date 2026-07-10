@@ -539,19 +539,31 @@ def update_dragon_leaders(request: Request):
 
 
 @app.get("/explain/signal/{trade_date}/{ts_code}")
-def signal_explanation(request: Request, trade_date: str, ts_code: str, refresh: bool = False):
+def signal_explanation(request: Request, trade_date: str, ts_code: str):
     explanation = get_or_create_signal_explanation(
         trade_date,
         ts_code,
         signal_db=DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
-        force=refresh,
+        force=False,
     )
     return templates.TemplateResponse(
         request,
         "signal_explanation.html",
         {"request": request, "explanation": explanation, "active_nav": "signals"},
     )
+
+
+@app.post("/explain/signal/{trade_date}/{ts_code}/refresh")
+def refresh_signal_explanation(trade_date: str, ts_code: str):
+    get_or_create_signal_explanation(
+        trade_date,
+        ts_code,
+        signal_db=DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        force=True,
+    )
+    return RedirectResponse(url=f"/explain/signal/{trade_date}/{ts_code}", status_code=303)
 
 
 @app.get("/longterm")

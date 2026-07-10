@@ -178,8 +178,21 @@ class WebAppTest(unittest.TestCase):
         response = self.client.get("/explain/signal/20260525/000012.SZ")
         self.assertEqual(response.status_code, 200)
         self.assertIn("AI解释文档", response.text)
-        self.assertIn("看好点", response.text)
+        self.assertIn("当时已知的支持因素", response.text)
         self.assertIn("风险点", response.text)
+        self.assertIn('method="post"', response.text)
+
+    def test_signal_explanation_refresh_uses_post_and_redirects_to_canonical_url(self):
+        with patch("web_app.app.get_or_create_signal_explanation") as get_explanation:
+            get_explanation.return_value = {"source": "ai", "doc": {}, "signal": {}}
+            response = self.client.post(
+                "/explain/signal/20260525/000012.SZ/refresh",
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/explain/signal/20260525/000012.SZ")
+        self.assertTrue(get_explanation.call_args.kwargs["force"])
 
     def test_longterm_page_renders(self):
         response = self.client.get("/longterm")

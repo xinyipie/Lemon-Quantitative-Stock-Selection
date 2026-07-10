@@ -175,7 +175,8 @@ class ExplanationServiceTest(unittest.TestCase):
 
         self.assertIn("资金分较强", doc["positives"][0])
         self.assertTrue(any("量比3.20偏热" in item for item in doc["risks"]))
-        self.assertIn("轻仓观察", doc["watch_plan"])
+        self.assertNotIn("轻仓", doc["watch_plan"])
+        self.assertIn("继续观察", doc["watch_plan"])
 
     def test_fallback_explanation_includes_signal_confidence(self):
         signal = {

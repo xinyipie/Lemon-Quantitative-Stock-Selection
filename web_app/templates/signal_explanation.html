@@ -16,15 +16,15 @@
 
 <section class="explain-hero">
   <div>
-    <span class="tag">{{ explanation.source }}</span>
+    <span class="tag">{{ explanation.source|display_source_label }}</span>
     <h2>{{ doc.title }}</h2>
     <p>{{ doc.summary }}</p>
   </div>
   {% if signal %}
   <div class="explain-facts">
     <div><span>日期</span><strong>{{ signal.trade_date|fmt_date }}</strong></div>
-    <div><span>策略</span><strong>{{ signal.profile }}</strong></div>
-    <div><span>分数</span><strong>{{ "%.1f"|format(signal.score or 0) }}</strong></div>
+    <div><span>策略</span><strong>{{ signal.profile_label or (signal.profile|display_source_label) }}</strong></div>
+    <div><span>分数</span><strong>{{ signal.score|fmt_optional(1) }}</strong></div>
     <div><span>结果</span><strong>{{ signal.outcome_label }}</strong></div>
   </div>
   {% endif %}
@@ -32,7 +32,7 @@
 
 <section class="explain-grid">
   <div class="panel">
-    <div class="panel-head"><h2>看好点</h2></div>
+    <div class="panel-head"><h2>当时已知的支持因素</h2></div>
     {% for item in doc.positives %}
     <p class="good-line">{{ item }}</p>
     {% else %}
@@ -41,7 +41,7 @@
   </div>
 
   <div class="panel">
-    <div class="panel-head"><h2>风险点</h2></div>
+    <div class="panel-head"><h2>当时已知的风险点</h2></div>
     {% for item in doc.risks %}
     <p class="risk-line">{{ item }}</p>
     {% else %}
@@ -50,7 +50,7 @@
   </div>
 
   <div class="panel">
-    <div class="panel-head"><h2>观察计划</h2></div>
+    <div class="panel-head"><h2>后续观察条件</h2></div>
     <p>{{ doc.watch_plan }}</p>
   </div>
 
@@ -63,20 +63,22 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>原始信号依据</h2>
-      <p>用于核对AI解释是否忠于数据。</p>
+      <h2>事实核对</h2>
+      <p>把信号当时已知的依据与事后验证结果分开阅读。</p>
     </div>
     {% if signal %}
-    <a href="/explain/signal/{{ signal.trade_date }}/{{ signal.ts_code }}?refresh=true">重新生成</a>
+    <form method="post" action="/explain/signal/{{ signal.trade_date }}/{{ signal.ts_code }}/refresh">
+      <button class="ghost-button" type="submit">重新生成解释</button>
+    </form>
     {% endif %}
   </div>
   {% if signal %}
   <dl class="info-list wide">
     <dt>股票</dt><dd>{{ signal.display_name }} {{ signal.display_code }}</dd>
     <dt>行业</dt><dd>{{ signal.industry or '-' }}</dd>
-    <dt>入选依据</dt><dd>{{ signal.basis_text }}</dd>
-    <dt>事后表现</dt><dd>{{ signal.performance_text }}</dd>
-    <dt>过程标签</dt><dd>{{ signal.process_label }}</dd>
+    <dt>当时已知 · 入选依据</dt><dd>{{ signal.basis_text }}</dd>
+    <dt>事后验证 · 表现</dt><dd>{{ signal.performance_text }}</dd>
+    <dt>事后验证 · 过程标签</dt><dd>{{ signal.process_label }}</dd>
     <dt>说明</dt><dd>{{ doc.confidence_note }}</dd>
   </dl>
   {% else %}
