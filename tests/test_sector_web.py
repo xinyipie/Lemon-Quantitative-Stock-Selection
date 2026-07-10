@@ -237,12 +237,18 @@ class SectorWebTest(unittest.TestCase):
             }
 
             save_sector_page_cache(cache_path, ("latest", "v1"), payload)
+            dated_payload = {"radar": {"end_date": "20260708"}}
+            save_sector_page_cache(cache_path, ("20260708", "v1"), dated_payload)
 
             self.assertEqual(
                 load_sector_page_cache(cache_path, ("latest", "v1"))["radar"]["end_date"],
                 "20260709",
             )
-            self.assertIsNone(load_sector_page_cache(cache_path, ("20260708", "v1")))
+            self.assertEqual(
+                load_sector_page_cache(cache_path, ("20260708", "v1"))["radar"]["end_date"],
+                "20260708",
+            )
+            self.assertIsNone(load_sector_page_cache(cache_path, ("20260707", "v1")))
 
     def test_sector_page_uses_trader_message_workbench_layout(self):
         client = TestClient(app)

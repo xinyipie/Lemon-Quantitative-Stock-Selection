@@ -310,11 +310,12 @@ def load_sector_page_cache(path: Path, key: tuple) -> dict | None:
         cached = pickle.loads(Path(path).read_bytes())
     except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
         return None
-    if not isinstance(cached, dict):
+    if not isinstance(cached, dict) or cached.get("version") != _SECTOR_PAGE_CACHE_VERSION:
         return None
-    if cached.get("version") != _SECTOR_PAGE_CACHE_VERSION or tuple(cached.get("key") or ()) != tuple(key):
+    entries = cached.get("entries")
+    if not isinstance(entries, dict):
         return None
-    payload = cached.get("payload")
+    payload = entries.get(tuple(key))
     return payload if isinstance(payload, dict) else None
 
 
@@ -323,11 +324,18 @@ def save_sector_page_cache(path: Path, key: tuple, payload: dict) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(target.suffix + ".tmp")
+    entries = {}
+    try:
+        existing = pickle.loads(target.read_bytes())
+        if isinstance(existing, dict) and existing.get("version") == _SECTOR_PAGE_CACHE_VERSION:
+            entries = dict(existing.get("entries") or {})
+    except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
+        pass
+    entries[tuple(key)] = payload
     data = {
         "version": _SECTOR_PAGE_CACHE_VERSION,
-        "key": tuple(key),
         "created_at": time.time(),
-        "payload": payload,
+        "entries": entries,
     }
     temporary.write_bytes(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
     temporary.replace(target)

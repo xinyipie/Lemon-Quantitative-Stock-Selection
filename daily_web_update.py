@@ -153,16 +153,22 @@ def refresh_market_radar_snapshot(
     snapshot_date = normalize_date(str(radar.get("end_date") or end_date or today_text()))
     row_id = save_market_radar_snapshot(signal_db, snapshot_date, brief, decision)
     strategy_overlap = build_strategy_overlap(signal_db, radar, concept_news)
+    page_payload = {
+        "radar": radar,
+        "concept_news": concept_news,
+        "decision": decision,
+        "strategy_overlap": strategy_overlap,
+        "latest_radar_snapshot": get_latest_market_radar_snapshot(signal_db),
+    }
     save_sector_page_cache(
         _SECTOR_PAGE_DISK_CACHE,
-        _sector_page_disk_cache_key(radar_date or ""),
-        {
-            "radar": radar,
-            "concept_news": concept_news,
-            "decision": decision,
-            "strategy_overlap": strategy_overlap,
-            "latest_radar_snapshot": get_latest_market_radar_snapshot(signal_db),
-        },
+        _sector_page_disk_cache_key(snapshot_date),
+        page_payload,
+    )
+    save_sector_page_cache(
+        _SECTOR_PAGE_DISK_CACHE,
+        _sector_page_disk_cache_key(""),
+        page_payload,
     )
     print(f"市场雷达快照已更新：date={snapshot_date} row_id={row_id}")
     return row_id
