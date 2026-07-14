@@ -159,77 +159,76 @@
     <div class="panel-head">
       <div>
         <h2>关键事件</h2>
-        <p>先看今日催化、风险阻断和来源缺口；旧消息只进入背景，不作为盘中新信号。</p>
+        <p>风险优先，先看今日催化、风险阻断和来源缺口；旧消息只进入背景，不作为盘中新信号。</p>
       </div>
     </div>
-    <div class="event-filter-tabs">
-      <a href="#event-catalysts">今日新增催化 <b>{{ (trade_groups.catalysts or event_groups.positive or [])|length }}</b></a>
-      <a href="#event-risk">风险阻断 <b>{{ (trade_groups.risks or event_groups.risk or [])|length }}</b></a>
-      <a href="#event-background">背景消息 <b>{{ (trade_groups.background or [])|length }}</b></a>
-      <a href="#event-source-gap">来源待核验 <b>{{ (trade_groups.source_gaps or event_groups.unverified or [])|length }}</b></a>
-      <a href="#event-all">全部事件 <b>{{ (event_groups.all or brief.event_watchlist or [])|length }}</b></a>
+    {% set catalyst_rows = trade_groups.catalysts or event_groups.positive or [] %}
+    {% set risk_rows = trade_groups.risks or event_groups.risk or [] %}
+    {% set background_rows = trade_groups.background or [] %}
+    {% set source_gap_rows = trade_groups.source_gaps or event_groups.unverified or [] %}
+    {% set readable_events = event_groups.all or (catalyst_rows + risk_rows + source_gap_rows + background_rows) or brief.event_watchlist or [] %}
+    <div class="event-filter-tabs event-reader-tabs">
+      <a href="#event-all">全部事件 <b>{{ readable_events|length }}</b></a>
+      <a href="#event-catalysts">今日新增催化 <b>{{ catalyst_rows|length }}</b></a>
+      <a href="#event-risk">风险 <b>{{ risk_rows|length }}</b></a>
+      <a href="#event-background">背景 <b>{{ background_rows|length }}</b></a>
+      <a href="#event-source-gap">待核验 <b>{{ source_gap_rows|length }}</b></a>
     </div>
 
-    <div class="event-impact-columns trader-message-columns">
-      <div class="event-group-section impact-column positive-column" id="event-catalysts">
-        <div class="event-group-title"><strong>今日新增催化</strong><span>只收录新鲜且有原文的利好线索。</span></div>
-        {% set catalyst_rows = trade_groups.catalysts or event_groups.positive or [] %}
-        {% if catalyst_rows %}
-          <div class="event-decision-list">
-            {% for event in catalyst_rows[:4] %}{{ render_event_card(event) }}{% endfor %}
+    <div class="event-reader-shell" data-legacy-layout="event-impact-columns positive-column risk-column">
+      <div class="event-reader-main" id="event-all">
+        <div class="event-reader-toolbar">
+          <div>
+            <strong>新闻阅读流</strong>
+            <span>按交易优先级混排，先读标题、级别、行业和结论，再展开原文。</span>
+          </div>
+          <b>{{ readable_events|length }} 条</b>
+        </div>
+        {% if readable_events %}
+          <div class="event-decision-list event-reader-list">
+            {% for event in readable_events[:8] %}{{ render_event_card(event) }}{% endfor %}
           </div>
         {% else %}
-          <div class="empty-state soft">暂无可作为今日催化的消息。</div>
+          <div class="empty-state soft">暂无可阅读的关键事件。</div>
         {% endif %}
       </div>
 
-      <div class="event-group-section impact-column risk-column" id="event-risk">
-        <div class="event-group-title"><strong>风险阻断</strong><span>风险优先；先处理利空和冲突，避免利好噪音干扰。</span></div>
-        {% set risk_rows = trade_groups.risks or event_groups.risk or [] %}
-        {% if risk_rows %}
-          <div class="event-decision-list">
-            {% for event in risk_rows[:4] %}{{ render_event_card(event) }}{% endfor %}
-          </div>
-        {% else %}
-          <div class="empty-state soft">暂无需要阻断的新鲜风险。</div>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="event-impact-columns trader-message-columns secondary">
-      <div class="event-group-section impact-column background-column" id="event-background">
-        <div class="event-group-title"><strong>背景消息</strong><span>发布日期较久，只用于理解主线环境。</span></div>
-        {% if trade_groups.background %}
-          <div class="event-decision-list">
-            {% for event in trade_groups.background[:3] %}{{ render_event_card(event) }}{% endfor %}
-          </div>
-        {% else %}
-          <div class="empty-state soft">暂无过期背景消息。</div>
-        {% endif %}
-      </div>
-
-      <div class="event-group-section impact-column source-gap-column" id="event-source-gap">
-        <div class="event-group-title"><strong>来源待核验</strong><span>缺原文或原始媒体不清，默认不参与决策。</span></div>
-        {% set source_gap_rows = trade_groups.source_gaps or event_groups.unverified or [] %}
-        {% if source_gap_rows %}
-          <div class="event-decision-list">
-            {% for event in source_gap_rows[:3] %}{{ render_event_card(event) }}{% endfor %}
-          </div>
-        {% else %}
-          <div class="empty-state soft">暂无来源缺口消息。</div>
-        {% endif %}
-      </div>
-    </div>
-
-    <div class="event-group-section compact" id="event-all">
-      <div class="event-group-title"><strong>全部事件</strong><span>用于复盘检索，不作为默认阅读顺序。</span></div>
-      {% if event_groups.all or brief.event_watchlist %}
-        <div class="event-all-list">
-          {% for event in (event_groups.all or brief.event_watchlist)[:8] %}
-            <span class="event-all-chip {{ event.impact_tone or 'neutral' }}">{{ event.freshness_label or event.catalyst_clock or "时效待核验" }} · {{ event.impact_label or event.impact }} {{ event.materiality }}级 · {{ event.title }}</span>
+      <aside class="event-reader-sidebar" aria-label="关键事件摘要">
+        <div class="event-reader-stat-grid">
+          <a href="#event-catalysts"><strong>{{ catalyst_rows|length }}</strong><span>今日催化</span></a>
+          <a href="#event-risk"><strong>{{ risk_rows|length }}</strong><span>风险阻断</span></a>
+          <a href="#event-background"><strong>{{ background_rows|length }}</strong><span>背景消息</span></a>
+          <a href="#event-source-gap"><strong>{{ source_gap_rows|length }}</strong><span>来源待核验</span></a>
+        </div>
+        <div class="event-quick-section" id="event-catalysts">
+          <strong>先看催化</strong>
+          {% if catalyst_rows %}
+            {% for event in catalyst_rows[:3] %}
+              <a href="{{ event.source_url or '#event-all' }}" {% if event.source_url %}target="_blank" rel="noopener"{% endif %}>{{ event.title }}</a>
+            {% endfor %}
+          {% else %}
+            <span>暂无可作为今日催化的消息。</span>
+          {% endif %}
+        </div>
+        <div class="event-quick-section danger" id="event-risk">
+          <strong>再看风险</strong>
+          {% if risk_rows %}
+            {% for event in risk_rows[:3] %}
+              <a href="{{ event.source_url or '#event-all' }}" {% if event.source_url %}target="_blank" rel="noopener"{% endif %}>{{ event.title }}</a>
+            {% endfor %}
+          {% else %}
+            <span>暂无需要阻断的新鲜风险。</span>
+          {% endif %}
+        </div>
+        {% if source_gap_rows or background_rows %}
+        <div class="event-quick-section muted" id="event-background">
+          <strong>放到复盘里</strong>
+          {% for event in (source_gap_rows + background_rows)[:4] %}
+            <span>{{ event.title }}</span>
           {% endfor %}
         </div>
-      {% endif %}
+        {% endif %}
+      </aside>
     </div>
   </section>
 

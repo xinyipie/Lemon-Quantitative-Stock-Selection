@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260710-ui-overhaul">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260714-news-reader">
 </head>
 <body>
   <aside class="sidebar">
@@ -29,7 +29,7 @@
     </nav>
     <div class="sidebar-note">只读研究看板，不包含交易执行功能。</div>
   </aside>
-  <main class="content">
+  <main class="content {{ 'market-radar-content' if active_nav == 'sectors' else '' }}">
     {% block content %}{% endblock %}
   </main>
   <script>
