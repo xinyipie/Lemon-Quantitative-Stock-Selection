@@ -180,17 +180,38 @@
         <div class="event-reader-toolbar">
           <div>
             <strong>新闻阅读流</strong>
-            <span>按交易优先级混排，先读标题、级别、行业和结论，再展开原文。</span>
+            <span>利多和利空分列阅读，先判断方向，再展开原文。</span>
           </div>
           <b>{{ readable_events|length }} 条</b>
         </div>
-        {% if readable_events %}
-          <div class="event-decision-list event-reader-list">
-            {% for event in readable_events[:8] %}{{ render_event_card(event) }}{% endfor %}
+        <div class="event-reader-columns">
+          <div class="event-reader-column bullish">
+            <div class="event-reader-column-head">
+              <strong>利多 / 催化</strong>
+              <span>{{ catalyst_rows|length }} 条</span>
+            </div>
+            {% if catalyst_rows %}
+              <div class="event-decision-list event-reader-list">
+                {% for event in catalyst_rows[:6] %}{{ render_event_card(event) }}{% endfor %}
+              </div>
+            {% else %}
+              <div class="empty-state soft">暂无可作为今日催化的消息。</div>
+            {% endif %}
           </div>
-        {% else %}
-          <div class="empty-state soft">暂无可阅读的关键事件。</div>
-        {% endif %}
+          <div class="event-reader-column bearish">
+            <div class="event-reader-column-head">
+              <strong>利空 / 风险</strong>
+              <span>{{ risk_rows|length }} 条</span>
+            </div>
+            {% if risk_rows %}
+              <div class="event-decision-list event-reader-list">
+                {% for event in risk_rows[:6] %}{{ render_event_card(event) }}{% endfor %}
+              </div>
+            {% else %}
+              <div class="empty-state soft">暂无需要阻断的新鲜风险。</div>
+            {% endif %}
+          </div>
+        </div>
       </div>
 
       <aside class="event-reader-sidebar" aria-label="关键事件摘要">
