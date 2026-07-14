@@ -105,6 +105,99 @@
 </article>
 {%- endmacro %}
 
+{% macro render_message_news_card(item, source_date) -%}
+<article class="message-news-card {{ item.tone }}">
+  <div class="message-news-head">
+    <div>
+      <span class="message-grade">{{ item.grade }}</span>
+      <strong>{{ item.title }}</strong>
+    </div>
+    <b class="{{ 'market-up' if item.impact == 'positive' else 'market-down' if item.impact == 'negative' else '' }}">{{ item.impact_text }} {{ item.boost_text }}</b>
+  </div>
+  <div class="message-news-meta">
+    {% if item.source_time %}
+      <span class="message-source-time">发布 {{ item.source_time }}</span>
+    {% elif source_date %}
+      <span class="message-source-time">采集 {{ source_date|fmt_date }}</span>
+    {% endif %}
+    <span>{{ item.quality }}</span>
+    <span>强度 {{ item.strength_text }}</span>
+    <span>{{ item.duration }}</span>
+    <span>{{ item.sectors_text }}</span>
+    {% if item.mapping_confidence_text %}
+      <span>{{ item.mapping_confidence_text }}</span>
+    {% endif %}
+  </div>
+  <p>{{ item.reason or item.why_selected }}</p>
+  <small>{{ item.why_selected }}</small>
+  <details class="message-detail">
+    <summary>查看详情</summary>
+    <div class="message-source-box">
+      <span>原始新闻</span>
+      <strong>{{ item.source_title or item.title }}</strong>
+      <p>
+        {% if item.source %}
+          {{ item.source }}
+        {% else %}
+          来源未记录
+        {% endif %}
+        {% if item.source_time %}
+          · {{ item.source_time }}
+        {% endif %}
+        {% if item.source_providers_text %}
+          · {{ item.source_providers_text }}
+        {% endif %}
+        {% if item.raw_source_count and item.raw_source_count > 1 %}
+          · {{ item.raw_source_count }} 个来源合并
+        {% endif %}
+      </p>
+      {% if (item.news_value_score_text and item.news_value_score_text != '-') or item.value_reason_text %}
+        <p class="message-value-line">
+          价值排序 {{ item.news_value_score_text }}
+          {% if item.value_reason_text %}
+            · {{ item.value_reason_text }}
+          {% endif %}
+        </p>
+      {% endif %}
+      {% if item.source_excerpt %}
+        <small>{{ item.source_excerpt }}</small>
+      {% endif %}
+      {% if item.source_url %}
+        <a href="{{ item.source_url }}" target="_blank" rel="noreferrer">打开原文</a>
+      {% endif %}
+    </div>
+    <div class="message-detail-grid">
+      <div>
+        <span>影响路径</span>
+        <strong>{{ item.impact_path }}</strong>
+      </div>
+      {% if item.mapping_note %}
+      <div>
+        <span>映射可信度</span>
+        <strong>{{ item.mapping_note }}</strong>
+      </div>
+      {% endif %}
+      <div>
+        <span>交易含义</span>
+        <strong>{{ item.trading_hint }}</strong>
+      </div>
+      <div>
+        <span>风险提示</span>
+        <strong>{{ item.risk_note }}</strong>
+      </div>
+    </div>
+    <div class="message-verify-list">
+      <strong>验证点</strong>
+      <ul>
+        {% for point in item.verification_points %}
+          <li>{{ point }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </details>
+</article>
+{%- endmacro %}
+
 <section id="research-brief" class="market-radar-v2-brief radar-summary-bar panel {{ brief.data_quality.tone if brief.data_quality else decision.tone }}">
   <div class="panel-head">
     <div>
@@ -537,100 +630,48 @@
     </div>
 
     {% if news_items %}
-      <div class="message-news-list">
-        {% for item in news_items %}
-        <article class="message-news-card {{ item.tone }}">
-          <div class="message-news-head">
-            <div>
-              <span class="message-grade">{{ item.grade }}</span>
-              <strong>{{ item.title }}</strong>
-            </div>
-            <b class="{{ 'market-up' if item.impact == 'positive' else 'market-down' if item.impact == 'negative' else '' }}">{{ item.impact_text }} {{ item.boost_text }}</b>
+      {% set message_positive_items = news_items|selectattr("impact", "equalto", "positive")|list %}
+      {% set message_negative_items = news_items|selectattr("impact", "equalto", "negative")|list %}
+      {% set message_neutral_items = news_items|rejectattr("impact", "equalto", "positive")|rejectattr("impact", "equalto", "negative")|list %}
+      <div class="message-news-columns">
+        <div class="message-news-column bullish">
+          <div class="message-news-column-head">
+            <strong>利多消息</strong>
+            <span>{{ message_positive_items|length }} 条</span>
           </div>
-          <div class="message-news-meta">
-            {% if item.source_time %}
-              <span class="message-source-time">发布 {{ item.source_time }}</span>
-            {% elif concept_news.news.source_date %}
-              <span class="message-source-time">采集 {{ concept_news.news.source_date|fmt_date }}</span>
-            {% endif %}
-            <span>{{ item.quality }}</span>
-            <span>强度 {{ item.strength_text }}</span>
-            <span>{{ item.duration }}</span>
-            <span>{{ item.sectors_text }}</span>
-            {% if item.mapping_confidence_text %}
-              <span>{{ item.mapping_confidence_text }}</span>
-            {% endif %}
+          {% if message_positive_items %}
+            <div class="message-news-list">
+              {% for item in message_positive_items %}{{ render_message_news_card(item, concept_news.news.source_date) }}{% endfor %}
+            </div>
+          {% else %}
+            <div class="empty-state soft">暂无利多消息。</div>
+          {% endif %}
+        </div>
+        <div class="message-news-column bearish">
+          <div class="message-news-column-head">
+            <strong>利空消息</strong>
+            <span>{{ message_negative_items|length }} 条</span>
           </div>
-          <p>{{ item.reason or item.why_selected }}</p>
-          <small>{{ item.why_selected }}</small>
-          <details class="message-detail">
-            <summary>查看详情</summary>
-            <div class="message-source-box">
-              <span>原始新闻</span>
-              <strong>{{ item.source_title or item.title }}</strong>
-              <p>
-                {% if item.source %}
-                  {{ item.source }}
-                {% else %}
-                  来源未记录
-                {% endif %}
-                {% if item.source_time %}
-                  · {{ item.source_time }}
-                {% endif %}
-                {% if item.source_providers_text %}
-                  · {{ item.source_providers_text }}
-                {% endif %}
-                {% if item.raw_source_count and item.raw_source_count > 1 %}
-                  · {{ item.raw_source_count }} 个来源合并
-                {% endif %}
-              </p>
-              {% if (item.news_value_score_text and item.news_value_score_text != '-') or item.value_reason_text %}
-                <p class="message-value-line">
-                  价值排序 {{ item.news_value_score_text }}
-                  {% if item.value_reason_text %}
-                    · {{ item.value_reason_text }}
-                  {% endif %}
-                </p>
-              {% endif %}
-              {% if item.source_excerpt %}
-                <small>{{ item.source_excerpt }}</small>
-              {% endif %}
-              {% if item.source_url %}
-                <a href="{{ item.source_url }}" target="_blank" rel="noreferrer">打开原文</a>
-              {% endif %}
+          {% if message_negative_items %}
+            <div class="message-news-list">
+              {% for item in message_negative_items %}{{ render_message_news_card(item, concept_news.news.source_date) }}{% endfor %}
             </div>
-            <div class="message-detail-grid">
-              <div>
-                <span>影响路径</span>
-                <strong>{{ item.impact_path }}</strong>
-              </div>
-              {% if item.mapping_note %}
-              <div>
-                <span>映射可信度</span>
-                <strong>{{ item.mapping_note }}</strong>
-              </div>
-              {% endif %}
-              <div>
-                <span>交易含义</span>
-                <strong>{{ item.trading_hint }}</strong>
-              </div>
-              <div>
-                <span>风险提示</span>
-                <strong>{{ item.risk_note }}</strong>
-              </div>
-            </div>
-            <div class="message-verify-list">
-              <strong>验证点</strong>
-              <ul>
-                {% for point in item.verification_points %}
-                  <li>{{ point }}</li>
-                {% endfor %}
-              </ul>
-            </div>
-          </details>
-        </article>
-        {% endfor %}
+          {% else %}
+            <div class="empty-state soft">暂无利空消息。</div>
+          {% endif %}
+        </div>
       </div>
+      {% if message_neutral_items %}
+        <div class="message-neutral-list">
+          <div class="message-news-column-head">
+            <strong>待判定 / 来源核验</strong>
+            <span>{{ message_neutral_items|length }} 条</span>
+          </div>
+          <div class="message-news-list compact">
+            {% for item in message_neutral_items %}{{ render_message_news_card(item, concept_news.news.source_date) }}{% endfor %}
+          </div>
+        </div>
+      {% endif %}
     {% else %}
       <div class="empty-state soft">{{ concept_news.news.message }}</div>
     {% endif %}
