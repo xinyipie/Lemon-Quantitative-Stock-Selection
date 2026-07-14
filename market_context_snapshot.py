@@ -56,6 +56,18 @@ def write_market_context_snapshot(
     ai_news = news_analyzer.ai_parse_news_to_sectors(ai_titles, ai_parser, max_titles=30) if ai_titles else []
     sector_boosts = news_analyzer.build_sector_boosts(ai_news)
     sentiment = news_analyzer.analyze_news_sentiment(news_df, ai_news) if news_df is not None else {}
+    if not ai_titles:
+        ai_status = "no_news"
+        ai_message = "没有可供 AI 解读的原始新闻。"
+    elif ai_news:
+        ai_status = "ok"
+        ai_message = "AI 新闻行业映射完成。"
+    elif call_ai_api_fn is None and not config.AI_CONFIG.get("api_key"):
+        ai_status = "missing_api_key"
+        ai_message = "未配置 DEEPSEEK_API_KEY，展示原始新闻但不参与板块加分。"
+    else:
+        ai_status = "empty_result"
+        ai_message = "AI 未返回有效行业映射，展示原始新闻但不参与板块加分。"
     news_payload = {
         "date": date_text,
         "titles": titles,
@@ -65,6 +77,8 @@ def write_market_context_snapshot(
         "items": ai_news,
         "boosts": sector_boosts,
         "sentiment": sentiment,
+        "ai_status": ai_status,
+        "ai_message": ai_message,
     }
     _write_json(cache_path / f"news_sector_{date_text}.json", news_payload)
     theme_filter = _get_or_create_theme_filter(

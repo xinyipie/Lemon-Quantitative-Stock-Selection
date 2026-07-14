@@ -1424,6 +1424,51 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(item["mapping_confidence_text"], "泛化映射")
         self.assertIn("broad", item["mapping_note"])
 
+    def test_raw_news_remains_visible_when_ai_mapping_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260714.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260714",
+                        "raw_news_total": 1,
+                        "raw_news": [
+                            {
+                                "title": "AI infrastructure project approved",
+                                "source": "test source",
+                                "provider": "test",
+                                "publish_time": "2026-07-14 09:00:00",
+                                "url": "https://example.com/news/ai",
+                                "content_excerpt": "The project entered construction.",
+                                "news_value_score": 76.0,
+                                "value_reason_text": "policy and industry",
+                            }
+                        ],
+                        "items": [],
+                        "boosts": {},
+                        "ai_status": "missing_api_key",
+                        "ai_message": "AI mapping unavailable; raw news is visible but does not affect sector scores.",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = build_concept_news_radar(
+                signal_db=Path(tmpdir) / "missing.db",
+                cache_dir=cache_dir,
+                today="20260714",
+            )
+
+        self.assertEqual(radar["news"]["source_date"], "20260714")
+        self.assertEqual(len(radar["news"]["items"]), 1)
+        self.assertEqual(radar["news"]["items"][0]["title"], "AI infrastructure project approved")
+        self.assertEqual(radar["news"]["items"][0]["impact"], "neutral")
+        self.assertEqual(radar["news"]["positive"], [])
+        self.assertEqual(radar["news"]["negative"], [])
+        self.assertIn("does not affect sector scores", radar["news"]["message"])
+
     def test_strategy_overlap_empty_db_returns_stable_bucket_schema(self):
         overlap = build_strategy_overlap(
             signal_db=Path("missing_signal_pool_for_test.db"),

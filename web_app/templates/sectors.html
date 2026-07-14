@@ -525,7 +525,7 @@
               <span class="message-grade">{{ item.grade }}</span>
               <strong>{{ item.title }}</strong>
             </div>
-            <b class="{{ 'market-up' if item.impact == 'positive' else 'market-down' }}">{{ item.impact_text }} {{ item.boost_text }}</b>
+            <b class="{{ 'market-up' if item.impact == 'positive' else 'market-down' if item.impact == 'negative' else '' }}">{{ item.impact_text }} {{ item.boost_text }}</b>
           </div>
           <div class="message-news-meta">
             {% if item.source_time %}

@@ -264,5 +264,38 @@ class MarketContextSnapshotTest(unittest.TestCase):
         self.assertNotIn("高价值新闻30", ai_prompts[0])
 
 
+    def test_snapshot_records_missing_ai_key_without_dropping_raw_news(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            raw_news = [
+                {
+                    "title": "AI infrastructure project approved",
+                    "source": "test source",
+                    "provider": "test",
+                    "publish_time": "2026-07-14 09:00:00",
+                    "url": "https://example.com/news/ai",
+                    "content_excerpt": "The project entered construction.",
+                    "news_value_score": 76.0,
+                    "value_reason_text": "policy and industry",
+                }
+            ]
+
+            with patch("market_context_snapshot.fetch_real_concept_heat", return_value=[]), patch(
+                "market_context_snapshot.news_analyzer.get_hot_concepts", return_value=[]
+            ), patch("market_context_snapshot.fetch_market_news", return_value=raw_news), patch.dict(
+                "market_context_snapshot.config.AI_CONFIG", {"api_key": ""}
+            ):
+                write_market_context_snapshot(cache_dir=cache_dir, snapshot_date="20260714")
+
+            payload = json.loads((cache_dir / "news_sector_20260714.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["raw_news_total"], 1)
+        self.assertEqual(payload["raw_news"][0]["title"], "AI infrastructure project approved")
+        self.assertEqual(payload["items"], [])
+        self.assertEqual(payload["boosts"], {})
+        self.assertEqual(payload["ai_status"], "missing_api_key")
+        self.assertIn("DEEPSEEK_API_KEY", payload["ai_message"])
+
+
 if __name__ == "__main__":
     unittest.main()

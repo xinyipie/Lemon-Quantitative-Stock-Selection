@@ -90,7 +90,7 @@ def build_concept_news_radar(
     """Build cached concept heat and news/concept impact summaries."""
     news_cache = _load_news_sector_cache(cache_dir=cache_dir, today=today, limit=limit)
     signal_news = _summarize_signal_news_impacts(signal_db=signal_db, limit=limit)
-    news = news_cache if news_cache.get("positive") or news_cache.get("negative") else signal_news
+    news = news_cache if news_cache.get("positive") or news_cache.get("negative") or news_cache.get("items") else signal_news
     concepts = _load_concept_heat(cache_dir=cache_dir, today=today, limit=limit)
     if not concepts.get("items"):
         concepts = _concepts_from_news_impacts(news, limit=limit) or concepts
@@ -676,9 +676,9 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
         except (OSError, json.JSONDecodeError):
             continue
         positive, negative = _news_payload_to_groups(payload, limit=limit)
-        if positive or negative:
+        items = _decorate_news_items(payload, limit=limit)
+        if positive or negative or items:
             source_date = str(payload.get("date") or path.stem.replace("news_sector_", ""))
-            items = _decorate_news_items(payload, limit=limit)
             selection = _build_news_selection_summary(payload, positive, negative, items)
             events = build_events_from_news_payload(payload, limit=max(limit * 2, limit))
             return {
@@ -690,7 +690,7 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
                 "events": events,
                 "event_summary": build_event_summary(events),
                 "selection": selection,
-                "message": "",
+                "message": str(payload.get("ai_message") or "") if not positive and not negative else "",
             }
     return {
         "source_date": None,
@@ -757,6 +757,8 @@ def _news_payload_to_groups(payload: dict, limit: int = 8) -> tuple[list[dict], 
 
 def _decorate_news_items(payload: dict, limit: int = 8) -> list[dict]:
     raw_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    if not raw_items:
+        return _decorate_raw_news_items(payload, limit=limit)
     boosts = payload.get("boosts") if isinstance(payload.get("boosts"), dict) else {}
     raw_news_index = _raw_news_index(payload)
     merged: dict[str, dict] = {}
@@ -864,6 +866,62 @@ def _decorate_news_items(payload: dict, limit: int = 8) -> list[dict]:
         reverse=True,
     )
     return decorated[:limit]
+
+
+def _decorate_raw_news_items(payload: dict, limit: int = 8) -> list[dict]:
+    raw_news = payload.get("raw_news") if isinstance(payload.get("raw_news"), list) else []
+    ranked = sorted(
+        (item for item in raw_news if isinstance(item, dict) and str(item.get("title") or "").strip()),
+        key=lambda item: (
+            float(item.get("news_value_score") or 0),
+            int(item.get("source_count") or 1),
+            str(item.get("publish_time") or ""),
+        ),
+        reverse=True,
+    )
+    message = str(payload.get("ai_message") or "AI 行业映射不可用，原始新闻不参与板块加分。")
+    decorated = []
+    for item in ranked[: max(0, int(limit))]:
+        score = float(item.get("news_value_score") or 0)
+        grade = "B" if score >= 50 else "C" if score >= 30 else "D"
+        reason = str(item.get("value_reason_text") or "原始新闻按信息价值排序展示。")
+        decorated.append(
+            {
+                "title": str(item.get("title") or "").strip()[:120],
+                "quality": "原始新闻",
+                "impact": "neutral",
+                "impact_text": "未映射",
+                "tone": "neutral",
+                "strength": 0,
+                "strength_text": "未映射",
+                "duration": "待研判",
+                "sectors": [],
+                "sectors_text": "未进行 AI 行业映射",
+                "mapping_confidence": "unmapped",
+                "mapping_confidence_text": "未映射",
+                "mapping_note": message,
+                "reason": reason,
+                "grade": grade,
+                "boost_total": 0.0,
+                "boost_text": "+0.0",
+                "impact_path": "原始新闻 → 待人工研判",
+                "trading_hint": "仅作信息浏览，不参与板块加分",
+                "verification_points": ["核对原文与发布时间", "等待行业映射恢复后再评估影响"],
+                "risk_note": "未完成行业映射，不可单独作为选股依据。",
+                "why_selected": reason,
+                "source_title": str(item.get("title") or "").strip(),
+                "source": str(item.get("source") or item.get("provider") or ""),
+                "source_url": str(item.get("url") or ""),
+                "source_time": str(item.get("publish_time") or ""),
+                "source_excerpt": str(item.get("content_excerpt") or ""),
+                "source_providers_text": _source_providers_text(item),
+                "raw_source_count": int(item.get("source_count") or 1),
+                "news_value_score": score,
+                "news_value_score_text": _value_score_text(score),
+                "value_reason_text": reason,
+            }
+        )
+    return decorated
 
 
 def _news_mapping_confidence(sectors: list[str], quality: str, reason: str) -> tuple[str, str]:
