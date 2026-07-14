@@ -52,6 +52,26 @@ class WebAppTest(unittest.TestCase):
         self.assertIn(".content {", response.text)
         self.assertIn("max-width: none;", response.text.split(".content {", 1)[1].split("}", 1)[0])
 
+    def test_global_usability_redesign_covers_every_page(self):
+        css_response = self.client.get("/static/app.css")
+        page_response = self.client.get("/")
+
+        self.assertEqual(css_response.status_code, 200)
+        self.assertEqual(page_response.status_code, 200)
+        self.assertIn("ALL-PAGE USABILITY REDESIGN", css_response.text)
+        for page_class in (
+            "page-dashboard",
+            "page-signals",
+            "page-dragon",
+            "page-longterm",
+            "page-sectors",
+            "page-stock",
+            "page-db",
+            "page-explanation",
+        ):
+            self.assertIn(f".{page_class}", css_response.text)
+        self.assertIn("20260714-usability-redesign", page_response.text)
+
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
             start_update.return_value = {"state": "running", "started": True}

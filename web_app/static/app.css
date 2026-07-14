@@ -3230,3 +3230,267 @@ code {
 @media (max-width: 460px) {
   .status-strip { grid-template-columns: 1fr; }
 }
+
+/* ALL-PAGE USABILITY REDESIGN */
+
+body[class*="page-"] .content > * {
+  min-width: 0;
+}
+
+body[class*="page-"] .panel-head h2,
+body[class*="page-"] .panel-title-row h2 {
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+body[class*="page-"] .panel-head p,
+body[class*="page-"] .page-header p,
+body[class*="page-"] .terminal-header p {
+  line-height: 1.6;
+}
+
+body[class*="page-"] .panel,
+body[class*="page-"] .metric,
+body[class*="page-"] .status-cell,
+body[class*="page-"] .stock-card,
+body[class*="page-"] .longterm-state-card {
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+body[class*="page-"] .panel:hover,
+body[class*="page-"] .stock-card:hover,
+body[class*="page-"] .longterm-state-card:hover {
+  border-color: #c7d2df;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .06);
+}
+
+body[class*="page-"] .dense-table tbody tr:nth-child(even) {
+  background: rgba(248, 250, 252, .72);
+}
+
+body[class*="page-"] .dense-table tbody tr:hover {
+  background: #edf4ff;
+}
+
+.page-dashboard .dashboard-primary-decision,
+.page-signals .primary-metric,
+.page-dragon .dragon-display-grid .priority,
+.page-longterm .longterm-state-card,
+.page-sectors .market-radar-v2-brief,
+.page-stock .stock-card,
+.page-db .attention-panel,
+.page-explanation .explain-hero,
+.page-signals:has(.explain-hero) .explain-hero {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .055);
+}
+
+.page-signals .filter-bar,
+.page-longterm .compact-filter {
+  position: sticky;
+  top: 8px;
+  z-index: 7;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .07);
+  backdrop-filter: blur(10px);
+}
+
+.page-signals .review-table th:first-child,
+.page-signals .review-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  min-width: 96px;
+  background: #fff;
+  box-shadow: 1px 0 0 var(--line);
+}
+
+.page-signals .review-table th:first-child {
+  z-index: 5;
+  background: var(--surface-2);
+}
+
+.page-sectors .event-decision-card,
+.page-sectors .message-news-card,
+.page-dragon .dragon-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 240px;
+}
+
+.page-stock .stock-trend-panel,
+.page-stock .strategy-link-panel,
+.page-explanation .explain-grid,
+.page-signals:has(.explain-hero) .explain-grid {
+  scroll-margin-top: 76px;
+}
+
+@media (min-width: 1680px) {
+  .content {
+    padding: 24px clamp(32px, 2.4vw, 56px) 60px;
+  }
+
+  .page-dashboard .content,
+  .page-longterm .content,
+  .page-stock .content,
+  .page-db .content {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 14px;
+    align-content: start;
+  }
+
+  .page-dashboard .content > *,
+  .page-longterm .content > *,
+  .page-stock .content > *,
+  .page-db .content > * {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+
+  .page-dashboard .status-strip {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .page-dashboard .dashboard-primary-decision {
+    grid-template-columns: minmax(0, 1.55fr) minmax(420px, .75fr);
+  }
+
+  .page-dashboard .update-panel {
+    grid-column: span 8;
+  }
+
+  .page-dashboard .update-panel + .notice-band {
+    grid-column: span 4;
+    align-content: center;
+    margin: 0;
+  }
+
+  .page-dashboard .ai-brief-panel {
+    grid-column: span 8;
+  }
+
+  .page-dashboard .ai-brief-panel + .panel {
+    grid-column: span 4;
+  }
+
+  .page-dashboard .workbench-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(300px, .55fr);
+  }
+
+  .page-signals .status-strip {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .page-signals .metric-grid.short-review-metrics {
+    grid-template-columns: repeat(2, minmax(240px, 1.25fr)) repeat(3, minmax(160px, .75fr));
+  }
+
+  .page-signals .review-table {
+    min-width: 1480px;
+  }
+
+  .page-dragon .dragon-display-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .page-dragon .dragon-metrics {
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+  }
+
+  .page-dragon .dragon-card-list {
+    gap: 12px;
+  }
+
+  .page-longterm .status-strip {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .page-longterm .longterm-state-card {
+    grid-column: span 8;
+  }
+
+  .page-longterm .longterm-state-card + .compact-attention {
+    grid-column: span 4;
+  }
+
+  .page-longterm #lifecycle,
+  .page-longterm #history-audit {
+    grid-column: span 6;
+  }
+
+  .page-longterm .funnel-grid {
+    grid-template-columns: repeat(5, minmax(170px, 1fr));
+  }
+
+  .page-sectors .event-reader-columns,
+  .page-sectors .message-news-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .page-sectors .market-context-grid.message-layout {
+    grid-template-columns: minmax(0, 1.45fr) minmax(360px, .55fr);
+    align-items: start;
+  }
+
+  .page-sectors .research-grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(420px, .75fr);
+  }
+
+  .page-stock .stock-trend-panel {
+    grid-column: span 9;
+  }
+
+  .page-stock .stock-trend-panel + .metric-grid {
+    grid-column: span 3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: stretch;
+    margin: 0;
+  }
+
+  .page-stock .stock-trend-panel + .metric-grid .metric {
+    min-height: 0;
+  }
+
+  .page-stock .diagnostic-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-db .metric-grid {
+    grid-column: span 4;
+    grid-template-columns: 1fr;
+    margin: 0;
+  }
+
+  .page-db .attention-panel {
+    grid-column: span 8;
+  }
+
+  .page-explanation .explain-grid,
+  .page-signals:has(.explain-hero) .explain-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .page-signals .filter-bar,
+  .page-longterm .compact-filter {
+    position: static;
+  }
+
+  .page-signals .review-table th:first-child,
+  .page-signals .review-table td:first-child {
+    position: static;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[class*="page-"] .panel,
+  body[class*="page-"] .metric,
+  body[class*="page-"] .status-cell,
+  body[class*="page-"] .stock-card,
+  body[class*="page-"] .longterm-state-card {
+    transition: none;
+  }
+}
