@@ -45,6 +45,13 @@ class WebAppTest(unittest.TestCase):
         self.assertIn('class="mobile-nav-toggle"', response.text)
         self.assertIn('data-confirm-message=', response.text)
 
+    def test_global_content_uses_all_available_width(self):
+        response = self.client.get("/static/app.css")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(".content {", response.text)
+        self.assertIn("max-width: none;", response.text.split(".content {", 1)[1].split("}", 1)[0])
+
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
             start_update.return_value = {"state": "running", "started": True}
