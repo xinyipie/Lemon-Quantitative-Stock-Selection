@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260714-news-reader-split-v2">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260714-global-ux-pass">
 </head>
-<body>
+<body class="page-{{ active_nav or 'default' }}">
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
   <aside class="sidebar">
     <div class="sidebar-top">
       <div class="brand">
@@ -29,13 +30,15 @@
     </nav>
     <div class="sidebar-note">只读研究看板，不包含交易执行功能。</div>
   </aside>
-  <main class="content {{ 'market-radar-content' if active_nav == 'sectors' else '' }}">
+  <main id="main-content" class="content {{ 'market-radar-content' if active_nav == 'sectors' else '' }}">
     {% block content %}{% endblock %}
   </main>
   <script>
   (() => {
     const navToggle = document.querySelector(".mobile-nav-toggle");
     const primaryNavigation = document.querySelector("#primary-navigation");
+    const activeNavigationLink = primaryNavigation && primaryNavigation.querySelector("a.active");
+    if (activeNavigationLink) activeNavigationLink.setAttribute("aria-current", "page");
     if (navToggle && primaryNavigation) {
       navToggle.addEventListener("click", () => {
         const expanded = navToggle.getAttribute("aria-expanded") === "true";
