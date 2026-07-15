@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 from argparse import Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,6 +11,7 @@ from daily_web_update import (
     latest_history_trade_date,
     latest_short_backtest_date,
     next_calendar_day,
+    record_short_backtest_coverage,
     run_update,
 )
 
@@ -43,6 +44,14 @@ class DailyWebUpdateTest(unittest.TestCase):
             db_path.touch()
 
             self.assertIsNone(latest_short_backtest_date(db_path))
+
+    def test_zero_signal_review_still_advances_backtest_coverage(self):
+        with TemporaryDirectory() as tmp:
+            signal_db = Path(tmp) / "signals.db"
+
+            record_short_backtest_coverage(signal_db, "20260714")
+
+            self.assertEqual(latest_short_backtest_date(signal_db), "20260714")
 
     def test_run_update_refreshes_market_context_before_main(self):
         calls = []

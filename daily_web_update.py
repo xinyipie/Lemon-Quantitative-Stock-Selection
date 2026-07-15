@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from signal_store import SignalStore
+
 
 DEFAULT_SIGNAL_DB = Path("data") / "stock_signals.db"
 DEFAULT_HISTORY_DB = Path("data") / "stock_history.db"
@@ -103,11 +105,10 @@ def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | Non
     try:
         row = conn.execute(
             """
-            select max(p.trade_date)
-            from signal_pool p
-            join signal_runs r on r.run_id = p.run_id
-            where p.mode = 'short'
-              and p.profile = ?
+            select max(r.trade_date)
+            from signal_runs r
+            where r.mode = 'short'
+              and r.profile = ?
               and r.source = 'backtest_ic_short'
             """,
             (SHORT_PROFILE,),
@@ -119,6 +120,21 @@ def latest_short_backtest_date(signal_db: Path = DEFAULT_SIGNAL_DB) -> str | Non
         raise
     finally:
         conn.close()
+
+
+def record_short_backtest_coverage(signal_db: Path, trade_date: str) -> int:
+    store = SignalStore(signal_db)
+    try:
+        return store.record_run(
+            trade_date=trade_date,
+            mode="short",
+            profile=SHORT_PROFILE,
+            source="backtest_ic_short",
+            label=f"coverage:web_short_v9_{trade_date}",
+            run_date=trade_date,
+        )
+    finally:
+        store.close()
 
 
 def refresh_market_radar_snapshot(
@@ -350,6 +366,8 @@ def run_update(args: argparse.Namespace) -> None:
                         ],
                         args.dry_run,
                     )
+                record_short_backtest_coverage(args.signal_db, effective_end)
+                print(f"短线复盘计算覆盖已记录到 {effective_end}。")
         else:
             print(f"短线复盘已到 {effective_end}，跳过回测回填。")
 
