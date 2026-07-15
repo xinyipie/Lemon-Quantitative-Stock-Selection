@@ -146,9 +146,21 @@ def dashboard(request: Request):
         profile="short_v9_final",
         mode="short",
     )
+    backtest_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        mode="short",
+        source="backtest_ic_short",
+        profile="short_v9_final",
+        limit=1,
+    )
+    latest_backtest_run = backtest_runs[0] if backtest_runs else None
     longterm_pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
     longterm_runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=8)
-    signal_summary = build_signal_summary(live_signals + backtest_signals, longterm_pool)
+    signal_summary = build_signal_summary(
+        live_signals + backtest_signals,
+        longterm_pool,
+        latest_backtest_run=latest_backtest_run,
+    )
     longterm_buckets = split_longterm_pool(longterm_pool)
     longterm_pool_status = build_longterm_pool_status(longterm_pool, longterm_runs)
     decision = build_dashboard_decision(latest_live_short_run, live_signals, longterm_pool, backtest_signals)
@@ -229,8 +241,20 @@ def _read_decorated_update_status() -> dict:
         profile="short_v9_final",
         mode="short",
     )
+    backtest_runs = get_signal_runs(
+        DEFAULT_SIGNAL_DB_PATH,
+        mode="short",
+        source="backtest_ic_short",
+        profile="short_v9_final",
+        limit=1,
+    )
+    latest_backtest_run = backtest_runs[0] if backtest_runs else None
     longterm_pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
-    signal_summary = build_signal_summary(backtest_signals, longterm_pool)
+    signal_summary = build_signal_summary(
+        backtest_signals,
+        longterm_pool,
+        latest_backtest_run=latest_backtest_run,
+    )
     freshness = build_data_freshness(status, latest_live_short_run, signal_summary)
     return decorate_update_status_with_freshness(update_status, freshness)
 

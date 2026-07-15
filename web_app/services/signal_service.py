@@ -675,16 +675,22 @@ def _ensure_longterm_audit_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def build_signal_summary(recent_signals: list[dict], longterm_pool: list[dict]) -> dict:
+def build_signal_summary(
+    recent_signals: list[dict],
+    longterm_pool: list[dict],
+    latest_backtest_run: dict | None = None,
+) -> dict:
     short_signals = [item for item in recent_signals if item.get("mode") == "short"]
     live_short = [item for item in short_signals if item.get("source") != "backtest_ic_short"]
     backtest_short = [item for item in short_signals if item.get("source") == "backtest_ic_short"]
     longterm_buckets = split_longterm_pool(longterm_pool)
     latest_signal_date = live_short[0]["trade_date"] if live_short else None
     latest_backtest_date = backtest_short[0]["trade_date"] if backtest_short else None
+    backtest_coverage_date = str((latest_backtest_run or {}).get("trade_date") or "") or latest_backtest_date
     return {
         "latest_signal_date": latest_signal_date,
         "latest_backtest_date": latest_backtest_date,
+        "backtest_coverage_date": backtest_coverage_date,
         "short_count": len(short_signals),
         "live_short_count": len(live_short),
         "backtest_short_count": len(backtest_short),
@@ -706,7 +712,8 @@ def build_data_freshness(
     """Summarize whether the dashboard data sources are in sync."""
     history_date = str(status.get("latest_trade_date") or "") or None
     live_date = str((latest_live_short_run or {}).get("trade_date") or "") or None
-    backtest_date = str(signal_summary.get("latest_backtest_date") or "") or None
+    backtest_sample_date = str(signal_summary.get("latest_backtest_date") or "") or None
+    backtest_date = str(signal_summary.get("backtest_coverage_date") or backtest_sample_date or "") or None
     live_lag_days = _days_between(history_date, live_date)
     history_lag_days = _days_between(live_date, history_date)
     backtest_lag_days = _days_between(history_date, backtest_date)
@@ -753,6 +760,7 @@ def build_data_freshness(
         "history_date": history_date,
         "live_date": live_date,
         "backtest_date": backtest_date,
+        "backtest_sample_date": backtest_sample_date,
         "live_lag_days": live_lag_days,
         "history_lag_days": history_lag_days,
         "backtest_lag_days": backtest_lag_days,

@@ -16,6 +16,7 @@ from web_app.services.signal_service import (
     build_longterm_pool_status,
     build_longterm_run_funnel,
     build_observation_candidate_card,
+    build_signal_summary,
     build_strong_recommendation_card,
     get_active_longterm_pool,
     get_longterm_audit_samples,
@@ -653,6 +654,33 @@ class WebServicesTest(unittest.TestCase):
         self.assertIn("今日实盘记录已更新", freshness["notes"][0])
         self.assertTrue(any("事后复盘" in item for item in freshness["notes"]))
         self.assertFalse(freshness["warnings"])
+
+    def test_backtest_coverage_uses_latest_completed_run_when_no_signal_was_selected(self):
+        summary = build_signal_summary(
+            recent_signals=[
+                {
+                    "mode": "short",
+                    "source": "backtest_ic_short",
+                    "trade_date": "20260703",
+                }
+            ],
+            longterm_pool=[],
+            latest_backtest_run={"trade_date": "20260714", "signal_count": 0},
+        )
+
+        self.assertEqual(summary["backtest_coverage_date"], "20260714")
+        self.assertEqual(summary["latest_backtest_date"], "20260703")
+
+        freshness = build_data_freshness(
+            status={"latest_trade_date": "20260714"},
+            latest_live_short_run={"trade_date": "20260714"},
+            signal_summary=summary,
+            now=datetime(2026, 7, 15),
+        )
+
+        self.assertEqual(freshness["backtest_date"], "20260714")
+        self.assertEqual(freshness["backtest_sample_date"], "20260703")
+        self.assertEqual(freshness["backtest_lag_days"], 0)
 
     def test_data_freshness_warns_when_live_signal_is_ahead_of_history_db(self):
         freshness = build_data_freshness(
