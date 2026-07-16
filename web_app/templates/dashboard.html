@@ -28,9 +28,9 @@
   <div class="status-cell"><span>行情有效日</span><strong>{{ status.latest_trade_date|fmt_date }}</strong></div>
   <div class="status-cell"><span>最近实盘信号日</span><strong>{{ latest_live_short_run.trade_date|fmt_date if latest_live_short_run else 'NA' }}</strong></div>
   <div class="status-cell">
-    <span>复盘计算截至</span>
+    <span>已复盘至</span>
     <strong>{{ signal_summary.backtest_coverage_date|fmt_date }}</strong>
-    <small>最近有效样本 {{ signal_summary.latest_backtest_date|fmt_date }}</small>
+    <small>最近一次有股票入选：{{ signal_summary.latest_backtest_date|fmt_date }}</small>
   </div>
   <div class="status-cell"><span>数据状态</span><strong class="{{ freshness.tone if freshness else '' }}">{{ freshness.status_label if freshness else 'NA' }}</strong></div>
   <div class="status-cell"><span>长线 Elite / Watch</span><strong>{{ signal_summary.longterm_elite }} / {{ signal_summary.longterm_watch }}</strong></div>
