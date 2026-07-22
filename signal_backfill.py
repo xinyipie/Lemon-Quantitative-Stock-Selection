@@ -185,10 +185,19 @@ def _get_or_create_run(
 ) -> int:
     existing = conn.execute(
         """
-        select run_id from signal_runs
-        where trade_date = ? and mode = 'short' and profile = ? and source = ? and label = ?
+        select r.run_id
+        from signal_runs r
+        where r.trade_date = ?
+          and r.mode = 'short'
+          and r.profile = ?
+          and r.source = ?
+          and exists (
+              select 1 from signal_pool p where p.run_id = r.run_id
+          )
+        order by r.run_id desc
+        limit 1
         """,
-        (trade_date, profile, source, label),
+        (trade_date, profile, source),
     ).fetchone()
     if existing:
         return int(existing["run_id"])

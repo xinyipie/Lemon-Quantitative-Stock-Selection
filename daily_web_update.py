@@ -415,8 +415,12 @@ def run_update(args: argparse.Namespace) -> None:
 
 def _default_short_start(signal_db: Path, effective_end: str) -> str:
     latest = latest_short_backtest_date(signal_db)
+    rolling_start = (
+        datetime.strptime(normalize_date(effective_end), "%Y%m%d") - timedelta(days=30)
+    ).strftime("%Y%m%d")
     if latest:
-        return next_calendar_day(latest)
+        # 全量更新必须回看近期信号，否则首次只观察到1至4天的样本永远无法补齐5日收益。
+        return min(next_calendar_day(latest), rolling_start)
     return f"{effective_end[:4]}0101"
 
 
