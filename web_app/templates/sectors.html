@@ -260,6 +260,18 @@
     {% set background_rows = trade_groups.background or [] %}
     {% set source_gap_rows = trade_groups.source_gaps or event_groups.unverified or [] %}
     {% set readable_events = event_groups.all or (catalyst_rows + risk_rows + source_gap_rows + background_rows) or brief.event_watchlist or [] %}
+    {% set reading_positive_rows = [] %}
+    {% set reading_negative_rows = [] %}
+    {% set reading_mixed_rows = [] %}
+    {% for event in readable_events %}
+      {% if event.impact == "positive" %}
+        {% set _ = reading_positive_rows.append(event) %}
+      {% elif event.impact == "negative" %}
+        {% set _ = reading_negative_rows.append(event) %}
+      {% else %}
+        {% set _ = reading_mixed_rows.append(event) %}
+      {% endif %}
+    {% endfor %}
     <div class="event-filter-tabs event-reader-tabs">
       <a href="#event-all">全部事件 <b>{{ readable_events|length }}</b></a>
       <a href="#event-catalysts">今日新增催化 <b>{{ catalyst_rows|length }}</b></a>
@@ -280,31 +292,42 @@
         <div class="event-reader-columns">
           <div class="event-reader-column bullish">
             <div class="event-reader-column-head">
-              <strong>利多 / 催化</strong>
-              <span>{{ catalyst_rows|length }} 条</span>
+              <strong>利多方向</strong>
+              <span>{{ reading_positive_rows|length }} 条</span>
             </div>
-            {% if catalyst_rows %}
+            {% if reading_positive_rows %}
               <div class="event-decision-list event-reader-list">
-                {% for event in catalyst_rows[:6] %}{{ render_event_card(event) }}{% endfor %}
+                {% for event in reading_positive_rows[:8] %}{{ render_event_card(event) }}{% endfor %}
               </div>
             {% else %}
-              <div class="empty-state soft">暂无可作为今日催化的消息。</div>
+              <div class="empty-state soft">暂无利多方向消息。</div>
             {% endif %}
           </div>
           <div class="event-reader-column bearish">
             <div class="event-reader-column-head">
-              <strong>利空 / 风险</strong>
-              <span>{{ risk_rows|length }} 条</span>
+              <strong>利空方向</strong>
+              <span>{{ reading_negative_rows|length }} 条</span>
             </div>
-            {% if risk_rows %}
+            {% if reading_negative_rows %}
               <div class="event-decision-list event-reader-list">
-                {% for event in risk_rows[:6] %}{{ render_event_card(event) }}{% endfor %}
+                {% for event in reading_negative_rows[:8] %}{{ render_event_card(event) }}{% endfor %}
               </div>
             {% else %}
-              <div class="empty-state soft">暂无需要阻断的新鲜风险。</div>
+              <div class="empty-state soft">暂无利空方向消息。</div>
             {% endif %}
           </div>
         </div>
+        {% if reading_mixed_rows %}
+          <div class="event-reader-mixed">
+            <div class="event-reader-column-head">
+              <strong>中性 / 冲突</strong>
+              <span>{{ reading_mixed_rows|length }} 条</span>
+            </div>
+            <div class="event-decision-list event-reader-list">
+              {% for event in reading_mixed_rows[:6] %}{{ render_event_card(event) }}{% endfor %}
+            </div>
+          </div>
+        {% endif %}
       </div>
 
       <aside class="event-reader-sidebar" aria-label="关键事件摘要">
