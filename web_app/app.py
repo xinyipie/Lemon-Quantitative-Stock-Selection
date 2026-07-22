@@ -598,8 +598,80 @@ def refresh_signal_explanation(trade_date: str, ts_code: str):
     return RedirectResponse(url=f"/explain/signal/{trade_date}/{ts_code}", status_code=303)
 
 
+def _build_longterm_result_context(samples: list[dict]) -> dict:
+    def pct_text(value) -> str:
+        return f"{float(value):+.2f}%" if value is not None else "待观察"
+
+    def pct_tone(value) -> str:
+        if value is None:
+            return "muted"
+        return "market-up" if float(value) > 0 else "market-down" if float(value) < 0 else "muted"
+
+    completed = []
+    current = []
+    for item in samples:
+        ret_80d = item.get("ret_80d")
+        excess = item.get("excess_ret_80d")
+        benchmark = float(ret_80d) - float(excess) if ret_80d is not None and excess is not None else None
+        item["benchmark_ret_80d"] = benchmark
+        item["benchmark_ret_80d_text"] = pct_text(benchmark)
+        item["benchmark_ret_80d_tone"] = pct_tone(benchmark)
+        item["return_path"] = [
+            {"label": "10日", "text": item.get("ret_10d_text") or "待观察", "tone": item.get("ret_10d_tone") or "muted"},
+            {"label": "40日", "text": item.get("ret_40d_text") or "待观察", "tone": item.get("ret_40d_tone") or "muted"},
+            {"label": "80日", "text": item.get("ret_80d_text") or "待观察", "tone": item.get("ret_80d_tone") or "muted"},
+        ]
+        if ret_80d is None:
+            item["result_label"] = "观察中"
+            item["result_tone"] = "muted"
+            current.append(item)
+            continue
+        mae = item.get("mae_80d")
+        if mae is not None and float(mae) <= -20:
+            item["result_label"] = "高回撤"
+            item["result_tone"] = "bad"
+        elif excess is not None and float(excess) >= 10 and float(ret_80d) > 0:
+            item["result_label"] = "显著跑赢"
+            item["result_tone"] = "ok"
+        elif excess is not None and float(excess) > 0:
+            item["result_label"] = "跑赢基准"
+            item["result_tone"] = "ok"
+        elif float(ret_80d) > 0:
+            item["result_label"] = "正收益但跑输"
+            item["result_tone"] = "warn"
+        else:
+            item["result_label"] = "亏损 / 跑输"
+            item["result_tone"] = "bad"
+        completed.append(item)
+
+    def average(field: str):
+        values = [float(item[field]) for item in completed if item.get(field) is not None]
+        return sum(values) / len(values) if values else None
+
+    winners = [item for item in completed if float(item.get("ret_80d") or 0) > 0]
+    outperformers = [item for item in completed if float(item.get("excess_ret_80d") or 0) > 0]
+    risk_rows = [item for item in completed if item.get("mae_80d") is not None and float(item["mae_80d"]) <= -15]
+    best = max(completed, key=lambda item: float(item.get("ret_80d") or 0), default=None)
+    worst = min(completed, key=lambda item: float(item.get("ret_80d") or 0), default=None)
+    count = len(completed)
+    return {
+        "completed": completed,
+        "current": current,
+        "completed_count": count,
+        "current_count": len(current),
+        "avg_ret_text": pct_text(average("ret_80d")),
+        "avg_ret_tone": pct_tone(average("ret_80d")),
+        "win_rate_text": f"{len(winners) / count * 100:.1f}%" if count else "待统计",
+        "outperform_rate_text": f"{len(outperformers) / count * 100:.1f}%" if count else "待统计",
+        "avg_mae_text": pct_text(average("mae_80d")),
+        "risk_count": len(risk_rows),
+        "best": best,
+        "worst": worst,
+    }
+
+
 @app.get("/longterm")
-def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1"):
+def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed"):
     pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
     buckets = split_longterm_pool(pool)
     runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=12)
@@ -615,9 +687,21 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
         start=normalized_start or None,
         end=normalized_end or None,
     )
-    sample_filters = {"start": normalized_start, "end": normalized_end, "sample_limit": sample_limit}
-    sample_filter_summary = summarize_longterm_audit_sample_filter(all_audit_samples, sample_filters)
-    audit_samples, page_info = paginate_items(all_audit_samples, page, page_size=50)
+    result_context = _build_longterm_result_context(all_audit_samples)
+    selected_view = view if view in {"completed", "current", "outperform", "risk", "all"} else "completed"
+    if selected_view == "current":
+        visible_samples = result_context["current"]
+    elif selected_view == "outperform":
+        visible_samples = [item for item in result_context["completed"] if float(item.get("excess_ret_80d") or 0) > 0]
+    elif selected_view == "risk":
+        visible_samples = [item for item in all_audit_samples if item.get("watch_risk_tone") in {"warn", "bad"}]
+    elif selected_view == "all":
+        visible_samples = all_audit_samples
+    else:
+        visible_samples = result_context["completed"]
+    sample_filters = {"start": normalized_start, "end": normalized_end, "sample_limit": sample_limit, "view": selected_view}
+    sample_filter_summary = summarize_longterm_audit_sample_filter(visible_samples, sample_filters)
+    audit_samples, page_info = paginate_items(visible_samples, page, page_size=30)
     run_funnel = build_longterm_run_funnel(runs, pool)
     pool_status = build_longterm_pool_status(pool, runs)
     return templates.TemplateResponse(
@@ -637,6 +721,9 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "pool_status": pool_status,
             "filters": sample_filters,
             "sample_filter_summary": sample_filter_summary,
+            "result_context": result_context,
+            "current_audit_samples": result_context["current"][:6],
+            "selected_view": selected_view,
             "update_status": read_update_status(),
             "active_nav": "longterm",
         },

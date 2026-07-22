@@ -72,7 +72,7 @@ class WebAppTest(unittest.TestCase):
             "page-explanation",
         ):
             self.assertIn(f".{page_class}", css_response.text)
-        self.assertIn("20260722-market-radar-v4", page_response.text)
+        self.assertIn("20260722-longterm-results-v1", page_response.text)
 
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:

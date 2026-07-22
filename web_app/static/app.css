@@ -3837,3 +3837,183 @@ body[class*="page-"] .dense-table tbody tr:hover {
     overflow: visible;
   }
 }
+
+/* LONGTERM RESULT WORKSPACE 20260722 */
+.page-longterm .longterm-result-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 10px;
+}
+
+.page-longterm .longterm-result-summary-grid article {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fff, #f7fafc);
+}
+
+.page-longterm .longterm-result-summary-grid span,
+.page-longterm .longterm-result-summary-grid small {
+  display: block;
+  color: var(--muted);
+}
+
+.page-longterm .longterm-result-summary-grid strong {
+  display: block;
+  margin: 5px 0 3px;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.page-longterm .longterm-result-extremes {
+  display: flex;
+  gap: 18px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #f7fafc;
+  color: var(--muted);
+}
+
+.page-longterm .longterm-current-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin: 20px 0 10px;
+}
+
+.page-longterm .longterm-current-head span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.page-longterm .longterm-current-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.page-longterm .longterm-current-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  padding: 14px;
+  color: inherit;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid #2563eb;
+  border-radius: 12px;
+  background: #f8fbff;
+  text-decoration: none;
+}
+
+.page-longterm .longterm-current-card div span,
+.page-longterm .longterm-current-card small {
+  display: block;
+  color: var(--muted);
+}
+
+.page-longterm .longterm-current-card small {
+  grid-column: 1 / -1;
+}
+
+.page-longterm .longterm-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.page-longterm .longterm-view-tabs a {
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+  background: #fff;
+}
+
+.page-longterm .longterm-view-tabs a.active {
+  color: #fff;
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.page-longterm .longterm-result-table th:first-child,
+.page-longterm .longterm-result-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 180px;
+  background: #fff;
+}
+
+.page-longterm .longterm-result-table thead th:first-child {
+  z-index: 3;
+  background: #f8fafc;
+}
+
+.page-longterm .longterm-result-table td {
+  vertical-align: middle;
+}
+
+.page-longterm .longterm-result-table td > small,
+.page-longterm .result-main small,
+.page-longterm .result-risk-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.page-longterm .result-main strong {
+  font-size: 1.15rem;
+}
+
+.page-longterm .return-path {
+  display: flex;
+  align-items: center;
+  min-width: 260px;
+  gap: 7px;
+}
+
+.page-longterm .return-path span {
+  display: grid;
+  gap: 3px;
+  text-align: center;
+}
+
+.page-longterm .return-path small {
+  color: var(--muted);
+}
+
+.page-longterm .return-path i {
+  color: #94a3b8;
+  font-style: normal;
+}
+
+.page-longterm .result-verdict {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: #eef2f7;
+}
+
+.page-longterm .result-verdict.ok { color: #047857; background: #dcfce7; }
+.page-longterm .result-verdict.warn { color: #b45309; background: #fef3c7; }
+.page-longterm .result-verdict.bad { color: #b91c1c; background: #fee2e2; }
+
+@media (max-width: 1200px) {
+  .page-longterm .longterm-result-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .page-longterm .longterm-current-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .page-longterm .longterm-result-summary-grid,
+  .page-longterm .longterm-current-grid { grid-template-columns: 1fr; }
+  .page-longterm .longterm-result-extremes { display: grid; gap: 6px; }
+}

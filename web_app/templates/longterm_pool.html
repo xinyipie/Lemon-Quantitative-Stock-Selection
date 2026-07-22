@@ -208,18 +208,55 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>历史样本明细</h2>
-      <p>固定 10/40/80 日用于审计规则质量；入池/移出用于实盘生命周期管理。未满期样本会显示当前收益和已经走过的交易日。</p>
+      <h2>长线收益结果</h2>
+      <p>先看最终赚了多少、是否跑赢沪深300、过程中承受了多大回撤，再展开10/40/80日收益路径。</p>
     </div>
   </div>
+  <div class="longterm-result-summary-grid">
+    <article><span>80日完成样本</span><strong>{{ result_context.completed_count }}</strong><small>当前观察 {{ result_context.current_count }} 条</small></article>
+    <article><span>80日平均收益</span><strong class="{{ result_context.avg_ret_tone }}">{{ result_context.avg_ret_text }}</strong><small>最终绝对收益</small></article>
+    <article><span>80日胜率</span><strong>{{ result_context.win_rate_text }}</strong><small>最终收益大于0</small></article>
+    <article><span>跑赢沪深300</span><strong>{{ result_context.outperform_rate_text }}</strong><small>超额收益大于0</small></article>
+    <article><span>平均最大回撤</span><strong class="market-down">{{ result_context.avg_mae_text }}</strong><small>深回撤样本 {{ result_context.risk_count }} 条</small></article>
+  </div>
+  {% if result_context.best and result_context.worst %}
+  <div class="longterm-result-extremes">
+    <span>最佳：<b>{{ result_context.best.display_name }}</b> <strong class="market-up">{{ result_context.best.ret_80d_text }}</strong></span>
+    <span>最差：<b>{{ result_context.worst.display_name }}</b> <strong class="market-down">{{ result_context.worst.ret_80d_text }}</strong></span>
+  </div>
+  {% endif %}
+
+  {% if current_audit_samples %}
+  <div class="longterm-current-head">
+    <div><strong>当前仍在观察</strong><span>这些样本尚未走满80个交易日，收益会继续变化。</span></div>
+    <a href="{{ request.url.include_query_params(view='current', page=1) }}">查看全部进行中</a>
+  </div>
+  <div class="longterm-current-grid">
+    {% for item in current_audit_samples %}
+    <a class="longterm-current-card {{ item.watch_risk_tone }}" href="/stock/{{ item.ts_code }}">
+      <div><strong>{{ item.display_name }}</strong><span>{{ item.display_code }} · {{ item.industry or '-' }}</span></div>
+      <b class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</b>
+      <small>{{ item.watch_risk_label }} · 评分 {{ "%.1f"|format(item.score or 0) }}</small>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
   <form class="filter-bar compact-filter" action="/longterm" method="get">
     <label class="sr-only" for="longterm-start">开始入池日</label>
     <label class="sr-only" for="longterm-end">结束入池日</label>
     <input id="longterm-start" type="date" name="start" value="{{ (filters.get('start', '') if filters else '')|fmt_date_input }}">
     <input id="longterm-end" type="date" name="end" value="{{ (filters.get('end', '') if filters else '')|fmt_date_input }}">
+    <input type="hidden" name="view" value="{{ selected_view }}">
     <button type="submit">筛选</button>
     <a class="ghost-button" href="/longterm">重置</a>
   </form>
+  <nav class="longterm-view-tabs" aria-label="长线样本快捷筛选">
+    <a class="{{ 'active' if selected_view == 'completed' else '' }}" href="{{ request.url.include_query_params(view='completed', page=1) }}">已完成</a>
+    <a class="{{ 'active' if selected_view == 'current' else '' }}" href="{{ request.url.include_query_params(view='current', page=1) }}">进行中</a>
+    <a class="{{ 'active' if selected_view == 'outperform' else '' }}" href="{{ request.url.include_query_params(view='outperform', page=1) }}">跑赢基准</a>
+    <a class="{{ 'active' if selected_view == 'risk' else '' }}" href="{{ request.url.include_query_params(view='risk', page=1) }}">高风险</a>
+    <a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ request.url.include_query_params(view='all', page=1) }}">全部</a>
+  </nav>
   <div class="filter-summary">
     当前明细筛选：
     {% if sample_filter_summary and sample_filter_summary.is_filtered %}
@@ -232,32 +269,21 @@
       最近 {{ page_info.total }} 条
     {% endif %}
   </div>
-  <div class="hint-list compact">
-    <span>基准：沪深300</span>
-    <span>核心逻辑：市场同步 + 质量趋势 + 健康回调</span>
-    <span>MAE越深，说明持有过程越痛苦</span>
-  </div>
-  <div class="table-shell" role="region" aria-label="历史长线样本明细" tabindex="0"><table class="dense-table">
-    <thead><tr><th>入池日</th><th>阶段</th><th>股票</th><th>行业</th><th>分数</th><th>当前/阶段收益</th><th>观察风险</th><th>10日</th><th>40日</th><th>80日</th><th>最大回撤</th><th>超额收益<br><span class="muted">vs 沪深300</span></th><th>生命周期</th></tr></thead>
+  <div class="table-shell longterm-result-table-shell" role="region" aria-label="历史长线收益结果" tabindex="0"><table class="dense-table longterm-result-table">
+    <thead><tr><th>股票 / 入池日</th><th>80日最终收益</th><th>同期沪深300</th><th>超额收益</th><th>最大回撤</th><th>收益路径</th><th>结果</th></tr></thead>
     <tbody>
     {% for item in audit_samples %}
-    <tr>
-      <td>{{ item.select_date|fmt_date }}</td>
-      <td>{{ item.period }}</td>
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-      <td>{{ item.industry or '-' }}</td>
-      <td>{{ "%.1f"|format(item.score or 0) }}</td>
-      <td class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</td>
-      <td><span class="tag {{ item.watch_risk_tone }}" title="{{ item.watch_risk_reason }}">{{ item.watch_risk_label }}</span></td>
-      <td class="{{ item.ret_10d_tone }}">{{ item.ret_10d_text }}</td>
-      <td class="{{ item.ret_40d_tone }}">{{ item.ret_40d_text }}</td>
-      <td class="{{ item.ret_80d_tone }}">{{ item.ret_80d_text }}</td>
+    <tr class="longterm-result-row {{ item.result_tone }}">
+      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }} · {{ item.industry or '-' }}</div></a><small>{{ item.select_date|fmt_date }} 入池 · {{ item.period }}</small></td>
+      <td class="result-main {{ item.ret_80d_tone }}"><strong>{{ item.ret_80d_text if item.ret_80d is not none else item.stage_return_text }}</strong><small>{{ item.lifecycle_label }}</small></td>
+      <td class="{{ item.benchmark_ret_80d_tone }}">{{ item.benchmark_ret_80d_text }}</td>
+      <td class="{{ item.excess_80d_tone }}"><strong>{{ item.excess_80d_text }}</strong></td>
       <td><span class="tag {{ item.mae_pain_tone }}">{{ item.mae_80d_text }}</span></td>
-      <td class="{{ item.excess_80d_tone }}">{{ item.excess_80d_text }}</td>
-      <td><span class="tag {{ 'bad' if '已移出' in item.lifecycle_label else 'ok' if '完成' in item.lifecycle_label else '' }}">{{ item.lifecycle_label }}</span></td>
+      <td><div class="return-path">{% for point in item.return_path %}<span><small>{{ point.label }}</small><b class="{{ point.tone }}">{{ point.text }}</b></span>{% if not loop.last %}<i>→</i>{% endif %}{% endfor %}</div></td>
+      <td><span class="result-verdict {{ item.result_tone }}">{{ item.result_label }}</span><small class="result-risk-note">{{ item.watch_risk_label }}</small></td>
     </tr>
     {% else %}
-    <tr><td colspan="13">暂无历史样本。</td></tr>
+    <tr><td colspan="7">当前筛选下暂无样本。</td></tr>
     {% endfor %}
     </tbody>
   </table></div>
