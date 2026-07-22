@@ -1,165 +1,197 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}短线复盘{% endblock %}
 {% block content %}
 {% set filters = filters|default({}) %}
 <header class="terminal-header compact">
   <div>
-    <div class="eyebrow">Short Signal Review</div>
+    <div class="eyebrow">Short Decision Desk</div>
     <h1>短线复盘</h1>
-    <p>展示短线 v9 定板版历史回测与 main.py 实盘运行记录。入选依据是当时已知信息；事后表现只在满期后用于复盘。</p>
+    <p>先看今天有没有值得跟踪的信号，再用已满5日样本检验策略。实盘记录与历史回测分开呈现，避免把事后收益误认为今日推荐。</p>
   </div>
 </header>
 
 {% include "partials/update_status_panel.html" %}
 
-<section class="status-strip">
-  <div class="status-cell"><span>筛选结果 / 本页</span><strong>{{ page_info.total }} / {{ signals|length }}</strong></div>
-  <div class="status-cell"><span>最新运行</span><strong>{{ latest_signal_run.trade_date|fmt_date if latest_signal_run else 'NA' }}</strong></div>
-  <div class="status-cell"><span>来源</span><strong>回测 + 实盘</strong></div>
-  <div class="status-cell"><span>策略</span><strong>v9 底层 + v39 强推荐</strong></div>
-  <div class="status-cell"><span>最新状态</span><strong>{{ latest_signal_run.status_label if latest_signal_run else '未运行' }}</strong></div>
-</section>
-
-<section class="metric-grid short-review-metrics">
-  <div class="metric primary-metric"><span>5日胜率</span><strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong><small>当前筛选最多 300 条，{{ short_stats.closed_count if short_stats else 0 }} 个已满期样本</small></div>
-  <div class="metric primary-metric"><span>平均5日收益</span><strong class="{% if short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d > 0 %}market-up{% elif short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d < 0 %}market-down{% endif %}">{% if short_stats and short_stats.avg_ret_5d is not none %}{{ "%+.2f"|format(short_stats.avg_ret_5d) }}%{% else %}-{% endif %}</strong><small>统计样本 {{ short_stats.count if short_stats else 0 }} 条</small></div>
-  <div class="metric secondary-metric"><span>盘中机会 MFE</span><strong>{% if short_stats and short_stats.avg_mfe is not none %}{{ "%+.2f"|format(short_stats.avg_mfe) }}%{% else %}-{% endif %}</strong></div>
-  <div class="metric secondary-metric"><span>盘中风险 MAE</span><strong>{% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</strong></div>
-  <div class="metric secondary-metric"><span>机会/风险比</span><strong>{% if short_stats and short_stats.opportunity_risk_ratio is not none %}{{ "%.2f"|format(short_stats.opportunity_risk_ratio) }}{% else %}-{% endif %}</strong></div>
-</section>
-
-{% include "partials/strong_recommendation_card.html" %}
-{% include "partials/observation_candidate_card.html" %}
-
-<section class="panel live-push-history-panel">
-  <div class="panel-head">
-    <div>
-      <h2>短线实盘推送历史</h2>
-      <p>最近 30 条真实实盘推送记录，只包含强推荐和观察候选，不混入回测样本。</p>
-    </div>
-  </div>
-  {% if live_push_history %}
-  <div class="table-shell" role="region" aria-label="短线实盘推送历史" tabindex="0">
-  <table class="dense-table live-push-history-table">
-    <thead>
-      <tr>
-        <th>日期</th>
-        <th>层级</th>
-        <th>股票</th>
-        <th>行业</th>
-        <th>分数</th>
-        <th>入场</th>
-        <th>原因</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in live_push_history %}
-      <tr>
-        <td>{{ item.trade_date|fmt_date }}</td>
-        <td><span class="live-layer-badge {{ item.history_layer_tone }}">{{ item.history_layer_label }}</span></td>
-        <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-        <td>{{ item.industry or '-' }}</td>
-        <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
-        <td>{{ item.history_entry_timing or '-' }}</td>
-        <td class="live-history-reason">{{ item.history_reason }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% else %}
-  <div class="empty-state soft">暂无实盘推送历史。</div>
-  {% endif %}
-</section>
-
-<form class="filter-bar" action="/signals" method="get">
-  <label class="sr-only" for="signal-query">股票代码或中文名</label>
-  <label class="sr-only" for="signal-start">开始日期</label>
-  <label class="sr-only" for="signal-end">结束日期</label>
-  <label class="sr-only" for="signal-industry">行业</label>
-  <input id="signal-query" name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名，例 平安银行 / 000001">
-  <input id="signal-start" type="date" name="start" value="{{ filters.get('start', '')|fmt_date_input }}">
-  <input id="signal-end" type="date" name="end" value="{{ filters.get('end', '')|fmt_date_input }}">
-  <input id="signal-industry" name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
-  <button type="submit">筛选</button>
-  <a class="ghost-button" href="/signals">重置</a>
-</form>
-
-<div class="filter-summary filter-tags">
-  <span class="filter-label">当前筛选</span>
-  {% if filters.get('is_default_window') %}
-    <span class="filter-chip">近{{ filters.get('default_window_days') }}日</span>
-    <span class="filter-chip">{{ filters.get('effective_start')|fmt_date }} - 最新</span>
-  {% elif filters.get('start') or filters.get('end') %}
-    <span class="filter-chip">{{ filters.get('start') or '最早' }} - {{ filters.get('end') or '最新' }}</span>
-  {% elif filters.get('effective_start') %}
-    <span class="filter-chip">近{{ filters.get('default_window_days') }}日起</span>
-    <span class="filter-chip">{{ filters.get('effective_start')|fmt_date }} - 最新</span>
-  {% else %}
-    <span class="filter-chip">全部日期</span>
-  {% endif %}
-  <span class="filter-chip">{% if filters.get('industry') %}行业：{{ filters.get('industry') }}{% else %}全部行业{% endif %}</span>
-  <span class="filter-chip">{% if filters.get('q') %}关键词：{{ filters.get('q') }}{% else %}无关键词{% endif %}</span>
-  <span class="filter-chip strong">共命中 {{ signals|length }} 条</span>
-</div>
-
-<div class="panel">
-  <div class="panel-head">
-    <div>
-      <h2>历史 Top3 信号</h2>
-      <p>没有展示的交易日，表示短线 v9 当天没有产生可入库的 Top3 信号，或当前筛选条件没有命中。</p>
-    </div>
-  </div>
-  <div class="table-shell" role="region" aria-label="历史 Top3 信号" tabindex="0">
-  <table class="dense-table review-table">
-    <thead>
-      <tr>
-        <th>日期</th>
-        <th>排名</th>
-        <th>股票</th>
-        <th>行业</th>
-        <th>分数</th>
-        <th>收益路径</th>
-        <th>系统原因</th>
-        <th>可信度 / 复盘</th>
-        <th>AI状态</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for item in signals %}
-    <tr>
-      <td>{{ item.trade_date|fmt_date }}</td>
-      <td>{{ item.rank or '-' }}</td>
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-      <td>{{ item.industry or '-' }}</td>
-      <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong><div class="muted">{{ item.basis_summary }}</div></td>
-      <td class="path-cell">
-        <strong class="{{ item.final_return_tone }}">{{ item.final_return_text }}</strong>
-        <div class="path-sub">
-          <span class="{% if item.performance.mfe_pct is none %}muted-cell{% endif %}">机会 {{ item.mfe_text }}</span>
-          <span class="{{ item.mae_risk_tone }} {% if item.performance.mae_pct is none %}muted-cell{% endif %}">风险 {{ item.mae_text }}</span>
-        </div>
-      </td>
-      <td class="reason system-reason" title="{{ item.score_tooltip }}">{{ item.recommend_reason }}</td>
-      <td>
-        <div class="tag-stack">
-          {% if item.current_risk_blocked %}
-          <span class="tag bad" title="{{ item.current_risk_reason }}">{{ item.current_risk_label }}</span>
-          {% endif %}
-          <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">可信度：{{ item.confidence_label }}</span>
-          <span class="tag {{ 'ok' if item.quality_label == '初筛通过' else 'warn' if item.quality_label == '线索不足' else 'bad' if item.quality_label == '质量偏弱' else '' }}">{{ item.quality_label }}</span>
-          <span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span>
-          <span class="tag {{ item.process_tone }}">{{ item.process_label }}</span>
-        </div>
-      </td>
-      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
-    </tr>
+<section class="short-command-hero">
+  <div class="short-decision-card">
+    <div class="eyebrow">Today''s Short Decision</div>
+    {% if strong_recommendation and strong_recommendation.items %}
+      <h2>今日有 {{ strong_recommendation.items|length }} 只强推荐</h2>
+      <p>优先查看正式层信号，观察候选只用于等待确认，不为数量硬推股票。</p>
+    {% elif observation_candidates and observation_candidates.items %}
+      <h2>今日无强推荐，保留观察</h2>
+      <p>正式层没有放行标的，观察候选需要后续确认后再决定是否继续跟踪。</p>
     {% else %}
-    <tr><td colspan="9">暂无短线回测信号。</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+      <h2>今日不宜勉强出手</h2>
+      <p>最新运行没有强推荐或观察候选。空着也是策略的一部分，先保护本金和注意力。</p>
+    {% endif %}
+    <div class="short-decision-meta">
+      <span class="tag">信号日 {{ latest_signal_run.trade_date|fmt_date if latest_signal_run else ''未运行'' }}</span>
+      <span class="tag {{ ''ok'' if latest_signal_run and latest_signal_run.signal_count else ''warn'' }}">{{ latest_signal_run.status_label if latest_signal_run else ''未运行'' }}</span>
+      <span class="tag">v9 底层 + v39 强推荐</span>
+    </div>
   </div>
+
+  <div class="short-scoreboard" aria-label="短线核心复盘指标">
+    <div class="short-score">
+      <span>5日胜率</span>
+      <strong>{% if short_stats and short_stats.win_rate is not none %}{{ "%.1f"|format(short_stats.win_rate) }}%{% else %}-{% endif %}</strong>
+      <small>{{ short_stats.closed_count if short_stats else 0 }} 个满期样本</small>
+    </div>
+    <div class="short-score">
+      <span>平均5日收益</span>
+      <strong class="{% if short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d > 0 %}market-up{% elif short_stats and short_stats.avg_ret_5d is not none and short_stats.avg_ret_5d < 0 %}market-down{% endif %}">{% if short_stats and short_stats.avg_ret_5d is not none %}{{ "%+.2f"|format(short_stats.avg_ret_5d) }}%{% else %}-{% endif %}</strong>
+      <small>当前筛选样本</small>
+    </div>
+    <div class="short-score">
+      <span>盘中平均机会</span>
+      <strong>{% if short_stats and short_stats.avg_mfe is not none %}{{ "%+.2f"|format(short_stats.avg_mfe) }}%{% else %}-{% endif %}</strong>
+      <small>MFE</small>
+    </div>
+    <div class="short-score">
+      <span>机会 / 风险比</span>
+      <strong>{% if short_stats and short_stats.opportunity_risk_ratio is not none %}{{ "%.2f"|format(short_stats.opportunity_risk_ratio) }}{% else %}-{% endif %}</strong>
+      <small>平均回撤 {% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</small>
+    </div>
+  </div>
+</section>
+
+<section class="short-today-grid">
+  {% include "partials/strong_recommendation_card.html" %}
+  {% include "partials/observation_candidate_card.html" %}
+</section>
+
+<details class="live-history-disclosure">
+  <summary>
+    <span>真实实盘推送记录</span>
+    <span class="muted">最近 {{ live_push_history|length }} 条，点击展开</span>
+  </summary>
+  <section class="panel live-push-history-panel">
+    <div class="panel-head">
+      <div>
+        <h2>短线实盘推送历史</h2>
+        <p>只包含真实强推荐和观察候选，不混入回测样本。</p>
+      </div>
+    </div>
+    {% if live_push_history %}
+    <div class="table-shell" role="region" aria-label="短线实盘推送历史" tabindex="0">
+      <table class="dense-table live-push-history-table">
+        <thead><tr><th>日期</th><th>层级</th><th>股票</th><th>行业</th><th>分数</th><th>入场</th><th>原因</th></tr></thead>
+        <tbody>
+        {% for item in live_push_history %}
+          <tr>
+            <td>{{ item.trade_date|fmt_date }}</td>
+            <td><span class="live-layer-badge {{ item.history_layer_tone }}">{{ item.history_layer_label }}</span></td>
+            <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+            <td>{{ item.industry or ''-'' }}</td>
+            <td><strong>{{ "%.1f"|format(item.score or 0) }}</strong></td>
+            <td>{{ item.history_entry_timing or ''-'' }}</td>
+            <td class="live-history-reason">{{ item.history_reason }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty-state soft">暂无实盘推送历史。</div>
+    {% endif %}
+  </section>
+</details>
+
+<section class="panel short-result-panel">
+  <div class="panel-head">
+    <div>
+      <div class="eyebrow">Five-Day Results</div>
+      <h2>历史信号结果</h2>
+      <p>默认先看已经走满5个交易日的样本。红色表示上涨，绿色表示下跌；MFE是盘中最大机会，MAE是持有过程最大回撤。</p>
+    </div>
+  </div>
+
+  <form class="filter-bar" action="/signals" method="get">
+    <label class="sr-only" for="signal-query">股票代码或中文名</label>
+    <label class="sr-only" for="signal-start">开始日期</label>
+    <label class="sr-only" for="signal-end">结束日期</label>
+    <label class="sr-only" for="signal-industry">行业</label>
+    <input type="hidden" name="view" value="{{ result_view }}">
+    <input id="signal-query" name="q" value="{{ filters.get(''q'', '''') }}" placeholder="股票代码或中文名">
+    <input id="signal-start" type="date" name="start" value="{{ filters.get(''start'', '''')|fmt_date_input }}">
+    <input id="signal-end" type="date" name="end" value="{{ filters.get(''end'', '''')|fmt_date_input }}">
+    <input id="signal-industry" name="industry" value="{{ filters.get(''industry'', '''') }}" placeholder="行业，可留空">
+    <button type="submit">筛选</button>
+    <a class="ghost-button" href="/signals">重置</a>
+  </form>
+
+  <div class="short-result-toolbar">
+    <div class="short-view-tabs" aria-label="短线结果快捷筛选">
+      {% for key, label in [(''completed'', ''已满5日''), (''pending'', ''观察中''), (''winning'', ''盈利''), (''losing'', ''亏损''), (''risk'', ''高回撤''), (''all'', ''全部'')] %}
+      <a class="short-view-tab {% if result_view == key %}active{% endif %}" href="{{ request.url.include_query_params(view=key, page=1) }}">
+        {{ label }} <span class="count">{{ result_counts[key] }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <span class="muted">当前显示 {{ page_info.total }} 条</span>
+  </div>
+
+  <div class="table-shell" role="region" aria-label="历史短线结果" tabindex="0">
+    <table class="dense-table short-result-table">
+      <thead>
+        <tr>
+          <th>股票 / 信号日</th>
+          <th>信号质量</th>
+          <th>5日最终收益</th>
+          <th>盘中最大机会</th>
+          <th>最大回撤</th>
+          <th>最终结论</th>
+          <th>依据与详情</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in signals %}
+        <tr>
+          <td>
+            <a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong></a>
+            <div class="muted">{{ item.display_code }} · {{ item.trade_date|fmt_date }}</div>
+            <div class="short-result-caption">{{ item.industry or ''行业未知'' }} · 第{{ item.rank or ''-'' }}名</div>
+          </td>
+          <td>
+            <strong title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong>
+            <div class="short-result-caption">{{ item.quality_label }}</div>
+          </td>
+          <td>
+            <strong class="short-result-value {{ item.final_return_tone }}">{{ item.final_return_text }}</strong>
+            <div class="short-result-caption">收盘结果</div>
+          </td>
+          <td>
+            <strong class="short-result-value {% if item.performance.mfe_pct is not none and item.performance.mfe_pct > 0 %}market-up{% endif %}">{{ item.mfe_text }}</strong>
+            <div class="short-result-caption">MFE，可兑现空间</div>
+          </td>
+          <td>
+            <strong class="short-result-value {{ item.mae_risk_tone }}">{{ item.mae_text }}</strong>
+            <div class="short-result-caption">MAE，过程风险</div>
+          </td>
+          <td>
+            <div class="short-verdict">
+              <span class="tag {{ item.short_result_tone }}">{{ item.short_result_label }}</span>
+              <span class="tag {{ item.short_risk_tone }}">{{ item.short_risk_label }}</span>
+              <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">{{ item.confidence_label }}</span>
+            </div>
+          </td>
+          <td>
+            <details class="short-reason-details">
+              <summary>查看入选依据</summary>
+              <p>{{ item.recommend_reason }}</p>
+              {% if item.current_risk_blocked %}<p class="market-down">{{ item.current_risk_reason }}</p>{% endif %}
+            </details>
+            <a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7"><div class="empty-state soft">当前条件没有匹配的短线结果。</div></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
   <nav class="pagination" aria-label="短线复盘分页">
     <span>第 {{ page_info.page }} / {{ page_info.total_pages }} 页 · 第 {{ page_info.start_index }}-{{ page_info.end_index }} 条，共 {{ page_info.total }} 条</span>
     <div class="pagination-actions">
@@ -167,5 +199,6 @@
       {% if page_info.page < page_info.total_pages %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page + 1) }}">下一页</a>{% endif %}
     </div>
   </nav>
-</div>
+</section>
 {% endblock %}
+

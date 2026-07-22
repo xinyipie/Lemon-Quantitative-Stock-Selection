@@ -444,6 +444,59 @@ def stock_detail(request: Request, code: str):
     )
 
 
+def _build_short_result_context(signals: list[dict], view: str = "completed") -> dict:
+    """为短线复盘页整理结果筛选、计数和直观结论。"""
+    allowed_views = {"completed", "pending", "winning", "losing", "risk", "all"}
+    active_view = view if view in allowed_views else "completed"
+
+    def _ret(item: dict):
+        return (item.get("performance") or {}).get("ret_5d")
+
+    def _mae(item: dict):
+        return (item.get("performance") or {}).get("mae_pct")
+
+    counts = {
+        "all": len(signals),
+        "completed": sum(1 for item in signals if _ret(item) is not None),
+        "pending": sum(1 for item in signals if _ret(item) is None),
+        "winning": sum(1 for item in signals if _ret(item) is not None and _ret(item) > 0),
+        "losing": sum(1 for item in signals if _ret(item) is not None and _ret(item) < 0),
+        "risk": sum(1 for item in signals if _mae(item) is not None and _mae(item) <= -8),
+    }
+
+    filters = {
+        "completed": lambda item: _ret(item) is not None,
+        "pending": lambda item: _ret(item) is None,
+        "winning": lambda item: _ret(item) is not None and _ret(item) > 0,
+        "losing": lambda item: _ret(item) is not None and _ret(item) < 0,
+        "risk": lambda item: _mae(item) is not None and _mae(item) <= -8,
+        "all": lambda item: True,
+    }
+    selected = [item for item in signals if filters[active_view](item)]
+    for item in selected:
+        ret = _ret(item)
+        mae = _mae(item)
+        if ret is None:
+            item["short_result_label"] = "观察中"
+            item["short_result_tone"] = "neutral"
+        elif ret >= 5:
+            item["short_result_label"] = "强势兑现"
+            item["short_result_tone"] = "good"
+        elif ret > 0:
+            item["short_result_label"] = "正收益"
+            item["short_result_tone"] = "good"
+        elif ret == 0:
+            item["short_result_label"] = "持平"
+            item["short_result_tone"] = "neutral"
+        else:
+            item["short_result_label"] = "未兑现"
+            item["short_result_tone"] = "bad"
+        item["short_risk_label"] = "高回撤" if mae is not None and mae <= -8 else "回撤可控"
+        item["short_risk_tone"] = "bad" if mae is not None and mae <= -8 else "ok"
+
+    return {"items": selected, "view": active_view, "counts": counts}
+
+
 @app.get("/signals")
 def signals(
     request: Request,
@@ -452,6 +505,7 @@ def signals(
     end: str = "",
     industry: str = "",
     page: str = "1",
+    view: str = "completed",
 ):
     default_window_days = 100
     review_sources = ["backtest_ic_short", "live"]
@@ -519,7 +573,8 @@ def signals(
         industry=industry or None,
     )
     short_stats = summarize_short_signal_performance(all_signals, limit=300)
-    recent_signals, page_info = paginate_items(all_signals, page, page_size=50)
+    result_context = _build_short_result_context(all_signals, view=view)
+    recent_signals, page_info = paginate_items(result_context["items"], page, page_size=30)
     return templates.TemplateResponse(
         request,
         "signals.html",
@@ -529,6 +584,8 @@ def signals(
             "all_signals": all_signals,
             "page_info": page_info,
             "short_stats": short_stats,
+            "result_view": result_context["view"],
+            "result_counts": result_context["counts"],
             "latest_signal_run": latest_signal_run,
             "strong_recommendation": strong_recommendation,
             "observation_candidates": observation_candidates,
@@ -542,6 +599,7 @@ def signals(
                 "effective_start": effective_start,
                 "default_window_days": default_window_days,
                 "is_default_window": not any([start, end, q, industry]),
+                "view": result_context["view"],
             },
             "active_nav": "signals",
         },
