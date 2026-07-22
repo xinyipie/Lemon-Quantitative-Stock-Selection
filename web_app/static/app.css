@@ -3771,3 +3771,69 @@ body[class*="page-"] .dense-table tbody tr:hover {
     transition: none;
   }
 }
+
+/* MARKET RADAR SPLIT SCROLLER 20260722 */
+@media (min-width: 901px) {
+  .page-sectors .event-reader-columns {
+    align-items: stretch;
+  }
+
+  .page-sectors .event-reader-column {
+    display: flex;
+    flex-direction: column;
+    height: min(680px, calc(100vh - 150px));
+    min-height: 520px;
+    min-width: 0;
+  }
+
+  .page-sectors .event-reader-column .event-reader-column-head {
+    flex: 0 0 auto;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: inherit;
+  }
+
+  .page-sectors .event-reader-column .event-reader-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding-right: 8px;
+  }
+
+  .page-sectors .event-reader-column .event-reader-list::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  .page-sectors .event-reader-column .event-reader-list::-webkit-scrollbar-track {
+    background: rgba(148, 163, 184, 0.12);
+    border-radius: 999px;
+  }
+
+  .page-sectors .event-reader-column .event-reader-list::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.42);
+    border-radius: 999px;
+  }
+
+  .page-sectors .event-reader-column .event-reader-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(71, 85, 105, 0.62);
+  }
+
+  .page-sectors .event-reader-column > .empty-state {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-sectors .event-reader-column,
+  .page-sectors .event-reader-column .event-reader-list {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+}

@@ -13,6 +13,14 @@ class SectorEventReaderTemplateTest(unittest.TestCase):
         self.assertNotIn('for event in catalyst_rows[:6]', template)
         self.assertNotIn('for event in risk_rows[:6]', template)
 
+    def test_reader_css_uses_equal_height_independent_scrollers(self):
+        css = Path("web_app/static/app.css").read_text(encoding="utf-8")
+
+        self.assertIn("MARKET RADAR SPLIT SCROLLER 20260722", css)
+        self.assertIn("height: min(680px, calc(100vh - 150px));", css)
+        self.assertIn("overflow-y: auto;", css)
+        self.assertIn("overscroll-behavior: contain;", css)
+
 
 if __name__ == "__main__":
     unittest.main()
