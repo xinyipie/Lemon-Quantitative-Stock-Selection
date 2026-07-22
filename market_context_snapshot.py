@@ -48,7 +48,7 @@ def write_market_context_snapshot(
             config.NEWS_ANALYSIS_CONFIG["enable_hot_concepts"] = old_enable_concepts
     _write_json(concept_cache_file, hot_concepts)
 
-    raw_news = fetch_market_news(days=3, limit=100)
+    raw_news = fetch_market_news(days=5, limit=100)
     news_df = _raw_news_to_frame(raw_news)
     if not raw_news:
         news_df = news_analyzer.get_policy_news(days=3, prefer_rich=False)

@@ -75,7 +75,7 @@ def fetch_market_news(
     days: int = 3,
     limit: int = 30,
     providers: Iterable[tuple[str, Callable[[], pd.DataFrame]]] | None = None,
-    provider_timeout: int = 12,
+    provider_timeout: int = 20,
 ) -> list[dict]:
     """拉取并合并多源新闻。
 
@@ -106,7 +106,7 @@ def fetch_market_news(
             else:
                 _merge_record(current, record)
 
-    records = [_decorate_news_value(item) for item in merged.values()]
+    records = [_decorate_news_value(_normalize_news_timing(item)) for item in merged.values()]
     if providers is None:
         records = _filter_recent_records(records, days=days)
     records.sort(key=_news_sort_key, reverse=True)
@@ -229,24 +229,65 @@ def _recency_score(value) -> float:
 def _filter_recent_records(records: list[dict], days: int) -> list[dict]:
     if days <= 0:
         return records
-    cutoff = datetime.now() - timedelta(days=days)
     filtered = []
     for item in records:
         publish_time = _parse_publish_time(item.get("publish_time"))
-        if publish_time is None or publish_time >= cutoff:
+        if publish_time is None:
+            continue
+        age_days = (datetime.now().date() - publish_time.date()).days
+        if 0 <= age_days <= days:
             filtered.append(item)
     return filtered
 
 
-def _news_sort_key(item: dict) -> tuple[float, int, float, str]:
+def _news_sort_key(item: dict) -> tuple[float, float, int, str]:
     publish_time = _parse_publish_time(item.get("publish_time"))
     timestamp = publish_time.timestamp() if publish_time else 0.0
     return (
+        timestamp,
         float(item.get("news_value_score") or 0.0),
         int(item.get("source_count") or 1),
-        timestamp,
         str(item.get("title") or ""),
     )
+
+
+def _normalize_news_timing(record: dict) -> dict:
+    """统一发布时间；字段缺失时只信任 URL 中明确的年月日。"""
+    item = dict(record)
+    publish_time = _parse_publish_time(item.get("publish_time"))
+    timing_source = "provider"
+    if publish_time is None:
+        publish_time = _publish_time_from_url(item.get("url"))
+        timing_source = "url" if publish_time is not None else "unknown"
+    if publish_time is not None:
+        item["publish_time"] = publish_time.strftime("%Y-%m-%d %H:%M:%S")
+        age_days = (datetime.now().date() - publish_time.date()).days
+        item["news_age_days"] = age_days
+        item["freshness_bucket"] = "fresh" if age_days <= 2 else "background" if age_days <= 5 else "expired"
+    else:
+        item["publish_time"] = ""
+        item["news_age_days"] = None
+        item["freshness_bucket"] = "unknown"
+    item["publish_time_source"] = timing_source
+    return item
+
+
+def _publish_time_from_url(value) -> datetime | None:
+    text = _clean_text(value)
+    patterns = (
+        r"/(20\d{2})-(\d{2})-(\d{2})/",
+        r"/(20\d{2})/(\d{2})/(\d{2})/",
+        r"(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            return datetime.strptime("-".join(match.groups()), "%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_publish_time(value) -> datetime | None:

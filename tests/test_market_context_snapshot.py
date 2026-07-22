@@ -255,7 +255,7 @@ class MarketContextSnapshotTest(unittest.TestCase):
 
             payload = json.loads((cache_dir / "news_sector_20260618.json").read_text(encoding="utf-8"))
 
-        fetch_news.assert_called_once_with(days=3, limit=100)
+        fetch_news.assert_called_once_with(days=5, limit=100)
         self.assertEqual(len(payload["titles"]), 35)
         self.assertEqual(len(payload["ai_titles"]), 30)
         self.assertEqual(payload["raw_news_total"], 35)
