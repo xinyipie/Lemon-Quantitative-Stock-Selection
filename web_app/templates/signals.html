@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}短线复盘{% endblock %}
 {% block content %}
 {% set filters = filters|default({}) %}
@@ -14,7 +14,7 @@
 
 <section class="short-command-hero">
   <div class="short-decision-card">
-    <div class="eyebrow">Today''s Short Decision</div>
+    <div class="eyebrow">Today's Short Decision</div>
     {% if strong_recommendation and strong_recommendation.items %}
       <h2>今日有 {{ strong_recommendation.items|length }} 只强推荐</h2>
       <p>优先查看正式层信号，观察候选只用于等待确认，不为数量硬推股票。</p>
@@ -26,8 +26,8 @@
       <p>最新运行没有强推荐或观察候选。空着也是策略的一部分，先保护本金和注意力。</p>
     {% endif %}
     <div class="short-decision-meta">
-      <span class="tag">信号日 {{ latest_signal_run.trade_date|fmt_date if latest_signal_run else ''未运行'' }}</span>
-      <span class="tag {{ ''ok'' if latest_signal_run and latest_signal_run.signal_count else ''warn'' }}">{{ latest_signal_run.status_label if latest_signal_run else ''未运行'' }}</span>
+      <span class="tag">信号日 {{ latest_signal_run.trade_date|fmt_date if latest_signal_run else '未运行' }}</span>
+      <span class="tag {{ 'ok' if latest_signal_run and latest_signal_run.signal_count else 'warn' }}">{{ latest_signal_run.status_label if latest_signal_run else '未运行' }}</span>
       <span class="tag">v9 底层 + v39 强推荐</span>
     </div>
   </div>
@@ -83,9 +83,9 @@
             <td>{{ item.trade_date|fmt_date }}</td>
             <td><span class="live-layer-badge {{ item.history_layer_tone }}">{{ item.history_layer_label }}</span></td>
             <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-            <td>{{ item.industry or ''-'' }}</td>
+            <td>{{ item.industry or '-' }}</td>
             <td><strong>{{ "%.1f"|format(item.score or 0) }}</strong></td>
-            <td>{{ item.history_entry_timing or ''-'' }}</td>
+            <td>{{ item.history_entry_timing or '-' }}</td>
             <td class="live-history-reason">{{ item.history_reason }}</td>
           </tr>
         {% endfor %}
@@ -113,17 +113,17 @@
     <label class="sr-only" for="signal-end">结束日期</label>
     <label class="sr-only" for="signal-industry">行业</label>
     <input type="hidden" name="view" value="{{ result_view }}">
-    <input id="signal-query" name="q" value="{{ filters.get(''q'', '''') }}" placeholder="股票代码或中文名">
-    <input id="signal-start" type="date" name="start" value="{{ filters.get(''start'', '''')|fmt_date_input }}">
-    <input id="signal-end" type="date" name="end" value="{{ filters.get(''end'', '''')|fmt_date_input }}">
-    <input id="signal-industry" name="industry" value="{{ filters.get(''industry'', '''') }}" placeholder="行业，可留空">
+    <input id="signal-query" name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名">
+    <input id="signal-start" type="date" name="start" value="{{ filters.get('start', '')|fmt_date_input }}">
+    <input id="signal-end" type="date" name="end" value="{{ filters.get('end', '')|fmt_date_input }}">
+    <input id="signal-industry" name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
     <button type="submit">筛选</button>
     <a class="ghost-button" href="/signals">重置</a>
   </form>
 
   <div class="short-result-toolbar">
     <div class="short-view-tabs" aria-label="短线结果快捷筛选">
-      {% for key, label in [(''completed'', ''已满5日''), (''pending'', ''观察中''), (''winning'', ''盈利''), (''losing'', ''亏损''), (''risk'', ''高回撤''), (''all'', ''全部'')] %}
+      {% for key, label in [('completed', '已满5日'), ('pending', '观察中'), ('winning', '盈利'), ('losing', '亏损'), ('risk', '高回撤'), ('all', '全部')] %}
       <a class="short-view-tab {% if result_view == key %}active{% endif %}" href="{{ request.url.include_query_params(view=key, page=1) }}">
         {{ label }} <span class="count">{{ result_counts[key] }}</span>
       </a>
@@ -151,7 +151,7 @@
           <td>
             <a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong></a>
             <div class="muted">{{ item.display_code }} · {{ item.trade_date|fmt_date }}</div>
-            <div class="short-result-caption">{{ item.industry or ''行业未知'' }} · 第{{ item.rank or ''-'' }}名</div>
+            <div class="short-result-caption">{{ item.industry or '行业未知' }} · 第{{ item.rank or '-' }}名</div>
           </td>
           <td>
             <strong title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong>
