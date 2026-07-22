@@ -371,6 +371,20 @@ def run_update(args: argparse.Namespace) -> None:
         else:
             print(f"短线复盘已到 {effective_end}，跳过回测回填。")
 
+        run_command(
+            [
+                py,
+                "short_signal_outcome_refresher.py",
+                "--signal-db",
+                str(args.signal_db),
+                "--history-db",
+                str(args.history_db),
+                "--end",
+                effective_end,
+            ],
+            args.dry_run,
+        )
+
     if update_mode != "daily" and not args.skip_longterm_audit:
         for period, start, end in build_longterm_periods(effective_end, full_history=args.full_history):
             output = Path("reports") / f"longterm_pool_quality_{period}_v18_market_sync_full.md"
@@ -415,12 +429,8 @@ def run_update(args: argparse.Namespace) -> None:
 
 def _default_short_start(signal_db: Path, effective_end: str) -> str:
     latest = latest_short_backtest_date(signal_db)
-    rolling_start = (
-        datetime.strptime(normalize_date(effective_end), "%Y%m%d") - timedelta(days=30)
-    ).strftime("%Y%m%d")
     if latest:
-        # 全量更新必须回看近期信号，否则首次只观察到1至4天的样本永远无法补齐5日收益。
-        return min(next_calendar_day(latest), rolling_start)
+        return next_calendar_day(latest)
     return f"{effective_end[:4]}0101"
 
 
