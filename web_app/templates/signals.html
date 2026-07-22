@@ -15,10 +15,10 @@
 <section class="short-command-hero">
   <div class="short-decision-card">
     <div class="eyebrow">Today's Short Decision</div>
-    {% if strong_recommendation and strong_recommendation.items %}
-      <h2>今日有 {{ strong_recommendation.items|length }} 只强推荐</h2>
+    {% if strong_recommendation and strong_recommendation.get('items') %}
+      <h2>今日有 {{ strong_recommendation.get('items')|length }} 只强推荐</h2>
       <p>优先查看正式层信号，观察候选只用于等待确认，不为数量硬推股票。</p>
-    {% elif observation_candidates and observation_candidates.items %}
+    {% elif observation_candidates and observation_candidates.get('items') %}
       <h2>今日无强推荐，保留观察</h2>
       <p>正式层没有放行标的，观察候选需要后续确认后再决定是否继续跟踪。</p>
     {% else %}
