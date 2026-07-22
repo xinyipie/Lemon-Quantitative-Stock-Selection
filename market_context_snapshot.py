@@ -19,6 +19,9 @@ from news_source_provider import fetch_market_news
 import news_analyzer
 
 
+AI_CALL_DIAGNOSTICS = {"status": "idle", "message": "", "attempts": 0}
+
+
 DEFAULT_CACHE_DIR = Path("logs") / "cache"
 
 
@@ -67,7 +70,10 @@ def write_market_context_snapshot(
         ai_message = "未配置 DEEPSEEK_API_KEY，展示原始新闻但不参与板块加分。"
     else:
         ai_status = "empty_result"
-        ai_message = "AI 未返回有效行业映射，展示原始新闻但不参与板块加分。"
+        call_message = str(AI_CALL_DIAGNOSTICS.get("message") or "") if call_ai_api_fn is None else ""
+        parse_message = str(news_analyzer.get_ai_news_diagnostic() or "")
+        failure_detail = call_message or parse_message or "AI 未返回有效行业映射。"
+        ai_message = f"{failure_detail} 展示原始新闻但不参与板块加分。"
     news_payload = {
         "date": date_text,
         "titles": titles,
@@ -98,10 +104,12 @@ def write_market_context_snapshot(
 
 
 def call_ai_api(prompt: str, system: str = "") -> str | None:
+    AI_CALL_DIAGNOSTICS.update(status="idle", message="", attempts=0)
     if not prompt:
         return None
     api_key = config.AI_CONFIG.get("api_key")
     if not api_key:
+        AI_CALL_DIAGNOSTICS.update(status="missing_api_key", message="未配置 DEEPSEEK_API_KEY。")
         return None
     messages = []
     if system:
@@ -113,17 +121,32 @@ def call_ai_api(prompt: str, system: str = "") -> str | None:
         "temperature": config.AI_CONFIG["temperature"],
         "max_tokens": config.AI_CONFIG["max_tokens"],
     }
-    try:
-        response = requests.post(
-            url=config.AI_CONFIG["base_url"],
-            headers={"Content-Type": "application/json; charset=utf-8", "Authorization": f"Bearer {api_key}"},
-            json=payload,
-            timeout=config.AI_CONFIG["timeout"],
-        )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
-    except Exception:
-        return None
+    for attempt in range(1, 3):
+        AI_CALL_DIAGNOSTICS["attempts"] = attempt
+        try:
+            response = requests.post(
+                url=config.AI_CONFIG["base_url"],
+                headers={"Content-Type": "application/json; charset=utf-8", "Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=config.AI_CONFIG["timeout"],
+            )
+            response.raise_for_status()
+            content = str(response.json()["choices"][0]["message"]["content"] or "").strip()
+            if content:
+                AI_CALL_DIAGNOSTICS.update(status="ok", message="")
+                return content
+            error_message = "DeepSeek 返回了空内容。"
+        except requests.Timeout:
+            error_message = "DeepSeek 请求超时。"
+        except requests.HTTPError as exc:
+            status_code = getattr(exc.response, "status_code", "未知")
+            error_message = f"DeepSeek HTTP {status_code}。"
+        except requests.RequestException as exc:
+            error_message = f"DeepSeek 网络请求失败：{type(exc).__name__}。"
+        except (KeyError, TypeError, ValueError):
+            error_message = "DeepSeek 响应结构不完整。"
+        AI_CALL_DIAGNOSTICS.update(status="failed", message=error_message)
+    return None
 
 
 def normalize_date(value: str) -> str:

@@ -230,6 +230,44 @@ def build_concept_industry_boosts(hot_concepts: List[Dict]) -> Dict[str, float]:
 
 # ==================== 方案A：AI新闻→板块映射 ====================
 
+_AI_NEWS_DIAGNOSTIC = ""
+
+
+def get_ai_news_diagnostic() -> str:
+    """返回最近一次新闻行业映射失败原因，不包含密钥或响应正文。"""
+    return _AI_NEWS_DIAGNOSTIC
+
+
+def _parse_ai_news_json(raw: str):
+    """兼容纯数组、Markdown 代码块和 {items: [...]} 包装。"""
+    import json
+
+    text = str(raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    candidates = [text]
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char in "[{":
+            try:
+                value, _end = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            candidates.append(value)
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate) if isinstance(candidate, str) else candidate
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for key in ("items", "events", "data", "result"):
+                if isinstance(value.get(key), list):
+                    return value[key]
+    return None
+
 def ai_parse_news_to_sectors(
     news_titles: List[str],
     call_ai_api_fn: Callable,
@@ -255,6 +293,9 @@ def ai_parse_news_to_sectors(
     if not news_titles:
         return []
 
+    global _AI_NEWS_DIAGNOSTIC
+    _AI_NEWS_DIAGNOSTIC = ""
+
     import json
     import ai_prompts
 
@@ -267,16 +308,13 @@ def ai_parse_news_to_sectors(
             system=ai_prompts.SYSTEM_NEWS_ANALYST,
         )
         if not raw:
+            _AI_NEWS_DIAGNOSTIC = "DeepSeek 未返回内容。"
             return []
 
-        # 提取 JSON 数组
-        m = re.search(r"\[[\s\S]*\]", raw)
-        if not m:
-            logger.warning("⚠️ AI新闻解读：未找到JSON数组")
-            return []
-
-        parsed = json.loads(m.group())
+        parsed = _parse_ai_news_json(raw)
         if not isinstance(parsed, list):
+            _AI_NEWS_DIAGNOSTIC = "DeepSeek 返回内容不是有效的新闻映射 JSON。"
+            logger.warning("AI新闻解读：未找到有效JSON数组")
             return []
 
         # 校验字段完整性
@@ -293,15 +331,22 @@ def ai_parse_news_to_sectors(
                 item["strength"] = 0
             if item["strength"] < 1:
                 continue
+            item["strength"] = min(item["strength"], 10)
             # sectors 确保是列表
             if isinstance(item["sectors"], str):
                 item["sectors"] = [item["sectors"]]
+            item["sectors"] = [str(sector).strip() for sector in item["sectors"] if str(sector).strip()]
+            if not item["sectors"] or item.get("impact") not in {"positive", "negative", "mixed"}:
+                continue
             valid.append(item)
 
+        if not valid:
+            _AI_NEWS_DIAGNOSTIC = "DeepSeek 返回了 JSON，但没有通过字段校验的行业映射。"
         logger.info(f"✅ AI新闻解读完成：{len(valid)} 条板块影响")
         return valid
 
     except Exception as e:
+        _AI_NEWS_DIAGNOSTIC = f"新闻映射解析失败：{type(e).__name__}。"
         logger.warning(f"⚠️ AI新闻解读失败（不影响选股）：{e}")
         return []
 
