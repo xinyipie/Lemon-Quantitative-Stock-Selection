@@ -25,6 +25,7 @@ class LongtermResultWorkspaceTest(unittest.TestCase):
         self.assertEqual(context["completed_count"], 1)
         self.assertEqual(samples[0]["benchmark_ret_80d_text"], "+8.00%")
         self.assertEqual(samples[0]["result_label"], "显著跑赢")
+        self.assertEqual(samples[0]["result_risk_label"], "80日回撤可控")
         self.assertEqual([point["label"] for point in samples[0]["return_path"]], ["10日", "40日", "80日"])
 
 

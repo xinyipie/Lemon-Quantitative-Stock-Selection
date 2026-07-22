@@ -624,9 +624,20 @@ def _build_longterm_result_context(samples: list[dict]) -> dict:
         if ret_80d is None:
             item["result_label"] = "观察中"
             item["result_tone"] = "muted"
+            item["result_risk_label"] = item.get("watch_risk_label") or "继续观察"
             current.append(item)
             continue
         mae = item.get("mae_80d")
+        if mae is None:
+            item["result_risk_label"] = "回撤待统计"
+        elif float(mae) <= -20:
+            item["result_risk_label"] = "80日高回撤"
+        elif float(mae) <= -15:
+            item["result_risk_label"] = "80日回撤偏深"
+        elif float(mae) <= -10:
+            item["result_risk_label"] = "80日回撤需注意"
+        else:
+            item["result_risk_label"] = "80日回撤可控"
         if mae is not None and float(mae) <= -20:
             item["result_label"] = "高回撤"
             item["result_tone"] = "bad"

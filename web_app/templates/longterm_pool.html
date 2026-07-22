@@ -280,7 +280,7 @@
       <td class="{{ item.excess_80d_tone }}"><strong>{{ item.excess_80d_text }}</strong></td>
       <td><span class="tag {{ item.mae_pain_tone }}">{{ item.mae_80d_text }}</span></td>
       <td><div class="return-path">{% for point in item.return_path %}<span><small>{{ point.label }}</small><b class="{{ point.tone }}">{{ point.text }}</b></span>{% if not loop.last %}<i>→</i>{% endif %}{% endfor %}</div></td>
-      <td><span class="result-verdict {{ item.result_tone }}">{{ item.result_label }}</span><small class="result-risk-note">{{ item.watch_risk_label }}</small></td>
+      <td><span class="result-verdict {{ item.result_tone }}">{{ item.result_label }}</span><small class="result-risk-note">{{ item.result_risk_label }}</small></td>
     </tr>
     {% else %}
     <tr><td colspan="7">当前筛选下暂无样本。</td></tr>
