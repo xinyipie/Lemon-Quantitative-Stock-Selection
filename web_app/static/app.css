@@ -3494,3 +3494,280 @@ body[class*="page-"] .dense-table tbody tr:hover {
     transition: none;
   }
 }
+
+/* MARKET RADAR USABILITY REWORK 20260722 */
+
+.page-sectors {
+  --radar-blue: #155eef;
+  --radar-green: #0f8a68;
+  --radar-amber: #c87909;
+  --radar-red: #c63f3f;
+  --radar-ink: #172033;
+  --radar-soft: #f5f8fc;
+}
+
+.page-sectors .page-section-nav {
+  position: static;
+  margin-bottom: 14px;
+  padding: 8px;
+  border: 1px solid #dce5f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 8px 22px rgba(31, 50, 81, .05);
+}
+
+.page-sectors .radar-workbench {
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.page-sectors .event-workbench-main,
+.page-sectors .radar-side-rail {
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+}
+
+.page-sectors .radar-side-rail {
+  position: sticky;
+  top: 14px;
+  border-top: 4px solid var(--radar-amber);
+  box-shadow: 0 12px 28px rgba(38, 53, 78, .07);
+}
+
+.page-sectors .event-workbench-main {
+  border-top: 4px solid var(--radar-blue);
+}
+
+.page-sectors .event-reader-columns {
+  align-items: start;
+}
+
+.page-sectors .event-reader-column {
+  align-self: start;
+}
+
+.page-sectors .research-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.page-sectors .sector-thesis-panel,
+.page-sectors .stock-evidence-panel {
+  min-width: 0;
+  overflow: visible;
+}
+
+.page-sectors .sector-thesis-panel {
+  border-top: 4px solid var(--radar-green);
+  background: linear-gradient(145deg, #ffffff 0%, #f7fbfa 100%);
+}
+
+.page-sectors .stock-evidence-panel {
+  border-top: 4px solid var(--radar-blue);
+  background: linear-gradient(145deg, #ffffff 0%, #f7faff 100%);
+}
+
+.page-sectors .thesis-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.page-sectors .thesis-grid .v2-mini-card {
+  position: relative;
+  min-height: 0;
+  padding: 14px;
+  border-color: #dbe7e3;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .92);
+}
+
+.page-sectors .thesis-grid .v2-mini-card::before {
+  position: absolute;
+  inset: 12px auto 12px 0;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: var(--radar-green);
+  content: "";
+}
+
+.page-sectors .thesis-grid .v2-mini-card:hover {
+  border-color: #9bcdbd;
+  box-shadow: 0 10px 24px rgba(24, 100, 78, .08);
+  transform: translateY(-1px);
+}
+
+.page-sectors .thesis-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.page-sectors .stock-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.page-sectors .stock-evidence-card-v3 {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #d9e3ef;
+  border-left: 4px solid #8da2bd;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(40, 58, 85, .045);
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.page-sectors .stock-evidence-card-v3.positive { border-left-color: var(--radar-green); }
+.page-sectors .stock-evidence-card-v3.caution { border-left-color: var(--radar-amber); }
+.page-sectors .stock-evidence-card-v3.neutral { border-left-color: #7890ad; }
+
+.page-sectors .stock-evidence-card-v3:hover {
+  border-top-color: #afbed0;
+  border-right-color: #afbed0;
+  border-bottom-color: #afbed0;
+  box-shadow: 0 14px 30px rgba(33, 51, 78, .09);
+  transform: translateY(-2px);
+}
+
+.page-sectors .stock-evidence-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid #e5ebf3;
+}
+
+.page-sectors .stock-evidence-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--radar-ink);
+}
+
+.page-sectors .stock-evidence-identity strong {
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.page-sectors .stock-evidence-identity span {
+  color: #728097;
+  font-size: 12px;
+}
+
+.page-sectors .stock-evidence-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.page-sectors .stock-evidence-facts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--radar-soft);
+}
+
+.page-sectors .stock-evidence-facts span,
+.page-sectors .stock-evidence-facts small,
+.page-sectors .stock-verification-box span {
+  color: #748197;
+  font-size: 11px;
+}
+
+.page-sectors .stock-evidence-facts strong {
+  overflow-wrap: anywhere;
+  color: var(--radar-ink);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.page-sectors .stock-evidence-facts small {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.page-sectors .stock-verification-box {
+  padding: 11px 12px;
+  border: 1px solid #dce6f4;
+  border-radius: 10px;
+  background: #f7faff;
+}
+
+.page-sectors .stock-verification-box p {
+  margin: 4px 0 0;
+  color: #30415a;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.page-sectors .stock-evidence-reasons {
+  display: flex;
+  grid-column: auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.page-sectors .stock-evidence-reasons span {
+  padding: 5px 8px;
+  border: 1px solid #d9e6fb;
+  background: #f1f6ff;
+}
+
+@media (max-width: 1400px) {
+  .page-sectors .thesis-grid,
+  .page-sectors .stock-evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .page-sectors .stock-evidence-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1080px) {
+  .page-sectors .radar-workbench,
+  .page-sectors .thesis-grid,
+  .page-sectors .stock-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-sectors .radar-side-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-sectors .stock-evidence-card-head {
+    display: grid;
+  }
+
+  .page-sectors .stock-evidence-card-head .tag {
+    justify-self: start;
+  }
+
+  .page-sectors .stock-evidence-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-sectors .thesis-grid .v2-mini-card,
+  .page-sectors .stock-evidence-card-v3 {
+    transition: none;
+  }
+}

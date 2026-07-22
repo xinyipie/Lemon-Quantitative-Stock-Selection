@@ -430,47 +430,55 @@
       </div>
     </div>
     {% if brief.stock_watchlist %}
-      <div class="stock-evidence-table-wrap">
-        <table class="dense-table stock-evidence-table">
-          <thead>
-            <tr>
-              <th>股票</th>
-              <th>行业</th>
-              <th>共振</th>
-              <th>角色</th>
-              <th>动作</th>
-              <th>验证条件</th>
-              <th>证据/风险</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for stock in brief.stock_watchlist[:8] %}
-            <tr id="stocks-{{ stock.industry }}">
-              <td><a href="/stock/{{ stock.ts_code }}"><strong>{{ stock.name or stock.ts_code }}</strong><br><span class="muted">{{ stock.ts_code }}</span></a></td>
-              <td>{{ stock.industry }}</td>
-              <td><span class="resonance-chip">{{ stock.resonance_level or "★" }} {{ stock.resonance_label or "待补证据" }}</span></td>
-              <td><strong>{{ stock.stock_role }}</strong><br><span class="muted">{{ stock.event_relevance }} · {{ stock.market_behavior }}</span></td>
-              <td><span class="tag {{ 'ok' if stock.research_action == '可重点跟踪' else 'warn' if stock.research_action == '等回踩确认' else 'watch' }}">{{ stock.research_action }}</span></td>
-              <td class="stock-validation-cell">
-                {% if stock.validation_conditions %}
-                  {{ stock.validation_conditions[0] }}
-                {% else %}
-                  等待板块承接验证。
-                {% endif %}
-              </td>
-              <td>
-                {% if stock.reason_cards %}
-                  <div class="stock-evidence-reasons">
-                    {% for card in stock.reason_cards[:3] %}
-                      <span><b>{{ card.type }}</b>{{ card.label }}</span>
-                    {% endfor %}
-                  </div>
-                {% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="stock-evidence-grid">
+        {% for stock in brief.stock_watchlist[:8] %}
+        <article class="stock-evidence-card-v3 {{ 'positive' if stock.research_action == '可重点跟踪' else 'caution' if stock.research_action == '等回踩确认' else 'neutral' }}" id="stock-{{ stock.ts_code }}">
+          <div class="stock-evidence-card-head">
+            <a class="stock-evidence-identity" href="/stock/{{ stock.ts_code }}">
+              <strong>{{ stock.name or stock.ts_code }}</strong>
+              <span>{{ stock.ts_code }} · {{ stock.industry }}</span>
+            </a>
+            <span class="tag {{ 'ok' if stock.research_action == '可重点跟踪' else 'warn' if stock.research_action == '等回踩确认' else 'watch' }}">{{ stock.research_action }}</span>
+          </div>
+
+          <div class="stock-evidence-facts">
+            <div class="stock-resonance-summary" aria-label="{{ stock.resonance_level or '★' }} {{ stock.resonance_label or '待补证据' }}">
+              <span>共振强度</span>
+              <strong>{{ stock.resonance_level or "★" }}</strong>
+              <small>{{ stock.resonance_label or "待补证据" }}</small>
+            </div>
+            <div>
+              <span>盘面角色</span>
+              <strong>{{ stock.stock_role }}</strong>
+              <small>{{ stock.market_behavior }}</small>
+            </div>
+            <div>
+              <span>事件关联</span>
+              <strong>{{ stock.event_relevance }}</strong>
+              <small>结合行业主线验证</small>
+            </div>
+          </div>
+
+          <div class="stock-verification-box">
+            <span>下一步验证</span>
+            <p>
+              {% if stock.validation_conditions %}
+                {{ stock.validation_conditions[0] }}
+              {% else %}
+                等待板块承接验证。
+              {% endif %}
+            </p>
+          </div>
+
+          {% if stock.reason_cards %}
+            <div class="stock-evidence-reasons">
+              {% for card in stock.reason_cards[:3] %}
+                <span><b>{{ card.type }}</b>{{ card.label }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </article>
+        {% endfor %}
       </div>
     {% else %}
       <div class="empty-state soft">暂无个股证据卡。</div>

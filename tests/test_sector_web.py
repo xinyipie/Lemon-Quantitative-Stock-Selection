@@ -136,10 +136,21 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("sector-thesis-panel", response.text)
         self.assertIn("stock-evidence-panel", response.text)
         self.assertIn("research-grid", response.text)
-        self.assertIn("stock-evidence-table", response.text)
+        self.assertIn("stock-evidence-grid", response.text)
+        self.assertIn("stock-evidence-card-v3", response.text)
+        self.assertNotIn("stock-evidence-table", response.text)
         self.assertIn("review-loop-panel", response.text)
         self.assertIn("stock-evidence-reasons", response.text)
         self.assertLess(response.text.find("market-radar-v2-brief"), response.text.find('id="mainline-view"'))
+
+    def test_sector_page_uses_compact_responsive_workbench_styles(self):
+        response = TestClient(app).get("/static/app.css")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("MARKET RADAR USABILITY REWORK 20260722", response.text)
+        self.assertIn(".page-sectors .stock-evidence-grid", response.text)
+        self.assertIn(".page-sectors .stock-evidence-card-v3", response.text)
+        self.assertIn(".page-sectors .event-workbench-main", response.text)
 
     def test_sector_page_has_radar_only_update_button(self):
         client = TestClient(app)
