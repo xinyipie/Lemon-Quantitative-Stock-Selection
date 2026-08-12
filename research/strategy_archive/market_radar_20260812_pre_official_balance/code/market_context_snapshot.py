@@ -1,0 +1,422 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Generate local market-context caches for the Web sector radar."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+import requests
+
+import config
+from concept_heat_provider import fetch_real_concept_heat
+from news_source_provider import fetch_market_news
+from market_radar.freshness import classify_news_time
+import news_analyzer
+
+
+AI_CALL_DIAGNOSTICS = {"status": "idle", "message": "", "attempts": 0}
+
+
+DEFAULT_CACHE_DIR = Path("logs") / "cache"
+
+
+def write_market_context_snapshot(
+    cache_dir: str | Path = DEFAULT_CACHE_DIR,
+    snapshot_date: str | None = None,
+    call_ai_api_fn: Callable | None = None,
+) -> dict:
+    date_text = normalize_date(snapshot_date or datetime.now().strftime("%Y%m%d"))
+    cache_path = Path(cache_dir)
+    cache_path.mkdir(parents=True, exist_ok=True)
+    news_cache_file = cache_path / f"news_sector_{date_text}.json"
+    previous_news_payload = _read_json(news_cache_file) if news_cache_file.exists() else {}
+
+    concept_top_n = config.NEWS_ANALYSIS_CONFIG.get("concept_top_n", 10)
+    concept_cache_file = cache_path / f"hot_concepts_{date_text}.json"
+    hot_concepts = fetch_real_concept_heat(top_n=concept_top_n)
+    if not hot_concepts:
+        old_enable_concepts = config.NEWS_ANALYSIS_CONFIG.get("enable_hot_concepts", False)
+        try:
+            config.NEWS_ANALYSIS_CONFIG["enable_hot_concepts"] = True
+            hot_concepts = news_analyzer.get_hot_concepts(top_n=concept_top_n)
+        finally:
+            config.NEWS_ANALYSIS_CONFIG["enable_hot_concepts"] = old_enable_concepts
+    _write_json(concept_cache_file, hot_concepts)
+
+    raw_news_candidates = fetch_market_news(
+        days=2,
+        limit=100,
+        provider_attempts=2,
+        include_unverified=True,
+    )
+    news_df = _raw_news_to_frame(raw_news_candidates)
+    source_reused = False
+    source_reused_from = ""
+    if not raw_news_candidates:
+        news_df = news_analyzer.get_policy_news(days=3, prefer_rich=False)
+        raw_news_candidates = _legacy_news_records(news_df)
+    if not raw_news_candidates and isinstance(previous_news_payload, dict):
+        raw_news_candidates = list(previous_news_payload.get("raw_news") or []) + list(
+            previous_news_payload.get("unverified_news") or []
+        )
+        source_reused = bool(raw_news_candidates)
+        source_reused_from = date_text if source_reused else ""
+    if not raw_news_candidates:
+        raw_news_candidates, source_reused_from = _load_recent_news_fallback(cache_path, date_text)
+        source_reused = bool(raw_news_candidates)
+    raw_news = []
+    unverified_news = []
+    for record in raw_news_candidates or []:
+        item = dict(record)
+        item.update(classify_news_time(item.get("publish_time")))
+        if item["decision_eligible"]:
+            raw_news.append(item)
+        elif item["freshness_status"] == "unknown":
+            unverified_news.append(item)
+    titles = [str(item.get("title") or "") for item in raw_news if item.get("title")]
+    ai_titles = titles[:30]
+    ai_parser = call_ai_api_fn or call_ai_api
+    ai_news = news_analyzer.ai_parse_news_to_sectors(ai_titles, ai_parser, max_titles=30) if ai_titles else []
+    sector_boosts = news_analyzer.build_sector_boosts(ai_news)
+    sentiment = news_analyzer.analyze_news_sentiment(news_df, ai_news) if news_df is not None else {}
+    if not ai_titles:
+        ai_status = "no_news"
+        ai_message = "没有可供 AI 解读的原始新闻。"
+    elif ai_news:
+        ai_status = "ok"
+        ai_message = "AI 新闻行业映射完成。"
+    elif call_ai_api_fn is None and not config.AI_CONFIG.get("api_key"):
+        ai_status = "missing_api_key"
+        ai_message = "未配置 DEEPSEEK_API_KEY，展示原始新闻但不参与板块加分。"
+    else:
+        ai_status = "empty_result"
+        call_message = str(AI_CALL_DIAGNOSTICS.get("message") or "") if call_ai_api_fn is None else ""
+        parse_message = str(news_analyzer.get_ai_news_diagnostic() or "")
+        failure_detail = call_message or parse_message or "AI 未返回有效行业映射。"
+        ai_message = f"{failure_detail} 展示原始新闻但不参与板块加分。"
+    news_payload = {
+        "date": date_text,
+        "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "titles": titles,
+        "ai_titles": ai_titles,
+        "raw_news_total": len(raw_news or []),
+        "raw_news": raw_news,
+        "unverified_news": unverified_news,
+        "items": ai_news,
+        "boosts": sector_boosts,
+        "sentiment": sentiment,
+        "ai_status": ai_status,
+        "ai_message": ai_message,
+        "source_reused": source_reused,
+        "source_reused_from": source_reused_from,
+        "source_message": (
+            f"本次实时新闻源不可用，沿用 {source_reused_from} 缓存中仍通过时效检查的新闻。"
+            if source_reused
+            else ("实时新闻源不可用，且没有可安全复用的近期新闻。" if not raw_news else "")
+        ),
+    }
+    _write_json(news_cache_file, news_payload)
+    theme_filter = _get_or_create_theme_filter(
+        cache_path=cache_path,
+        date_text=date_text,
+        hot_concepts=hot_concepts or [],
+        ai_news=ai_news or [],
+        call_ai_api_fn=ai_parser,
+    )
+    return {
+        "date": date_text,
+        "concept_count": len(hot_concepts or []),
+        "raw_news_count": len(raw_news or []),
+        "news_item_count": len(ai_news or []),
+        "news_sector_count": len(sector_boosts or {}),
+        "theme_count": len(theme_filter.get("items") or []),
+        "news_source_status": "cache_fallback" if source_reused else ("live" if raw_news else "failed"),
+    }
+
+
+def _load_recent_news_fallback(cache_path: Path, date_text: str, max_calendar_days: int = 4) -> tuple[list[dict], str]:
+    """实时源失败时，仅复用近期缓存；后续仍会逐条执行发布时间校验。"""
+    try:
+        target_date = datetime.strptime(date_text, "%Y%m%d")
+    except ValueError:
+        return [], ""
+    for candidate in sorted(cache_path.glob("news_sector_*.json"), reverse=True):
+        match = re.search(r"news_sector_(\d{8})\.json$", candidate.name)
+        if not match or match.group(1) == date_text:
+            continue
+        cache_date_text = match.group(1)
+        try:
+            age_days = (target_date - datetime.strptime(cache_date_text, "%Y%m%d")).days
+        except ValueError:
+            continue
+        if age_days < 0 or age_days > max_calendar_days:
+            continue
+        payload = _read_json(candidate)
+        if not isinstance(payload, dict):
+            continue
+        records = list(payload.get("raw_news") or []) + list(payload.get("unverified_news") or [])
+        if records:
+            return records, cache_date_text
+    return [], ""
+
+
+def call_ai_api(prompt: str, system: str = "") -> str | None:
+    AI_CALL_DIAGNOSTICS.update(status="idle", message="", attempts=0)
+    if not prompt:
+        return None
+    api_key = config.AI_CONFIG.get("api_key")
+    if not api_key:
+        AI_CALL_DIAGNOSTICS.update(status="missing_api_key", message="未配置 DEEPSEEK_API_KEY。")
+        return None
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    payload = {
+        "model": config.AI_CONFIG["model"],
+        "messages": messages,
+        "temperature": config.AI_CONFIG["temperature"],
+        "max_tokens": config.AI_CONFIG["max_tokens"],
+    }
+    for attempt in range(1, 3):
+        AI_CALL_DIAGNOSTICS["attempts"] = attempt
+        try:
+            response = requests.post(
+                url=config.AI_CONFIG["base_url"],
+                headers={"Content-Type": "application/json; charset=utf-8", "Authorization": f"Bearer {api_key}"},
+                json=payload,
+                timeout=config.AI_CONFIG["timeout"],
+            )
+            response.raise_for_status()
+            content = str(response.json()["choices"][0]["message"]["content"] or "").strip()
+            if content:
+                AI_CALL_DIAGNOSTICS.update(status="ok", message="")
+                return content
+            error_message = "DeepSeek 返回了空内容。"
+        except requests.Timeout:
+            error_message = "DeepSeek 请求超时。"
+        except requests.HTTPError as exc:
+            status_code = getattr(exc.response, "status_code", "未知")
+            error_message = f"DeepSeek HTTP {status_code}。"
+        except requests.RequestException as exc:
+            error_message = f"DeepSeek 网络请求失败：{type(exc).__name__}。"
+        except (KeyError, TypeError, ValueError):
+            error_message = "DeepSeek 响应结构不完整。"
+        AI_CALL_DIAGNOSTICS.update(status="failed", message=error_message)
+    return None
+
+
+def normalize_date(value: str) -> str:
+    text = str(value or "").replace("-", "")[:8]
+    return text if len(text) == 8 and text.isdigit() else datetime.now().strftime("%Y%m%d")
+
+
+def _write_json(path: Path, data) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _read_json(path: Path):
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _raw_news_to_frame(raw_news: list[dict]):
+    try:
+        import pandas as pd
+    except Exception:  # pragma: no cover - pandas 是项目基础依赖，这里只是兜底
+        return None
+    rows = []
+    for item in raw_news or []:
+        rows.append(
+            {
+                "title": item.get("title") or "",
+                "date": item.get("publish_time") or "",
+                "source": item.get("source") or item.get("provider") or "",
+                "content": item.get("content_excerpt") or item.get("title") or "",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _legacy_news_records(news_df) -> list[dict]:
+    if news_df is None or getattr(news_df, "empty", True):
+        return []
+    records = []
+    for _, row in news_df.head(30).iterrows():
+        title = str(row.get("title") or "").strip()
+        if not title:
+            continue
+        records.append(
+            {
+                "title": title,
+                "source": str(row.get("source") or row.get("来源") or "东方财富").strip(),
+                "provider": "legacy_policy_news",
+                "providers": ["legacy_policy_news"],
+                "sources": [str(row.get("source") or row.get("来源") or "东方财富").strip()],
+                "source_count": 1,
+                "publish_time": str(row.get("date") or row.get("time") or row.get("发布时间") or "").strip(),
+                "url": str(row.get("url") or row.get("链接") or "").strip(),
+                "content_excerpt": str(row.get("content") or row.get("内容") or title).strip()[:180],
+            }
+        )
+    return records
+
+
+def _get_or_create_theme_filter(
+    cache_path: Path,
+    date_text: str,
+    hot_concepts: list[dict],
+    ai_news: list[dict],
+    call_ai_api_fn: Callable,
+) -> dict:
+    target = cache_path / f"theme_filter_{date_text}.json"
+    candidates = _theme_candidates(hot_concepts, ai_news)
+    if not candidates:
+        payload = {
+            "date": date_text,
+            "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            "items": [],
+            "message": "暂无可供AI筛选的概念或新闻题材。",
+        }
+        _write_json(target, payload)
+        return payload
+
+    prompt = _build_theme_filter_prompt(candidates)
+    raw = call_ai_api_fn(prompt=prompt, system="你是A股题材研究员，只做题材归因和风险分级，不给交易指令。")
+    items = _parse_theme_filter(raw)
+    payload = {
+        "date": date_text,
+        "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+        "items": items,
+        "message": "" if items else "AI未返回有效题材分级，保留原始概念热度供人工观察。",
+    }
+    _write_json(target, payload)
+    return payload
+
+
+def _theme_candidates(hot_concepts: list[dict], ai_news: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    for item in hot_concepts[:8]:
+        if not isinstance(item, dict):
+            continue
+        candidates.append(
+            {
+                "theme": item.get("concept") or item.get("name") or "",
+                "change": item.get("change"),
+                "heat": item.get("heat"),
+                "reason": item.get("reason") or "",
+                "source": item.get("source") or "concept",
+            }
+        )
+    for item in ai_news[:8]:
+        if not isinstance(item, dict):
+            continue
+        sectors = item.get("sectors") or []
+        if isinstance(sectors, str):
+            sectors = [sectors]
+        for sector in sectors[:3]:
+            candidates.append(
+                {
+                    "theme": sector,
+                    "change": None,
+                    "heat": item.get("strength"),
+                    "reason": item.get("reason") or item.get("news") or "",
+                    "source": "news",
+                }
+            )
+    seen = set()
+    unique = []
+    for item in candidates:
+        theme = str(item.get("theme") or "").strip()
+        if not theme or theme in seen:
+            continue
+        seen.add(theme)
+        item["theme"] = theme
+        unique.append(item)
+    return unique[:12]
+
+
+def _build_theme_filter_prompt(candidates: list[dict]) -> str:
+    lines = []
+    for idx, item in enumerate(candidates, start=1):
+        lines.append(
+            f"{idx}. 题材={item.get('theme')} 来源={item.get('source')} "
+            f"涨幅={item.get('change')} 热度={item.get('heat')} 原因={item.get('reason')}"
+        )
+    return (
+        "请从下面A股题材/新闻候选中筛掉噪音，只输出JSON数组。"
+        "每项字段必须为 theme、level、horizon、verdict、reason。"
+        "level只能取 strong/watch/noise/risk；horizon只能取 intraday/short/swing/unknown。"
+        "verdict用10字以内中文，例如强催化、观察、噪音、过热风险。不要输出交易指令。\n"
+        + "\n".join(lines)
+    )
+
+
+def _parse_theme_filter(raw: str | None) -> list[dict]:
+    if not raw:
+        return []
+    match = re.search(r"\[[\s\S]*\]", str(raw))
+    if not match:
+        return []
+    try:
+        parsed = json.loads(match.group())
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    valid = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        theme = str(item.get("theme") or item.get("concept") or "").strip()
+        if not theme:
+            continue
+        level = str(item.get("level") or "watch").strip().lower()
+        if level not in {"strong", "watch", "noise", "risk"}:
+            level = "watch"
+        horizon = str(item.get("horizon") or "unknown").strip().lower()
+        if horizon not in {"intraday", "short", "swing", "unknown"}:
+            horizon = "unknown"
+        valid.append(
+            {
+                "theme": theme,
+                "level": level,
+                "horizon": horizon,
+                "verdict": str(item.get("verdict") or "").strip()[:20],
+                "reason": str(item.get("reason") or "").strip()[:120],
+            }
+        )
+    return valid[:8]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="生成市场雷达的概念热度和新闻板块缓存")
+    parser.add_argument("--date", default=None, help="快照日期 YYYYMMDD，默认今天")
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    result = write_market_context_snapshot(cache_dir=args.cache_dir, snapshot_date=args.date)
+    print(
+        "市场上下文快照完成："
+        f"date={result['date']} concepts={result['concept_count']} "
+        f"news_items={result['news_item_count']} news_sectors={result['news_sector_count']}"
+    )
+    if int(result.get("raw_news_count") or 0) <= 0:
+        raise SystemExit("市场上下文更新失败：实时新闻源不可用，且没有通过时效检查的近期缓存。")
+
+
+if __name__ == "__main__":
+    main()
