@@ -36,6 +36,17 @@ TABLE_COLUMNS: dict[str, list[str]] = {
         "trade_date", "ts_code", "open", "high", "low", "close",
         "pre_close", "change", "pct_chg", "vol", "amount",
     ],
+    "fund_daily": [
+        "trade_date", "ts_code", "open", "high", "low", "close",
+        "pre_close", "change", "pct_chg", "vol", "amount",
+    ],
+    "index_basic": [
+        "ts_code", "name", "market", "publisher", "category",
+    ],
+    "fund_basic": [
+        "ts_code", "name", "management", "custodian", "fund_type",
+        "list_date", "delist_date", "status", "market",
+    ],
     "stock_basic": [
         "ts_code", "symbol", "name", "area", "industry", "market",
         "list_date", "list_status",
@@ -56,6 +67,9 @@ TABLE_KEYS: dict[str, list[str]] = {
     "stock_daily_basic": ["trade_date", "ts_code"],
     "stock_moneyflow": ["trade_date", "ts_code"],
     "index_daily": ["trade_date", "ts_code"],
+    "fund_daily": ["trade_date", "ts_code"],
+    "index_basic": ["ts_code"],
+    "fund_basic": ["ts_code"],
     "stock_basic": ["ts_code"],
     "fina_indicator": ["ts_code", "ann_date", "end_date"],
     "income": ["ts_code", "ann_date", "end_date"],
@@ -159,6 +173,43 @@ class HistoryStore:
             create index if not exists idx_index_daily_code_date
                 on index_daily(ts_code, trade_date);
 
+            create table if not exists fund_daily (
+                trade_date text not null,
+                ts_code text not null,
+                open real,
+                high real,
+                low real,
+                close real,
+                pre_close real,
+                change real,
+                pct_chg real,
+                vol real,
+                amount real,
+                primary key(trade_date, ts_code)
+            );
+            create index if not exists idx_fund_daily_code_date
+                on fund_daily(ts_code, trade_date);
+
+            create table if not exists index_basic (
+                ts_code text primary key,
+                name text,
+                market text,
+                publisher text,
+                category text
+            );
+
+            create table if not exists fund_basic (
+                ts_code text primary key,
+                name text,
+                management text,
+                custodian text,
+                fund_type text,
+                list_date text,
+                delist_date text,
+                status text,
+                market text
+            );
+
             create table if not exists stock_basic (
                 ts_code text primary key,
                 symbol text,
@@ -234,7 +285,7 @@ class HistoryStore:
         for col in columns:
             if col not in prepared.columns:
                 prepared[col] = None
-        for col in ("trade_date", "ann_date", "end_date", "list_date"):
+        for col in ("trade_date", "ann_date", "end_date", "list_date", "delist_date"):
             if col in prepared.columns:
                 prepared[col] = _normalize_date_series(prepared[col])
         for key in key_cols:

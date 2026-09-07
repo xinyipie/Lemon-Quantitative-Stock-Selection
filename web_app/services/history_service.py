@@ -79,6 +79,7 @@ def build_stock_verdict(detail: dict) -> dict:
     moneyflow = detail.get("latest_moneyflow") or {}
     finance = detail.get("latest_finance") or {}
     signal = detail.get("signal_state") or {}
+    asset_type = detail.get("asset_type") or "stock"
 
     score = 0
     reasons = []
@@ -97,6 +98,20 @@ def build_stock_verdict(detail: dict) -> dict:
         reasons.append("近80日趋势有延续")
     elif ret80 is not None and ret80 < -10:
         risks.append("近80日表现较弱")
+
+    if asset_type != "stock":
+        if score >= 2:
+            level = "趋势偏强"
+        elif risks:
+            level = "趋势偏弱"
+        else:
+            level = "中性观察"
+        return {
+            "level": level,
+            "score": score,
+            "reasons": reasons[:4],
+            "risks": risks[:4],
+        }
 
     pe = _num(basic.get("pe_ttm"))
     pb = _num(basic.get("pb"))

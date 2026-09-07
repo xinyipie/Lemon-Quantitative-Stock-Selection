@@ -21,6 +21,14 @@ class SectorEventReaderTemplateTest(unittest.TestCase):
         self.assertIn("overflow-y: auto;", css)
         self.assertIn("overscroll-behavior: contain;", css)
 
+    def test_radar_situation_layout_is_compact_and_responsive(self):
+        css = Path("web_app/static/app.css").read_text(encoding="utf-8")
+
+        self.assertIn("MARKET RADAR SITUATION 20260818", css)
+        self.assertIn(".radar-situation-grid", css)
+        self.assertIn("grid-template-columns: repeat(4, minmax(0, 1fr));", css)
+        self.assertIn(".radar-situation-card", css)
+
 
 if __name__ == "__main__":
     unittest.main()

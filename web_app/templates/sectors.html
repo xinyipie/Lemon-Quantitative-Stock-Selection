@@ -23,7 +23,7 @@
 
 <section class="radar-refresh-strip panel" data-update-status-url="/update/status">
   <div class="radar-refresh-main">
-    <strong>市场雷达刷新状态</strong>
+    <strong>刷新任务状态 <small>数据对齐情况见下方数据时钟</small></strong>
     <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行市场雷达刷新；点击后会先补核心行情，再刷新雷达。" }}</span>
     <span data-update-finished {% if not update_status.finished_at or update_status.running %}hidden{% endif %}>{{ "完成" if update_status and update_status.state == "finished" else "结束" }} {{ update_status.finished_at if update_status and update_status.finished_at else "" }}</span>
   </div>
@@ -38,15 +38,27 @@
 {% set news_selection = concept_news.news.get("selection", {}) %}
 {% set brief = decision.get("research_brief", {}) %}
 {% set brief_quality = brief.get("data_quality", {}) %}
-<section class="radar-refresh-strip panel">
-  <div class="radar-refresh-main">
-    <strong>消息雷达默认更新到最新可用交易日</strong>
-    <span>行情 {{ brief_quality.sector_date or radar.end_date or "-" }}</span>
-    <span>新闻 {{ brief_quality.news_date or "-" }}</span>
-    <span>概念 {{ brief_quality.concept_date or "-" }}</span>
-    {% if latest_radar_snapshot %}
-      <span>已保存复盘 {{ latest_radar_snapshot.radar_date|fmt_date }}</span>
-    {% endif %}
+{% set pipeline = concept_news.pipeline_health or {} %}
+<section class="radar-freshness-panel panel {{ freshness.overall_status or 'degraded' }}">
+  <div class="radar-freshness-head">
+    <div>
+      <strong>市场雷达数据时钟</strong>
+      <p>{{ freshness.summary or "正在核验各模块数据日期。" }}</p>
+    </div>
+    <span class="freshness-overall {{ freshness.overall_status or 'degraded' }}">
+      {{ "全部对齐" if freshness.overall_status == "fresh" else "停止判断" if freshness.overall_status == "blocked" else "降级运行" }}
+    </span>
+  </div>
+  <div class="radar-freshness-grid">
+    {% for key in ["market", "news", "concepts", "strategy"] %}
+      {% set module = freshness.modules.get(key, {}) if freshness and freshness.modules else {} %}
+      <article class="freshness-module {{ module.freshness_status or 'unknown' }}">
+        <span>{{ module.name or key }}</span>
+        <strong>{{ module.freshness_label or "待更新" }}</strong>
+        <small>{{ module.display_time|fmt_date if module.display_time else "无可验证日期" }}</small>
+        <p>{{ module.freshness_reason or "尚未完成时效核验。" }}</p>
+      </article>
+    {% endfor %}
   </div>
   <details class="radar-history-filter">
     <summary>历史复盘</summary>
@@ -58,7 +70,9 @@
   </details>
 </section>
 <nav class="page-section-nav" aria-label="市场雷达页面分区">
+  <a href="#radar-situation">最新态势</a>
   <a href="#research-brief">研究简报</a>
+  <a href="#ai-news-brief">AI消息研判</a>
   <a href="#key-events">关键事件</a>
   <a href="#mainline-view">主线判断</a>
   <a href="#strategy-overlap">策略共振</a>
@@ -66,10 +80,48 @@
   <a href="#sector-candidates">板块候选</a>
   <a href="#risk-sectors">风险提醒</a>
 </nav>
+{% set situation_news_count = ai_news_brief.news_count if ai_news_brief.status == "ok" else (pipeline.raw_count or 0) %}
+{% set situation_pending_count = ai_news_brief.neutral_focus|length if ai_news_brief.status == "ok" else (pipeline.unresolved_count or 0) %}
+{% set situation_risk_count = ai_news_brief.risk_focus|length if ai_news_brief.status == "ok" else (radar.summary.risky_count or 0) %}
+<section id="radar-situation" class="panel radar-situation-panel">
+  <div class="radar-situation-head">
+    <div>
+      <span class="eyebrow">Live Market Signals</span>
+      <h2>最新雷达态势</h2>
+      <p>独立追踪消息、行业与量价变化，不承担日报核查职责。</p>
+    </div>
+    <div class="radar-situation-state">
+      <span class="tag {{ decision.tone or 'neutral' }}">{{ decision.alignment or "等待判断" }}</span>
+      <small>{{ freshness.summary or "等待数据核验" }}</small>
+    </div>
+  </div>
+  <div class="radar-situation-grid">
+    <a class="radar-situation-card changes" href="#ai-news-brief">
+      <div class="radar-situation-metric"><span>新变化</span><b>{{ situation_news_count }}</b></div>
+      <strong>{{ ai_news_brief.summary if ai_news_brief.status == "ok" else (pipeline.source_label or "等待新消息") }}</strong>
+      <small>查看消息研判与来源状态</small>
+    </a>
+    <a class="radar-situation-card resonance" href="#mainline-view">
+      <div class="radar-situation-metric"><span>量价共振</span><b>{{ decision.focus_industries|length }}</b></div>
+      <strong>{{ decision.focus_industries|join("、") if decision.focus_industries else (decision.alignment or "尚未形成共振") }}</strong>
+      <small>{{ decision.explanation or "等待行业趋势与量价信号互相验证" }}</small>
+    </a>
+    <a class="radar-situation-card pending" href="#key-events">
+      <div class="radar-situation-metric"><span>待确认</span><b>{{ situation_pending_count }}</b></div>
+      <strong>{{ "消息与行情尚未闭环" if situation_pending_count else "暂无新增待确认项" }}</strong>
+      <small>查看时效、行业映射与验证条件</small>
+    </a>
+    <a class="radar-situation-card risk" href="#risk-sectors">
+      <div class="radar-situation-metric"><span>风险变化</span><b>{{ situation_risk_count }}</b></div>
+      <strong>{{ decision.avoid_industries|join("、") if decision.avoid_industries else "暂无明确扩散风险" }}</strong>
+      <small>利空只作风险提示，不作为推荐</small>
+    </a>
+  </div>
+</section>
 {% macro render_event_card(event) -%}
 <article class="event-decision-card {{ event.impact_tone or 'neutral' }}">
   <div class="event-decision-head">
-    <span class="impact-badge {{ event.impact_tone or 'neutral' }}">{{ event.impact_label or event.impact or "待判定" }} {{ event.materiality }}级</span>
+    <span class="impact-badge {{ event.impact_tone or 'neutral' }}">{{ event.impact_label or event.impact or "待判定" }}{% if event.materiality %} {{ event.materiality }}级{% endif %}</span>
     <span>{{ event.mapped_industries|join("、") or "相关行业" }}</span>
     <span>{{ event.freshness_label or event.catalyst_clock or "时效待核验" }}</span>
     <span>{{ event.source_quality or "来源待核验" }}</span>
@@ -82,7 +134,7 @@
     {% endif %}
   </h3>
   <p class="event-impact-text">{{ event.impact_degree_text or event.effect_summary or event.risk_note }}</p>
-  <p>{{ event.effect_summary or event.risk_note }}</p>
+  {% if event.effect_summary and event.effect_summary != event.impact_degree_text %}<p>{{ event.effect_summary }}</p>{% endif %}
   <div class="event-source-meta detailed">
     <span>原始媒体：{{ event.original_source or event.source_name or "未知" }}</span>
     <span>采集通道：{{ event.source_channel or "新闻缓存" }}</span>
@@ -98,8 +150,8 @@
     </ul>
   {% endif %}
   <div class="event-jump-links">
-    {% if event.industry_anchor %}<a href="#{{ event.industry_anchor }}">看相关行业</a>{% endif %}
-    {% if event.stock_anchor %}<a href="#{{ event.stock_anchor }}">看相关个股</a>{% endif %}
+    {% if event.mapped_industries %}<a href="#mainline-view">看相关行业</a>{% endif %}
+    {% if event.mapped_industries %}<a href="#sector-candidates">看相关个股</a>{% endif %}
     {% if event.source_url %}<a href="{{ event.source_url }}" target="_blank" rel="noopener">看原文</a>{% else %}<span>原文缺失</span>{% endif %}
   </div>
 </article>
@@ -120,6 +172,7 @@
     {% elif source_date %}
       <span class="message-source-time">采集 {{ source_date|fmt_date }}</span>
     {% endif %}
+    {% if item.age_text %}<span class="freshness-chip {{ item.freshness_status }}">{{ item.age_text }} · {{ item.freshness_label }}</span>{% endif %}
     <span>{{ item.quality }}</span>
     <span>强度 {{ item.strength_text }}</span>
     <span>{{ item.duration }}</span>
@@ -245,6 +298,112 @@
   </div>
 </section>
 
+<section id="ai-news-brief" class="panel ai-news-brief-panel">
+  <div class="panel-head ai-news-brief-head">
+    <div>
+      <span class="eyebrow">AI News Intelligence</span>
+      <h2>AI 消息面研判</h2>
+      <p>汇总时效合格新闻，与健康主线和量化候选交叉验证；独立展示，不影响任何量化分数。</p>
+    </div>
+    <div class="ai-news-meta">
+      <span>{{ ai_news_brief.target_date|fmt_date if ai_news_brief.target_date else "日期待更新" }}</span>
+      <span>{{ ai_news_brief.news_count or 0 }} 条消息</span>
+      {% if ai_news_brief.last_refresh_slot_text or ai_news_brief.refresh_slot_text %}<span>{{ ai_news_brief.last_refresh_slot_text or ai_news_brief.refresh_slot_text }}</span>{% endif %}
+      <span>{{ ai_news_brief.cache_status_text }}</span>
+    </div>
+  </div>
+  {% if ai_news_brief.status == "ok" %}
+    <div class="ai-news-summary-band">
+      <div><span>消息面结论</span><strong>{{ ai_news_brief.summary }}</strong></div>
+      <small>内容生成于 {{ ai_news_brief.generated_at }}{% if ai_news_brief.last_checked_at and ai_news_brief.last_checked_at != ai_news_brief.generated_at %} · 最近检查 {{ ai_news_brief.last_checked_at }}{% endif %} · AI仅作独立研究判断</small>
+    </div>
+    <div class="ai-news-driver-grid">
+      <div>
+        <strong>主要驱动</strong>
+        {% if ai_news_brief.drivers %}<ul>{% for item in ai_news_brief.drivers %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>暂无集中驱动。</p>{% endif %}
+      </div>
+      <div class="risk">
+        <strong>主要风险</strong>
+        {% if ai_news_brief.risks %}<ul>{% for item in ai_news_brief.risks %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>暂无新增风险结论。</p>{% endif %}
+      </div>
+    </div>
+    <div class="ai-news-focus-grid">
+      <section class="ai-focus-column">
+        <div class="ai-focus-title"><div><span>SECTOR FOCUS</span><h3>关注板块</h3></div><b>{{ ai_news_brief.sector_focus|length }}</b></div>
+        {% if ai_news_brief.sector_focus %}
+          <div class="ai-focus-list">
+          {% for item in ai_news_brief.sector_focus %}
+            <article class="ai-sector-card {{ 'warn' if item.stance == '谨慎' else 'ok' if item.stance == '关注' else 'neutral' }}">
+              <div class="ai-card-title"><strong>{{ item.industry }}</strong><span>{{ item.stance }} · {{ item.confidence }}置信</span></div>
+              <div class="ai-relation">{{ item.relation }}</div>
+              <p>{{ item.reason }}</p>
+              {% if item.impact_chain %}<div class="ai-news-logic"><b>影响传导：</b>{{ item.impact_chain }}</div>{% endif %}
+              {% if item.market_check %}<div class="ai-news-logic"><b>量价校验：</b>{{ item.market_check }}</div>{% endif %}
+              <dl><div><dt>验证</dt><dd>{{ item.validation }}</dd></div><div><dt>失效</dt><dd>{{ item.invalidation }}</dd></div></dl>
+              {% if item.evidence_details %}<details><summary>查看完整证据 {{ item.evidence_details|length }} 条</summary><ul>{% for evidence in item.evidence_details %}<li><strong>{{ evidence.title }}</strong>{% if evidence.sources %}<small>来源：{{ evidence.sources|join('、') }}</small>{% endif %}{% if evidence.publish_time %}<small>发布：{{ evidence.publish_time }}</small>{% endif %}{% if evidence.assessment_reason %}<span>{{ evidence.direction }} · {{ evidence.value_level }}价值 · {{ evidence.confidence }}置信：{{ evidence.assessment_reason }}</span>{% endif %}</li>{% endfor %}</ul></details>{% elif item.evidence_titles %}<details><summary>关联消息 {{ item.evidence_titles|length }} 条</summary><ul>{% for title in item.evidence_titles %}<li>{{ title }}</li>{% endfor %}</ul></details>{% endif %}
+            </article>
+          {% endfor %}
+          </div>
+        {% else %}<div class="empty-state soft">AI 已完成研判，但消息方向与健康主线没有形成足够共振，本期不强行给出板块关注项。</div>{% endif %}
+      </section>
+      <section class="ai-focus-column stocks">
+        <div class="ai-focus-title"><div><span>OPPORTUNITY & RISK</span><h3>个股消息研判</h3></div><b>{{ ai_news_brief.stock_focus|length }}</b></div>
+        <p class="ai-origin-note">默认只看利多机会；利空是风险提示，不代表推荐。AI 不改变量化分。</p>
+        {% if ai_news_brief.stock_focus %}
+          <div class="ai-direction-tabs" role="tablist" aria-label="个股消息方向">
+            <button type="button" class="active" data-ai-direction="利多">利多机会 <b>{{ ai_news_brief.bullish_focus|length }}</b></button>
+            <button type="button" data-ai-direction="利空">利空风险 <b>{{ ai_news_brief.risk_focus|length }}</b></button>
+            <button type="button" data-ai-direction="中性">中性待确认 <b>{{ ai_news_brief.neutral_focus|length }}</b></button>
+            <button type="button" data-ai-direction="全部">全部 <b>{{ ai_news_brief.stock_focus|length }}</b></button>
+          </div>
+          <div class="ai-focus-list stock-list">
+          {% for item in ai_news_brief.stock_focus %}
+            <article class="ai-stock-card direction-{{ item.impact_direction or '中性' }}" data-impact-direction="{{ item.impact_direction or '中性' }}"{% if (item.impact_direction or '中性') != '利多' %} hidden{% endif %}>
+              <div class="ai-card-title"><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong><small>{{ item.ts_code }} · {{ item.industry }}</small></a><span class="ai-stance">{{ item.stance }}</span></div>
+              <div class="ai-source-tags"><span class="ai-direction-tag {{ item.impact_direction or '中性' }}">{{ item.impact_direction or '中性' }}</span><span class="ai-source-tag {{ item.focus_type }}">{{ item.focus_type }}</span><span class="ai-relation">{{ item.relation_label }}</span></div>
+              <p>{{ item.reason }}</p>
+              {% if item.news_logic %}<div class="ai-news-logic">消息逻辑：{{ item.news_logic }}</div>{% endif %}
+              {% if item.market_check %}<div class="ai-news-logic">当前校验：{{ item.market_check }}</div>{% endif %}
+              <div class="ai-stock-check"><span>验证：{{ item.validation }}</span><span>风险：{{ item.risk }}</span></div>
+              {% if item.evidence_details %}<details><summary>查看完整证据 {{ item.evidence_details|length }} 条</summary><ul>{% for evidence in item.evidence_details %}<li><strong>{{ evidence.title }}</strong>{% if evidence.sources %}<small>来源：{{ evidence.sources|join('、') }}</small>{% endif %}{% if evidence.publish_time %}<small>发布：{{ evidence.publish_time }}</small>{% endif %}{% if evidence.assessment_reason %}<span>{{ evidence.direction }} · {{ evidence.value_level }}价值 · {{ evidence.confidence }}置信：{{ evidence.assessment_reason }}</span>{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+            </article>
+          {% endfor %}
+          </div>
+          <div class="empty-state soft ai-direction-empty" hidden>当前方向没有符合条件的个股。</div>
+        {% else %}<div class="empty-state soft">当前没有形成可验证的个股消息研判。</div>{% endif %}
+      </section>
+    </div>
+  {% else %}
+    <div class="ai-news-unavailable">
+      <strong>本次未形成可靠 AI 研判</strong>
+      <p>{{ ai_news_brief.message }}</p>
+      <span>原始新闻、关键事件和量化主线仍可正常使用。</span>
+    </div>
+  {% endif %}
+</section>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  document.querySelectorAll(".ai-direction-tabs").forEach(function (tabs) {
+    var column = tabs.closest(".ai-focus-column");
+    var cards = Array.from(column.querySelectorAll(".ai-stock-card"));
+    var empty = column.querySelector(".ai-direction-empty");
+    tabs.querySelectorAll("button").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var direction = button.dataset.aiDirection;
+        var visible = 0;
+        tabs.querySelectorAll("button").forEach(function (item) { item.classList.toggle("active", item === button); });
+        cards.forEach(function (card) {
+          var show = direction === "全部" || card.dataset.impactDirection === direction;
+          card.hidden = !show;
+          if (show) visible += 1;
+        });
+        if (empty) empty.hidden = visible !== 0;
+      });
+    });
+  });
+});
+</script>
+
 <section class="radar-workbench">
 <section id="key-events" class="panel event-watchlist-panel event-workbench-main redesigned">
     {% set event_groups = brief.event_groups or {} %}
@@ -277,7 +436,7 @@
       <a href="#event-catalysts">今日新增催化 <b>{{ catalyst_rows|length }}</b></a>
       <a href="#event-risk">风险 <b>{{ risk_rows|length }}</b></a>
       <a href="#event-background">背景 <b>{{ background_rows|length }}</b></a>
-      <a href="#event-source-gap">待核验 <b>{{ source_gap_rows|length }}</b></a>
+      {% if source_gap_rows %}<a href="#event-source-gap">待核验 <b>{{ source_gap_rows|length }}</b></a>{% endif %}
     </div>
 
     <div class="event-reader-shell" data-legacy-layout="event-impact-columns positive-column risk-column">
@@ -289,6 +448,7 @@
           </div>
           <b>{{ readable_events|length }} 条</b>
         </div>
+        {% if reading_positive_rows or reading_negative_rows %}
         <div class="event-reader-columns">
           <div class="event-reader-column bullish">
             <div class="event-reader-column-head">
@@ -317,6 +477,9 @@
             {% endif %}
           </div>
         </div>
+        {% else %}
+          <div class="event-direction-empty"><strong>暂无明确利多 / 利空</strong><span>当前消息均为规则待判或背景信息，不强行归类。</span></div>
+        {% endif %}
         {% if reading_mixed_rows %}
           <div class="event-reader-mixed">
             <div class="event-reader-column-head">
@@ -335,7 +498,7 @@
           <a href="#event-catalysts"><strong>{{ catalyst_rows|length }}</strong><span>今日催化</span></a>
           <a href="#event-risk"><strong>{{ risk_rows|length }}</strong><span>风险阻断</span></a>
           <a href="#event-background"><strong>{{ background_rows|length }}</strong><span>背景消息</span></a>
-          <a href="#event-source-gap"><strong>{{ source_gap_rows|length }}</strong><span>来源待核验</span></a>
+          {% if source_gap_rows %}<a href="#event-source-gap"><strong>{{ source_gap_rows|length }}</strong><span>来源待核验</span></a>{% else %}<span><strong>0</strong><span>来源待核验</span></span>{% endif %}
         </div>
         <div class="event-quick-section" id="event-catalysts">
           <strong>先看催化</strong>
@@ -416,7 +579,7 @@
   <section class="panel sector-thesis-panel">
     <div class="panel-head">
       <div>
-        <h2>行业 Thesis</h2>
+        <h2>行业研判</h2>
         <p>把行业热度、事件质量、风险冲突合成研究判断。</p>
       </div>
     </div>
@@ -660,6 +823,37 @@
       </div>
     </div>
 
+    {% set pipeline = concept_news.pipeline_health or {} %}
+    {% if pipeline %}
+    <div class="message-pipeline" aria-label="消息处理状态">
+      <div class="message-pipeline-head">
+        <div>
+          <strong>消息处理状态</strong>
+          <span>{{ pipeline.source_detail }}</span>
+        </div>
+        <div class="message-pipeline-badges">
+          <span class="pipeline-state {{ pipeline.source_tone }}">{{ pipeline.source_label }}</span>
+          <span class="pipeline-state {{ pipeline.ai_tone }}">{{ pipeline.ai_label }}</span>
+        </div>
+      </div>
+      <div class="message-pipeline-flow">
+        {% for step in pipeline.funnel %}
+        <div class="message-pipeline-step">
+          <span>{{ step.label }}</span>
+          <strong>{{ step.count }}</strong>
+          <small>{{ step.note }}</small>
+        </div>
+        {% endfor %}
+      </div>
+      {% if pipeline.source_message or pipeline.ai_message %}
+      <div class="message-pipeline-note">
+        {% if pipeline.source_message %}<span>数据源：{{ pipeline.source_message }}</span>{% endif %}
+        {% if pipeline.ai_message %}<span>AI：{{ pipeline.ai_message }}</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if news_items %}
       {% set message_positive_items = news_items|selectattr("impact", "equalto", "positive")|list %}
       {% set message_negative_items = news_items|selectattr("impact", "equalto", "negative")|list %}
@@ -815,53 +1009,54 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>各主线板块候选</h2>
-      <p>这里是每个健康主线里的候选 Top3，用于进一步体检；真正优先看的，是上方“策略共振观察”。</p>
+      <h2>主线板块与个股证据</h2>
+      <p>按板块集中展示候选、量价角色、事件共振和下一步验证，不再重复铺设个股卡片。</p>
     </div>
   </div>
   {% if radar.candidate_groups %}
+  {% set evidence_by_code = {} %}
+  {% for stock in brief.stock_watchlist or [] %}{% set _ = evidence_by_code.update({stock.ts_code: stock}) %}{% endfor %}
   <div class="sector-candidate-grid">
     {% for group in radar.candidate_groups %}
-    <section class="sector-candidate-group" id="{{ group.anchor_id }}">
-      <div class="sector-candidate-head">
+    <details class="sector-candidate-group" id="{{ group.anchor_id }}" {% if loop.index <= 2 %}open{% endif %}>
+      <summary class="sector-candidate-head">
         <div>
           <strong>{{ group.industry }}</strong>
           <span>{{ group.sector.stage }} · 热度 {{ group.sector.heat_score_text }} · {{ group.sector.action }}</span>
         </div>
         <small>{{ group.sector.summary }}</small>
-      </div>
+      </summary>
       <table class="dense-table sector-mini-table">
         <thead>
           <tr>
             <th>排名</th>
             <th>股票</th>
             <th>分数</th>
-            <th>5日</th>
-            <th>10日</th>
+            <th>阶段表现</th>
             <th>相对板块</th>
-            <th>动作</th>
-            <th>风险提示</th>
+            <th>证据组合</th>
+            <th>动作 / 下一步验证</th>
           </tr>
         </thead>
         <tbody>
           {% for item in group.candidates %}
+          {% set stock = evidence_by_code.get(item.ts_code) %}
           <tr>
             <td>{{ item.candidate_rank }}</td>
             <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong><br><span class="muted">{{ item.ts_code }}</span></a></td>
             <td><strong>{{ item.candidate_score_text }}</strong></td>
-            <td class="{{ 'market-up' if item.ret_5d >= 0 else 'market-down' }}">{{ item.ret_5d_text }}</td>
-            <td class="{{ 'market-up' if item.ret_10d >= 0 else 'market-down' }}">{{ item.ret_10d_text }}</td>
+            <td><span class="{{ 'market-up' if item.ret_5d >= 0 else 'market-down' }}">5日 {{ item.ret_5d_text }}</span><br><span class="{{ 'market-up' if item.ret_10d >= 0 else 'market-down' }}">10日 {{ item.ret_10d_text }}</span></td>
             <td class="{{ 'market-up' if item.stock_vs_sector_10d >= 0 else 'market-down' }}">
               <strong>{{ item.stock_vs_sector_10d_text }}</strong>
               <div class="muted">{{ item.sector_relative_label }}</div>
             </td>
-            <td><span class="tag {{ item.tone }}">{{ item.action_tag }}</span></td>
-            <td class="reason">{{ item.risk_note }}<br><span class="muted">{{ item.candidate_reason }}</span></td>
+            <td class="candidate-evidence-cell">{% if stock %}<strong>{{ stock.resonance_level or "★" }} {{ stock.stock_role }}</strong><span>{{ stock.market_behavior }} · {{ stock.event_relevance }}</span>{% else %}<strong>板块候选</strong><span>暂无独立事件证据</span>{% endif %}</td>
+            <td class="candidate-action-cell"><span class="tag {{ item.tone }}">{{ stock.research_action if stock else item.action_tag }}</span><span>{{ stock.validation_conditions[0] if stock and stock.validation_conditions else item.candidate_reason }}</span>{% if item.risk_note %}<small>{{ item.risk_note }}</small>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
-    </section>
+    </details>
     {% endfor %}
   </div>
   {% else %}

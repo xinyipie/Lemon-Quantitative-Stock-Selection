@@ -56,20 +56,37 @@ def current_half_year_period(end_date: str) -> tuple[str, str, str]:
     return f"{year}H2", f"{year}0701", end_text
 
 
+def previous_half_year_period(end_date: str) -> tuple[str, str, str]:
+    """返回当前半年度之前的完整半年，用于继续回填尚未成熟的80日结果。"""
+    end_text = normalize_date(end_date)
+    year = int(end_text[:4])
+    if end_text[4:6] <= "06":
+        previous_year = year - 1
+        return f"{previous_year}H2", f"{previous_year}0701", f"{previous_year}1231"
+    return f"{year}H1", f"{year}0101", f"{year}0630"
+
+
+def all_half_year_periods(end_date: str, start_year: int = 2024) -> list[tuple[str, str, str]]:
+    """动态生成历史半年区间，避免年份列表写死后漏掉新年度。"""
+    end_text = normalize_date(end_date)
+    end_year = int(end_text[:4])
+    periods = []
+    for year in range(start_year, end_year + 1):
+        for half, start, period_end in (
+            ("H1", f"{year}0101", f"{year}0630"),
+            ("H2", f"{year}0701", f"{year}1231"),
+        ):
+            if start > end_text:
+                continue
+            periods.append((f"{year}{half}", start, min(period_end, end_text)))
+    return periods
+
+
 def build_longterm_periods(end_date: str, full_history: bool = False) -> list[tuple[str, str, str]]:
     current = current_half_year_period(end_date)
-    if not full_history:
-        return [current]
-    fixed = [
-        ("2024H1", "20240101", "20240630"),
-        ("2024H2", "20240701", "20241231"),
-        ("2025H1", "20250101", "20250630"),
-        ("2025H2", "20250701", "20251231"),
-    ]
-    periods = [item for item in fixed if item[1] <= normalize_date(end_date)]
-    if current[0] not in {item[0] for item in periods}:
-        periods.append(current)
-    return periods
+    if full_history:
+        return all_half_year_periods(end_date)
+    return [current]
 
 
 def latest_history_trade_date(history_db: Path = DEFAULT_HISTORY_DB) -> str | None:
@@ -149,6 +166,7 @@ def refresh_market_radar_snapshot(
         return None
 
     from market_radar.store import get_latest_market_radar_snapshot, save_market_radar_snapshot
+    from market_radar.ai_news_brief import generate_ai_news_brief
     from web_app.app import _SECTOR_PAGE_DISK_CACHE, _sector_page_disk_cache_key, save_sector_page_cache
     from web_app.services.sector_service import (
         build_concept_news_radar,
@@ -159,14 +177,15 @@ def refresh_market_radar_snapshot(
 
     end_date = normalize_date(radar_date) if radar_date else None
     radar = build_sector_radar(history_db, end_date=end_date)
-    concept_news = build_concept_news_radar(signal_db, today=end_date)
+    concept_news = build_concept_news_radar(signal_db, today=end_date, limit=30)
+    snapshot_date = normalize_date(str(radar.get("end_date") or end_date or today_text()))
+    ai_news_brief = generate_ai_news_brief(radar, concept_news, snapshot_date)
     decision = build_market_radar_decision(radar, concept_news)
     brief = decision.get("research_brief") if isinstance(decision, dict) else None
     if not isinstance(brief, dict) or not brief:
         print("市场雷达快照跳过：未生成研究简报。")
         return None
 
-    snapshot_date = normalize_date(str(radar.get("end_date") or end_date or today_text()))
     row_id = save_market_radar_snapshot(signal_db, snapshot_date, brief, decision)
     strategy_overlap = build_strategy_overlap(signal_db, radar, concept_news)
     page_payload = {
@@ -174,6 +193,8 @@ def refresh_market_radar_snapshot(
         "concept_news": concept_news,
         "decision": decision,
         "strategy_overlap": strategy_overlap,
+        "ai_news_brief": ai_news_brief,
+        "ai_input_audit": ai_news_brief.get("input_audit") or {},
         "latest_radar_snapshot": get_latest_market_radar_snapshot(signal_db),
     }
     save_sector_page_cache(
@@ -257,6 +278,14 @@ def run_update(args: argparse.Namespace) -> None:
         if not args.skip_market_context:
             run_command([py, "market_context_snapshot.py", "--date", effective_end], args.dry_run)
         refresh_market_radar_snapshot(args.history_db, args.signal_db, effective_end, dry_run=args.dry_run)
+        _generate_leadership_report(
+            py,
+            args,
+            report_date=today_text(),
+            market_date=effective_end,
+            slot="morning",
+            retry_if_missing=True,
+        )
         print("\n市场雷达更新流程完成。")
         return
 
@@ -288,6 +317,9 @@ def run_update(args: argparse.Namespace) -> None:
                     "moneyflow",
                     "stock_basic",
                     "index_daily",
+                    "fund_daily",
+                    "index_basic",
+                    "fund_basic",
                 ],
                 args.dry_run,
             )
@@ -424,6 +456,29 @@ def run_update(args: argparse.Namespace) -> None:
                 args.dry_run,
             )
 
+    # 只给既有长线样本补收益路径，不重新选股、不改变历史评分和入池名单。
+    run_command(
+        [
+            py,
+            "longterm_outcome_refresher.py",
+            "--signal-db",
+            str(args.signal_db),
+            "--history-db",
+            str(args.history_db),
+        ],
+        args.dry_run,
+    )
+
+    if update_mode == "full" and not fast_mode:
+        _generate_leadership_report(
+            py,
+            args,
+            report_date=today_text(),
+            market_date=effective_end,
+            slot="night",
+            retry_if_missing=False,
+        )
+
     print("\nWeb 数据同步流程完成。")
 
 
@@ -471,6 +526,36 @@ def _generate_daily_ai_brief(py: str, args: argparse.Namespace, effective_end: s
         ],
         args.dry_run,
     )
+
+
+def _generate_leadership_report(
+    py: str,
+    args: argparse.Namespace,
+    report_date: str,
+    market_date: str,
+    slot: str,
+    retry_if_missing: bool,
+) -> None:
+    """调用独立日报进程；生成失败由日报任务自行记录，不中断数据更新。"""
+    if getattr(args, "skip_daily_report", False):
+        return
+    command = [
+        py,
+        "daily_research_report.py",
+        "--report-date",
+        report_date,
+        "--market-date",
+        market_date,
+        "--signal-db",
+        str(args.signal_db),
+        "--history-db",
+        str(args.history_db),
+        "--slot",
+        slot,
+    ]
+    if retry_if_missing:
+        command.append("--retry-if-missing")
+    run_command(command, args.dry_run)
 
 
 def _dragon_limit_pool_collector_path() -> Path | None:
@@ -532,6 +617,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ai-explanation-limit", type=int, default=0, help="每类信号最多生成多少条AI解释，0表示不限")
     parser.add_argument("--skip-short-review", action="store_true")
     parser.add_argument("--skip-longterm-audit", action="store_true")
+    parser.add_argument("--skip-daily-report", action="store_true", help="跳过管理层市场研究日报生成")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的命令")
     return parser.parse_args()
 

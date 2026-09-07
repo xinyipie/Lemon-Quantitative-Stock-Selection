@@ -60,6 +60,34 @@ class AiNewsResilienceTest(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         self.assertEqual(AI_CALL_DIAGNOSTICS["status"], "ok")
 
+    @patch("market_context_snapshot.config.AI_CONFIG", {
+        "api_key": "test-key",
+        "base_url": "https://example.com/chat/completions",
+        "model": "deepseek-v4-flash",
+        "temperature": 0.1,
+        "max_tokens": 100,
+        "timeout": 5,
+    })
+    @patch("market_context_snapshot.requests.post")
+    def test_api_supports_reasoning_model_and_json_mode(self, post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+        post.return_value = response
+
+        result = call_ai_api(
+            "test",
+            model="deepseek-v4-pro",
+            thinking=True,
+            json_mode=True,
+        )
+
+        self.assertEqual(result, "{}")
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "deepseek-v4-pro")
+        self.assertEqual(payload["thinking"], {"type": "enabled", "reasoning_effort": "high"})
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+
 
 if __name__ == "__main__":
     unittest.main()

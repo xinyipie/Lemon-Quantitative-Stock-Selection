@@ -14,6 +14,29 @@ from history_store import DEFAULT_HISTORY_DB_PATH
 from signal_store import DEFAULT_DB_PATH as DEFAULT_SIGNAL_DB_PATH
 
 
+ASSET_TABLES = {
+    "stock": ("stock_basic", "stock_daily"),
+    "index": ("index_basic", "index_daily"),
+    "fund": ("fund_basic", "fund_daily"),
+}
+
+ASSET_LABELS = {"stock": "股票", "index": "指数", "fund": "ETF/场内基金"}
+
+INDEX_ALIASES = {
+    "上证": "000001.SH",
+    "上证指数": "000001.SH",
+    "上证50": "000016.SH",
+    "沪深300": "000300.SH",
+    "科创50": "000688.SH",
+    "中证500": "000905.SH",
+    "中证1000": "000852.SH",
+    "深证成指": "399001.SZ",
+    "深证指数": "399001.SZ",
+    "创业板指": "399006.SZ",
+    "创业板指数": "399006.SZ",
+}
+
+
 def query_stock_history(
     code: str,
     history_db: str | Path = DEFAULT_HISTORY_DB_PATH,
@@ -23,11 +46,13 @@ def query_stock_history(
     conn = sqlite3.connect(history_db)
     conn.row_factory = sqlite3.Row
     try:
-        ts_code = _resolve_ts_code(conn, query)
-        stock = _query_stock_basic(conn, ts_code)
+        instrument = _resolve_instrument(conn, query)
+        ts_code = instrument["ts_code"]
+        asset_type = instrument["asset_type"]
+        daily_table = ASSET_TABLES[asset_type][1]
         daily_rows = conn.execute(
-            """
-            select trade_date, close, pct_chg from stock_daily
+            f"""
+            select trade_date, close, pct_chg from {daily_table}
             where ts_code = ?
             order by trade_date desc
             limit 120
@@ -36,20 +61,22 @@ def query_stock_history(
         ).fetchall()
         latest_daily = dict(daily_rows[0]) if daily_rows else {}
         latest_trade_date = latest_daily.get("trade_date")
-        latest_basic = _query_latest_by_trade_date(conn, "stock_daily_basic", ts_code)
-        latest_moneyflow = _query_latest_by_trade_date(conn, "stock_moneyflow", ts_code)
-        latest_finance = _query_latest_finance(conn, ts_code)
+        latest_basic = _query_latest_by_trade_date(conn, "stock_daily_basic", ts_code) if asset_type == "stock" else {}
+        latest_moneyflow = _query_latest_by_trade_date(conn, "stock_moneyflow", ts_code) if asset_type == "stock" else {}
+        latest_finance = _query_latest_finance(conn, ts_code) if asset_type == "stock" else {}
         returns = _calc_trailing_returns(daily_rows)
         price_history = _build_price_history(daily_rows)
     finally:
         conn.close()
 
-    signal_state = _query_signal_state(ts_code, signal_db) if signal_db else {}
-    found = bool((stock and stock.get("name")) or latest_daily)
+    signal_state = _query_signal_state(ts_code, signal_db) if signal_db and asset_type == "stock" else {}
+    found = bool(instrument.get("name") or latest_daily)
     return {
         "query": query,
         "found": found,
-        "stock": stock or {"ts_code": ts_code, "name": "", "industry": ""},
+        "stock": instrument,
+        "asset_type": asset_type,
+        "asset_type_label": ASSET_LABELS[asset_type],
         "latest_daily": latest_daily,
         "latest_basic": latest_basic,
         "latest_moneyflow": latest_moneyflow,
@@ -124,35 +151,74 @@ def _query_stock_basic(conn: sqlite3.Connection, ts_code: str) -> dict:
     return dict(row) if row else {"ts_code": ts_code, "name": "", "industry": ""}
 
 
-def _resolve_ts_code(conn: sqlite3.Connection, query: str) -> str:
-    if _looks_like_stock_code(query):
-        return _format_code(query)
-
-    name = query.strip()
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     row = conn.execute(
-        """
-        select ts_code from stock_basic
-        where name = ? or symbol = ?
-        order by list_status = 'L' desc, ts_code asc
-        limit 1
-        """,
-        (name, name),
+        "select 1 from sqlite_master where type = 'table' and name = ?",
+        (table,),
     ).fetchone()
-    if row:
-        return row["ts_code"]
+    return bool(row)
 
-    fuzzy = conn.execute(
-        """
-        select ts_code from stock_basic
-        where name like ?
-        order by list_status = 'L' desc, ts_code asc
-        limit 1
-        """,
-        (f"%{name}%",),
-    ).fetchone()
-    if fuzzy:
-        return fuzzy["ts_code"]
-    return _format_code(query)
+
+def _resolve_instrument(conn: sqlite3.Connection, query: str) -> dict:
+    normalized = query.strip()
+    alias_code = INDEX_ALIASES.get(normalized)
+    candidates = [alias_code] if alias_code else []
+    if _looks_like_stock_code(normalized):
+        formatted = _format_code(normalized)
+        candidates.append(formatted)
+        # 纯数字代码存在交易所歧义时，同时检查另一市场，由真实基础表决定。
+        if "." not in normalized and not normalized.upper().startswith(("SH", "SZ")):
+            suffix = "SZ" if formatted.endswith(".SH") else "SH"
+            candidates.append(f"{normalized}.{suffix}")
+
+    for asset_type, (basic_table, _) in ASSET_TABLES.items():
+        if not _table_exists(conn, basic_table):
+            continue
+        for ts_code in candidates:
+            row = conn.execute(
+                f"select * from {basic_table} where ts_code = ? limit 1",
+                (ts_code,),
+            ).fetchone()
+            if row:
+                return _instrument_from_row(dict(row), asset_type)
+
+    if normalized:
+        for asset_type, (basic_table, _) in ASSET_TABLES.items():
+            if not _table_exists(conn, basic_table):
+                continue
+            order_sql = "order by list_status = 'L' desc, ts_code asc" if asset_type == "stock" else "order by ts_code asc"
+            row = conn.execute(
+                f"select * from {basic_table} where name = ? {order_sql} limit 1",
+                (normalized,),
+            ).fetchone()
+            if not row:
+                row = conn.execute(
+                    f"select * from {basic_table} where name like ? {order_sql} limit 1",
+                    (f"%{normalized}%",),
+                ).fetchone()
+            if row:
+                return _instrument_from_row(dict(row), asset_type)
+
+    ts_code = alias_code or _format_code(normalized)
+    asset_type = "index" if alias_code else "stock"
+    return _instrument_from_row({"ts_code": ts_code, "name": ""}, asset_type)
+
+
+def _instrument_from_row(row: dict, asset_type: str) -> dict:
+    result = dict(row)
+    result["asset_type"] = asset_type
+    result["asset_type_label"] = ASSET_LABELS[asset_type]
+    if asset_type == "index":
+        result["industry"] = result.get("category") or "市场指数"
+    elif asset_type == "fund":
+        result["industry"] = result.get("fund_type") or "场内基金"
+    else:
+        result.setdefault("industry", "")
+    return result
+
+
+def _resolve_ts_code(conn: sqlite3.Connection, query: str) -> str:
+    return _resolve_instrument(conn, query)["ts_code"]
 
 
 def _looks_like_stock_code(query: str) -> bool:
@@ -173,7 +239,7 @@ def _format_code(code: str) -> str:
         return f"{code}.{prefix}"
     if "." in code:
         return code
-    if code.startswith(("6", "9")):
+    if code.startswith(("5", "6", "9")):
         return f"{code}.SH"
     return f"{code}.SZ"
 

@@ -48,7 +48,8 @@ CACHE_DIR = os.path.join("data", "cache")
 
 # 申万一级行业指数（28个）+ 沪深300 + 上证指数
 INDEX_CODES = [
-    '000001.SH', '000300.SH',  # 上证、沪深300
+    '000001.SH', '000016.SH', '000300.SH', '000688.SH', '000852.SH',
+    '000905.SH', '399001.SZ', '399006.SZ',
     # 申万一级行业指数（28个）— 用于板块共振过滤
     '801010.SI', '801020.SI', '801030.SI', '801040.SI', '801050.SI',
     '801080.SI', '801110.SI', '801120.SI', '801130.SI', '801140.SI',
@@ -57,6 +58,17 @@ INDEX_CODES = [
     '801740.SI', '801750.SI', '801760.SI', '801770.SI', '801780.SI',
     '801790.SI', '801880.SI', '801890.SI',
 ]
+
+INDEX_NAMES = {
+    '000001.SH': '上证指数',
+    '000016.SH': '上证50',
+    '000300.SH': '沪深300',
+    '000688.SH': '科创50',
+    '000852.SH': '中证1000',
+    '000905.SH': '中证500',
+    '399001.SZ': '深证成指',
+    '399006.SZ': '创业板指',
+}
 
 # ==================== 日志 ====================
 logging.basicConfig(
@@ -75,7 +87,7 @@ logger = logging.getLogger("downloader")
 
 def _ensure_dirs():
     """创建所有需要的目录"""
-    for sub in ["", "daily", "daily_basic", "moneyflow", "index_daily",
+    for sub in ["", "daily", "daily_basic", "moneyflow", "index_daily", "fund_daily",
                 "top_list", "top_inst", "margin_detail"]:
         os.makedirs(os.path.join(CACHE_DIR, sub), exist_ok=True)
 
@@ -104,8 +116,17 @@ def _index_cache_min_rows() -> int:
 
 
 def _save(df: pd.DataFrame, path: str):
-    """保存 DataFrame 为 Parquet，所有字符串列强制 str 类型"""
-    df.to_parquet(path, index=False, engine='pyarrow', compression='snappy')
+    """先写同目录临时文件再原子替换，避免直接覆盖异属主缓存失败。"""
+    target_path = os.path.abspath(os.fspath(path))
+    target_dir = os.path.dirname(target_path)
+    os.makedirs(target_dir, exist_ok=True)
+    temp_path = f"{target_path}.tmp.{os.getpid()}.{time.time_ns()}"
+    try:
+        df.to_parquet(temp_path, index=False, engine='pyarrow', compression='snappy')
+        os.replace(temp_path, target_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def _retry(fn, retries: int = 3, wait: float = 5.0):
@@ -114,13 +135,50 @@ def _retry(fn, retries: int = 3, wait: float = 5.0):
         try:
             return fn()
         except Exception as e:
+            error_text = str(e).strip().lower()
+            if "invalid token" in error_text or "token invalid" in error_text:
+                logger.error("  Tushare Token 无效，立即终止下载，避免继续使用旧行情生成报告")
+                raise RuntimeError("Tushare Token 无效，请更新 TUSHARE_TOKEN") from e
             if attempt < retries - 1:
-                logger.warning(f"  ⚠ 调用失败（{attempt+1}/{retries}）：{e}，{wait}秒后重试...")
-                time.sleep(wait)
+                retry_wait = wait * (2 ** attempt)
+                logger.warning(f"  ⚠ 调用失败（{attempt+1}/{retries}）：{e}，{retry_wait}秒后重试...")
+                time.sleep(retry_wait)
             else:
                 logger.error(f"  ✗ 重试{retries}次仍失败：{e}")
                 return None
     return None
+
+
+def _validate_completed_core_downloads(
+    trade_dates: List[str],
+    start_date: str,
+    end_date: str,
+    require_index: bool,
+    now: Optional[datetime] = None,
+) -> None:
+    """校验目标窗口内已经收盘的交易日，禁止核心行情残缺时继续生成报告。"""
+    current = now or datetime.now()
+    today = current.strftime("%Y%m%d")
+    completed_cutoff = today if current.hour >= 18 else (current - timedelta(days=1)).strftime("%Y%m%d")
+    required_dates = [
+        date for date in trade_dates
+        if start_date <= date <= end_date and date <= completed_cutoff
+    ]
+    missing = []
+    requirements = [
+        ("daily", 1000),
+        ("daily_basic", 1000),
+        ("moneyflow", 500),
+    ]
+    if require_index:
+        requirements.append(("index_daily", 2))
+    for date in required_dates:
+        for subdir, min_rows in requirements:
+            if not _cache_has_rows(_daily_path(subdir, date), min_rows=min_rows):
+                missing.append(f"{date}:{subdir}")
+    if missing:
+        detail = ", ".join(missing[:12])
+        raise RuntimeError(f"核心行情未完整下载：{detail}")
 
 
 def _get_trade_dates(pro, start_date: str, end_date: str) -> List[str]:
@@ -244,6 +302,39 @@ def download_stock_basic(pro, force: bool = False):
         logger.info(f"  ✓ stock_basic：{len(df)} 只")
 
 
+def download_index_basic(force: bool = False):
+    """保存当前系统实际维护的指数名称，供统一品种检索使用。"""
+    path = _static_path("index_basic")
+    if not force and os.path.exists(path):
+        return
+    rows = [
+        {
+            "ts_code": code,
+            "name": INDEX_NAMES.get(code, code),
+            "market": code.rsplit(".", 1)[-1],
+            "publisher": "",
+            "category": "大盘指数" if code in INDEX_NAMES else "申万一级行业",
+        }
+        for code in INDEX_CODES
+    ]
+    _save(pd.DataFrame(rows), path)
+    logger.info(f"  ✓ index_basic：{len(rows)} 个")
+
+
+def download_fund_basic(pro, force: bool = False):
+    """批量下载场内基金基础信息，ETF 名称和代码检索依赖该文件。"""
+    path = _static_path("fund_basic")
+    if not force and _cache_has_rows(path):
+        return
+    df = _retry(lambda: pro.fund_basic(
+        market="E", status="L",
+        fields="ts_code,name,management,custodian,fund_type,list_date,delist_date,status,market",
+    ))
+    if df is not None and not df.empty:
+        _save(df, path)
+        logger.info(f"  ✓ fund_basic：{len(df)} 只")
+
+
 def download_daily_one_date(pro, date: str, force: bool = False) -> bool:
     """下载单个交易日的全市场日线数据"""
     path = _daily_path("daily", date)
@@ -333,6 +424,25 @@ def download_index_daily_one_date(pro, date: str, force: bool = False) -> bool:
     combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     _save(combined, path)
     logger.info(f"  ✓ index_daily {date}：{len(combined)} 条（{len(all_dfs)}/{len(INDEX_CODES)} 个指数有数据）")
+    return True
+
+
+def download_fund_daily_one_date(pro, date: str, force: bool = False) -> bool:
+    """按交易日批量下载全部场内基金行情，禁止逐只基金请求。"""
+    path = _daily_path("fund_daily", date)
+    if not force and _cache_has_rows(path):
+        return True
+    df = _retry(lambda: pro.fund_daily(
+        trade_date=date,
+        fields="ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
+    ))
+    if df is None:
+        return False
+    if df.empty:
+        logger.warning(f"  ⚠ fund_daily {date} 返回0行，保留为待重试状态")
+        return False
+    _save(df, path)
+    logger.info(f"  ✓ fund_daily {date}：{len(df)} 只")
     return True
 
 
@@ -555,7 +665,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
     market_core=True 时下载回测核心行情和指数，跳过龙虎榜/融资等扩展日频数据。
     """
     total = len(trade_dates)
-    daily_ok = daily_basic_ok = moneyflow_ok = index_ok = 0
+    daily_ok = daily_basic_ok = moneyflow_ok = index_ok = fund_ok = 0
     top_list_ok = top_inst_ok = margin_ok = 0
 
     for idx, date in enumerate(trade_dates, 1):
@@ -588,6 +698,15 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                 time.sleep(0.8)
             else:
                 moneyflow_ok += 1
+
+            # ETF 日线使用单日全市场批量接口，不逐只请求。
+            need_fund = force or not _cache_has_rows(_daily_path("fund_daily", date))
+            if need_fund:
+                if download_fund_daily_one_date(pro, date, force):
+                    fund_ok += 1
+                time.sleep(0.5)
+            else:
+                fund_ok += 1
 
             # index_daily
             if not core_only:
@@ -634,6 +753,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                     f"  进度摘要：daily={daily_ok}/{idx}  "
                     f"daily_basic={daily_basic_ok}/{idx}  "
                     f"moneyflow={moneyflow_ok}/{idx}  "
+                    f"fund_daily={fund_ok}/{idx}  "
                     f"index={index_ok}/{idx}  "
                     f"top_list={top_list_ok}/{idx}  "
                     f"top_inst={top_inst_ok}/{idx}  "
@@ -646,7 +766,7 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                     f"margin={margin_ok}/{idx}"
                 )
 
-    return daily_ok, daily_basic_ok, moneyflow_ok, index_ok, top_list_ok, top_inst_ok, margin_ok
+    return daily_ok, daily_basic_ok, moneyflow_ok, index_ok, fund_ok, top_list_ok, top_inst_ok, margin_ok
 
 
 # ==================== 主入口 ====================
@@ -682,6 +802,9 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         download_trade_cal(pro, start_date, end_date, force)
         time.sleep(0.5)
         download_stock_basic(pro, force)
+        time.sleep(0.5)
+        download_index_basic(force)
+        download_fund_basic(pro, force)
         time.sleep(0.5)
         if not core_only and not market_core:
             download_share_float(pro, start_date, end_date, force)
@@ -726,7 +849,14 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         core_only=core_only,
         market_core=market_core,
     )
-    daily_ok, basic_ok, mf_ok, idx_ok, tl_ok, ti_ok, mg_ok = results
+    daily_ok, basic_ok, mf_ok, idx_ok, fund_ok, tl_ok, ti_ok, mg_ok = results
+    if not only_new:
+        _validate_completed_core_downloads(
+            trade_dates,
+            start_date,
+            end_date,
+            require_index=not core_only,
+        )
 
     # ── 完成报告 ──
     elapsed = (datetime.now() - t0).total_seconds()
@@ -736,6 +866,7 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         logger.info(f"  daily：{daily_ok}/{len(trade_dates)} 天")
         logger.info(f"  daily_basic：{basic_ok}/{len(trade_dates)} 天")
         logger.info(f"  moneyflow：{mf_ok}/{len(trade_dates)} 天")
+        logger.info(f"  fund_daily：{fund_ok}/{len(trade_dates)} 天")
         logger.info(f"  index_daily：{idx_ok}/{len(trade_dates)} 天")
     if not market_core:
         logger.info(f"  top_list：{tl_ok}/{len(trade_dates)} 天  ← 龙虎榜明细（方案D）")

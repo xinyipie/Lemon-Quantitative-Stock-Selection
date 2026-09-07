@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-exec 9>/run/lock/stock-daily-full-update.lock
+exec 9>/run/lock/stock-update.lock
 /usr/bin/flock -n 9 || exit 0
 
 cd /opt/stock
@@ -10,8 +10,9 @@ set -a
 set +a
 
 mkdir -p /opt/stock/logs
-command_json='["/opt/stock/.venv/bin/python", "daily_web_update.py", "--mode", "full"]'
+command_json='["/opt/stock/.venv/bin/python", "daily_web_update.py", "--mode", "full", "--skip-daily-report"]'
 exec /opt/stock/.venv/bin/python -m web_app.services.update_worker \
   "$command_json" \
   "data/web_update_status.json" \
-  >> /opt/stock/logs/daily_full_update.log 2>&1
+  "logs/daily_full_update.log" \
+  >> /opt/stock/logs/daily_full_scheduler.log 2>&1

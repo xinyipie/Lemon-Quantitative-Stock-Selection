@@ -5058,24 +5058,58 @@ def parse_ai_json(result: str) -> Optional[List[Dict]]:
     return None
 
 
-def ai_analyze_stock_pool(stock_pool: pd.DataFrame) -> List[Dict]:
+def _compact_ai_stock_records(stock_pool: pd.DataFrame, columns: List[str]) -> str:
+    """压缩AI输入，只保留高信息密度事实并统一数值精度。"""
+    records = stock_pool[[c for c in columns if c in stock_pool.columns]].to_dict("records")
+    compact = []
+    for record in records:
+        cleaned = {}
+        for key, value in record.items():
+            if pd.isna(value) if not isinstance(value, (list, dict, tuple)) else False:
+                continue
+            if isinstance(value, float):
+                cleaned[key] = round(value, 2)
+            elif hasattr(value, "item"):
+                cleaned[key] = value.item()
+            else:
+                cleaned[key] = value
+        compact.append(cleaned)
+    return json.dumps(compact, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _normalize_ai_observation(item: Dict, default_style: str) -> Optional[Dict]:
+    required = ["code", "name", "stance", "summary", "positives", "risks", "watch_plan", "invalidation"]
+    if not all(key in item for key in required):
+        return None
+    normalized = dict(item)
+    normalized["positives"] = [str(v) for v in item.get("positives", []) if str(v).strip()][:2]
+    normalized["risks"] = [str(v) for v in item.get("risks", []) if str(v).strip()][:2]
+    normalized["style"] = str(item.get("style") or default_style)
+    normalized["risk_level"] = str(item.get("risk_level") or "中")
+    normalized["confidence_note"] = str(item.get("confidence_note") or "中：仅基于当前量化事实。")
+    # 兼容旧日报展示字段，但不让AI分数进入任何量化链路。
+    normalized["sentiment"] = str(item.get("stance") or "等待确认")
+    normalized["risk"] = normalized["risk_level"]
+    normalized["reason"] = str(item.get("summary") or "")
+    return normalized
+
+
+def ai_analyze_stock_pool(stock_pool: pd.DataFrame, market_context: Optional[Dict] = None) -> List[Dict]:
     if stock_pool.empty:
         return []
-    cols = ["code", "name", "industry", "close", "change", "volume_ratio",
-            "main_net_inflow", "is_limit_up", "has_limit_up_gene",
-            "ma5", "ma10", "ma20", "ma60", "high20", "low20",
-            "drawdown_from_high", "target_price", "stop_loss_price",
-            "volatility", "hold_days_est", "trend", "data_date",
-            "roe", "revenue_growth", "debt_ratio"]  # 方案B：加入财务数据
-    # 只取存在的列
-    cols = [c for c in cols if c in stock_pool.columns]
-    stock_list = json.dumps(stock_pool[cols].to_dict("records"), ensure_ascii=False)
+    cols = ["code", "name", "industry", "score", "original_score", "close", "change",
+            "volume_ratio", "main_net_inflow", "trend", "ma20", "ma60",
+            "drawdown_from_high", "factor_inflow", "factor_sector", "factor_pattern",
+            "factor_volume_ratio", "factor_drawdown", "factor_wyckoff",
+            "rule_reasons", "risk_reasons", "entry_timing", "data_date"]
+    stock_list = _compact_ai_stock_records(stock_pool, cols)
     data_date = stock_pool['data_date'].iloc[0] if 'data_date' in stock_pool.columns else "未知"
     result = parse_ai_json(
         call_ai_api(
             prompt=ai_prompts.PROMPT_STOCK_ANALYSIS.format(
                 stock_list=stock_list,
-                data_date=data_date
+                data_date=data_date,
+                market_context=json.dumps(market_context or {}, ensure_ascii=False, separators=(",", ":"), default=str),
             ),
             system=ai_prompts.SYSTEM_STOCK_ANALYST
         )
@@ -5085,19 +5119,14 @@ def ai_analyze_stock_pool(stock_pool: pd.DataFrame) -> List[Dict]:
         return []
     valid = []
     for r in result:
-        if not all(k in r for k in ["code", "name", "score", "sentiment", "risk", "reason"]):
-            continue
-        # score 可能是 float，统一转 int
-        try:
-            r["score"] = int(float(r["score"]))
-        except (ValueError, TypeError):
-            r["score"] = 0
-        valid.append(r)
+        normalized = _normalize_ai_observation(r, "短线观察") if isinstance(r, dict) else None
+        if normalized:
+            valid.append(normalized)
     logger.info(f"✅ AI分析完成：{len(valid)}条有效建议")
     return valid
 
 
-def ai_analyze_longterm(stock_pool: pd.DataFrame) -> List[Dict]:
+def ai_analyze_longterm(stock_pool: pd.DataFrame, market_context: Optional[Dict] = None) -> List[Dict]:
     if stock_pool.empty:
         return []
 
@@ -5109,20 +5138,19 @@ def ai_analyze_longterm(stock_pool: pd.DataFrame) -> List[Dict]:
         batch = stock_pool.iloc[i:i+batch_size]
         logger.info(f"📊 波段AI分析批次 {i//batch_size + 1}/{(len(stock_pool)-1)//batch_size + 1}（{len(batch)}只）")
 
-        cols = ["code", "name", "industry", "close", "change", "volume_ratio",
-                "main_net_inflow", "ma20", "ma60", "drawdown_from_high",
-                "vol_shrinking", "buy_price_low", "buy_price_high",
-                "target_price", "stop_loss_price", "hold_weeks_est", "data_date",
-                "roe", "revenue_growth", "debt_ratio"]  # 方案B：加入财务数据
-        cols = [c for c in cols if c in batch.columns]
-        stock_list = json.dumps(batch[cols].to_dict("records"), ensure_ascii=False)
+        cols = ["code", "name", "industry", "longterm_score", "compression_score", "close",
+                "main_net_inflow", "ma20", "ma60", "ma20_slope", "drawdown_from_high",
+                "vol_shrinking", "industry_rs", "roe", "netprofit_yoy", "debt_ratio",
+                "rule_reasons", "risk_reasons", "alert_tier", "data_date"]
+        stock_list = _compact_ai_stock_records(batch, cols)
         data_date = batch['data_date'].iloc[0] if 'data_date' in batch.columns else "未知"
 
         result = parse_ai_json(
             call_ai_api(
                 prompt=ai_prompts.PROMPT_LONGTERM_ANALYSIS.format(
                     stock_list=stock_list,
-                    data_date=data_date
+                    data_date=data_date,
+                    market_context=json.dumps(market_context or {}, ensure_ascii=False, separators=(",", ":"), default=str),
                 ),
                 system=ai_prompts.SYSTEM_STOCK_ANALYST
             )
@@ -5137,13 +5165,9 @@ def ai_analyze_longterm(stock_pool: pd.DataFrame) -> List[Dict]:
 
     valid = []
     for r in all_results:
-        if not all(k in r for k in ["code", "name", "score", "sentiment", "risk", "reason"]):
-            continue
-        try:
-            r["score"] = int(float(r["score"]))
-        except (ValueError, TypeError):
-            r["score"] = 0
-        valid.append(r)
+        normalized = _normalize_ai_observation(r, "长线观察") if isinstance(r, dict) else None
+        if normalized:
+            valid.append(normalized)
     logger.info(f"✅ 波段AI分析完成：{len(valid)}条有效建议")
     return valid
 
@@ -5579,31 +5603,36 @@ def run_daily_selection(
         news_titles = policy_news['title'].tolist()[:15]
         ai_news_result = news_analyzer.ai_parse_news_to_sectors(news_titles, call_ai_api)
 
-    # 构建行业消息面加分字典（AI板块加分 + 概念热度加分合并，AI优先）
-    sector_news_boosts = news_analyzer.build_sector_boosts(ai_news_result)
-    # 概念热度加分作为补充（已有AI加分的行业不叠加，避免双重计算）
-    for industry, concept_boost in concept_industry_boosts.items():
-        if industry not in sector_news_boosts:
-            sector_news_boosts[industry] = concept_boost
+    # AI消息判断只作为独立观察层保存，严禁进入量化分数、排名、入池和市场模式。
+    ai_sector_observations = news_analyzer.build_sector_boosts(ai_news_result)
+    ai_news_observation = news_analyzer.analyze_news_sentiment(policy_news, ai_news_result)
 
-    news_sentiment = news_analyzer.analyze_news_sentiment(policy_news, ai_news_result)
+    # 量化链路只使用非AI规则口径；概念热度仍由 select_stock_pool 的规则因子独立处理。
+    sector_news_boosts = {}
+    news_sentiment = news_analyzer.analyze_news_sentiment(policy_news, [])
 
     # 打印消息面摘要
-    if sector_news_boosts:
-        pos_boosts = [(s, v) for s, v in sector_news_boosts.items() if v > 0]
-        neg_boosts = [(s, v) for s, v in sector_news_boosts.items() if v < 0]
+    if ai_sector_observations:
+        pos_boosts = [(s, v) for s, v in ai_sector_observations.items() if v > 0]
+        neg_boosts = [(s, v) for s, v in ai_sector_observations.items() if v < 0]
         pos_boosts.sort(key=lambda x: -x[1])
         neg_boosts.sort(key=lambda x: x[1])
         if pos_boosts:
-            logger.info(f"📰 消息面利好：{' | '.join(f'{s}(+{v:.0f})' for s, v in pos_boosts[:3])}")
+            logger.info(f"🤖 AI独立观察利好（不参与量化）：{' | '.join(f'{s}(+{v:.0f})' for s, v in pos_boosts[:3])}")
         if neg_boosts:
-            logger.info(f"📉 消息面利空：{' | '.join(f'{s}({v:.0f})' for s, v in neg_boosts[:3])}")
+            logger.info(f"🤖 AI独立观察利空（不参与量化）：{' | '.join(f'{s}({v:.0f})' for s, v in neg_boosts[:3])}")
 
     sentiment_data['news_sentiment'] = news_sentiment
+    sentiment_data['ai_observation'] = {
+        'news_sentiment': ai_news_observation,
+        'sector_observations': ai_sector_observations,
+        'affects_quant_score': False,
+        'note': 'AI仅作独立观察，不参与市场模式、量化评分、排名或入池。',
+    }
 
     # ── 8. 综合决策 ──
     operation_mode, position_advice, reason = market_analyzer.get_market_decision(
-        market_state, sentiment_data, news_sentiment, sector_news_boosts
+        market_state, sentiment_data, news_sentiment, {}
     )
     logger.info(f"📊 综合决策：{operation_mode} | 仓位：{position_advice} | {reason}")
     sentiment_data['operation_mode'] = operation_mode
@@ -5885,9 +5914,24 @@ def main():
             f"观察{len(longterm_watch_pool)}只，精英提醒{len(longterm_elite_pool)}只"
         )
 
-    # ── AI 分析 ──
+    _persist_daily_selection_snapshot(
+        sel,
+        include_longterm=include_longterm,
+        longterm_watch=longterm_watch_pool,
+        longterm_elite=longterm_elite_pool,
+    )
+
+    # ── AI 独立观察：共享一次市场背景，不参与量化分数、排名或入池 ──
+    shared_ai_context = {
+        "trade_date": trade_date,
+        "market_state": sel.get("market_state"),
+        "market_style": sel.get("market_style"),
+        "regime": sel.get("regime"),
+        "operation_mode": sel.get("operation_mode"),
+        "news_observation": (sentiment_data or {}).get("ai_observation", {}),
+    }
     if not stock_pool.empty:
-        ai_analysis = ai_analyze_stock_pool(stock_pool)
+        ai_analysis = ai_analyze_stock_pool(stock_pool, shared_ai_context)
         # 把 stock_pool 的量化指标合并进 ai_analysis，供报告展示选股逻辑
         quant_map = stock_pool.set_index('code').to_dict('index')
         price_map = dict(zip(stock_pool['code'].astype(str), stock_pool['close']))
@@ -5927,7 +5971,7 @@ def main():
             item['atr_14']            = qdata.get('atr_14', '-')
 
     if not longterm_watch_pool.empty:
-        ai_longterm = ai_analyze_longterm(longterm_watch_pool)
+        ai_longterm = ai_analyze_longterm(longterm_watch_pool, shared_ai_context)
         quant_map_lt = longterm_watch_pool.set_index('code').to_dict('index')
         price_map_lt = dict(zip(longterm_watch_pool['code'].astype(str), longterm_watch_pool['close']))
         buy_map_lt   = dict(zip(longterm_watch_pool['code'].astype(str),
@@ -5942,6 +5986,7 @@ def main():
             item['trend_strength'] = trend_map_lt.get(code, 0)
             # 合并波段量化字段
             qdata = quant_map_lt.get(code, {})
+            item['score']             = qdata.get('compression_score', qdata.get('longterm_score', 0))
             item['industry']          = qdata.get('industry', item.get('industry', ''))
             item['ma20']              = qdata.get('ma20', '-')
             item['ma60']              = qdata.get('ma60', '-')
@@ -6062,6 +6107,13 @@ def main():
         longterm_watch_pool if include_longterm else None,
         longterm_elite_pool if include_longterm else None,
     )
+    _persist_main_ai_observations(
+        trade_date,
+        ai_analysis,
+        ai_longterm,
+        short_profile=getattr(config, "SHORT_LIVE_FACTOR_PROFILE", "short"),
+        longterm_profile=longterm_live_profile,
+    )
 
     # 生成每日报告文件
     _write_daily_report(
@@ -6073,6 +6125,47 @@ def main():
         market_style=sel.get('market_style', ''),
         include_longterm=include_longterm,
     )
+
+
+def _persist_main_ai_observations(
+    trade_date: str,
+    short_items: List[Dict],
+    longterm_items: List[Dict],
+    short_profile: str,
+    longterm_profile: str,
+) -> None:
+    """把主流程唯一生成的AI观察写入独立文档表，供日报和网站共同复用。"""
+    try:
+        from web_app.services.explanation_service import store_main_ai_observations
+
+        short_count = store_main_ai_observations(
+            trade_date, short_items, mode="short", profile=short_profile,
+        )
+        longterm_count = store_main_ai_observations(
+            trade_date, longterm_items, mode="longterm", profile=longterm_profile,
+        )
+        logger.info(f"🤖 主流程AI观察已入库：短线{short_count}条，长线{longterm_count}条")
+    except Exception as exc:
+        logger.warning(f"主流程AI观察入库失败，日报仍可继续生成：{exc}")
+
+
+def _persist_daily_selection_snapshot(
+    selection: dict,
+    include_longterm: bool,
+    longterm_watch: pd.DataFrame,
+    longterm_elite: pd.DataFrame,
+    db_path=DEFAULT_DB_PATH,
+) -> None:
+    """保存正式扫描是否执行及是否为空，避免空池被误判成数据缺失。"""
+    from daily_report.selection_snapshot import build_selection_snapshot, save_selection_snapshot
+
+    snapshot = build_selection_snapshot(
+        selection,
+        include_longterm=include_longterm,
+        longterm_watch_count=len(longterm_watch) if longterm_watch is not None else 0,
+        longterm_elite_count=len(longterm_elite) if longterm_elite is not None else 0,
+    )
+    save_selection_snapshot(db_path, snapshot)
 
 
 def _save_live_selections(trade_date: str, stock_pool: pd.DataFrame,
@@ -6452,6 +6545,24 @@ def _safe_float(value, default: float = 0.0) -> float:
 
 
 def _format_short_decision_card(item: Dict, candidate_count: int) -> List[str]:
+    if item.get("summary"):
+        positives = [str(v) for v in item.get("positives", []) if str(v).strip()]
+        risks = [str(v) for v in item.get("risks", []) if str(v).strip()]
+        lines = [
+            f"      AI独立判断：{item.get('stance', item.get('style', '等待确认'))}\n",
+            f"      {item.get('summary')}\n",
+        ]
+        if positives:
+            lines.append(f"      支持证据：{'；'.join(positives)}\n")
+        if risks:
+            lines.append(f"      反面证据：{'；'.join(risks)}\n")
+        lines.extend([
+            f"      下一步确认：{item.get('watch_plan', '-')}\n",
+            f"      失效条件：{item.get('invalidation', '-')}\n",
+            f"      置信度：{item.get('confidence_note', '-')}\n",
+            "      注：AI判断独立展示，不参与量化评分、排名和入池。\n",
+        ])
+        return lines
     score = _safe_float(item.get("score"))
     original_score = _safe_float(item.get("original_score", item.get("score_base", score)))
     volume_ratio = _safe_float(item.get("volume_ratio"))
@@ -6511,6 +6622,13 @@ def _format_short_decision_card(item: Dict, candidate_count: int) -> List[str]:
 
 
 def _format_short_execution_plan(item: Dict, candidate_count: int) -> List[str]:
+    if item.get("summary"):
+        return [
+            "      【条件验证】\n",
+            f"      需要确认：{item.get('watch_plan', '-')}\n",
+            f"      判断失效：{item.get('invalidation', '-')}\n",
+            "      注：这里只记录验证条件，不生成仓位或买卖指令。\n",
+        ]
     score = _safe_float(item.get("score"))
     close = _safe_float(item.get("close"))
     stop_loss = item.get("stop_loss_price", "-")

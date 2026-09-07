@@ -1435,6 +1435,43 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(item["mapping_confidence_text"], "泛化映射")
         self.assertIn("broad", item["mapping_note"])
 
+    def test_news_pipeline_health_exposes_source_and_ai_funnel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "news_sector_20260721.json").write_text(
+                json.dumps(
+                    {
+                        "date": "20260721",
+                        "raw_news_total": 4,
+                        "raw_news": [
+                            {"title": "新闻甲", "source": "来源A"},
+                            {"title": "新闻乙", "source": "来源B"},
+                        ],
+                        "ai_titles": ["新闻甲", "新闻乙", "新闻丙"],
+                        "items": [
+                            {"title": "新闻甲", "impact": "positive", "sector": "电子"},
+                            {"title": "新闻乙", "impact": "negative", "sector": "汽车"},
+                        ],
+                        "ai_status": "ok",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            radar = sector_service.build_concept_news_radar(cache_dir=cache_dir, today="20260721")
+
+        health = radar["pipeline_health"]
+        self.assertEqual(health["source_state"], "live")
+        self.assertEqual(health["ai_status"], "ok")
+        self.assertEqual(health["raw_count"], 4)
+        self.assertEqual(health["ai_candidate_count"], 3)
+        self.assertEqual(health["mapped_count"], 2)
+        self.assertEqual(health["positive_count"], 1)
+        self.assertEqual(health["negative_count"], 1)
+        self.assertEqual(health["unresolved_count"], 2)
+
     def test_raw_news_remains_visible_when_ai_mapping_is_unavailable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir) / "cache"

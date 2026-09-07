@@ -255,7 +255,7 @@
         <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">可信度：{{ item.confidence_label }}</span>
         <span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else item.process_tone }}">{{ item.outcome_label }} · {{ item.process_label }}</span>
       </td>
-      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
+      <td>{% include "partials/ai_observation.html" %}</td>
     </tr>
     {% else %}
     <tr><td colspan="9">暂无历史回测信号。</td></tr>

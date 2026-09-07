@@ -396,11 +396,14 @@ class DailyWebUpdateTest(unittest.TestCase):
             run_update(args)
 
         command_texts = [" ".join(map(str, command)) for command in calls]
-        self.assertEqual(len(command_texts), 3)
+        self.assertEqual(len(command_texts), 4)
         self.assertIn("data_downloader.py --start 20260624 --end 20260624 --core-only", command_texts[0])
         self.assertIn("history_db_importer.py", command_texts[1])
         self.assertIn("daily daily_basic moneyflow stock_basic", command_texts[1])
         self.assertIn("market_context_snapshot.py --date 20260623", command_texts[2])
+        self.assertIn("daily_research_report.py", command_texts[3])
+        self.assertIn("--slot morning", command_texts[3])
+        self.assertIn("--retry-if-missing", command_texts[3])
         self.assertFalse(any("main.py" in text for text in command_texts))
         refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
         dragon_path.assert_not_called()

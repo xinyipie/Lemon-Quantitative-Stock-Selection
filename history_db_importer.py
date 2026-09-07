@@ -22,13 +22,16 @@ SOURCE_TO_TABLE = {
     "daily_basic": "stock_daily_basic",
     "moneyflow": "stock_moneyflow",
     "index_daily": "index_daily",
+    "fund_daily": "fund_daily",
+    "index_basic": "index_basic",
+    "fund_basic": "fund_basic",
     "stock_basic": "stock_basic",
     "fina_indicator": "fina_indicator",
     "income": "income",
 }
 
-DAILY_SOURCES = {"daily", "daily_basic", "moneyflow", "index_daily"}
-STATIC_SOURCES = {"stock_basic", "fina_indicator", "income"}
+DAILY_SOURCES = {"daily", "daily_basic", "moneyflow", "index_daily", "fund_daily"}
+STATIC_SOURCES = {"stock_basic", "index_basic", "fund_basic", "fina_indicator", "income"}
 
 
 def import_history_cache(

@@ -24,6 +24,72 @@ SHORT_FACTOR_REQUIRED_COLUMNS = (
 )
 
 
+SHORT_STRATEGY_CATALOG = {
+    "all": {
+        "label": "全部策略",
+        "badge": "综合视图",
+        "description": "汇总三套短线口径，重复命中不会合并丢失。",
+        "tone": "all",
+    },
+    "steady": {
+        "label": "稳健共振",
+        "badge": "正式策略",
+        "description": "v9 稳健评分与 v39 高置信层共振。",
+        "tone": "steady",
+    },
+    "balance": {
+        "label": "均衡观察",
+        "badge": "观察候选",
+        "description": "扩展候选层，等待量价进一步确认。",
+        "tone": "balance",
+    },
+    "repair": {
+        "label": "逆风修复",
+        "badge": "影子试运行",
+        "description": "弱势、反弹与回撤环境中的质量动量修复。",
+        "tone": "repair",
+    },
+}
+
+
+def short_strategy_key(item: dict) -> str:
+    """把内部来源和版本映射为稳定的用户策略身份。"""
+
+    source = str(item.get("source") or "")
+    profile = str(item.get("profile") or "")
+    if source == "research_shadow" or profile == "short_defensive_quality_reentry_v16":
+        return "repair"
+    if source == "live_observe" or profile == "short_live_observe_best_balance":
+        return "balance"
+    return "steady"
+
+
+def summarize_short_strategy_cards(signals: list[dict]) -> list[dict]:
+    """生成全部策略和三个独立策略的可比较概览。"""
+
+    cards = []
+    for key, meta in SHORT_STRATEGY_CATALOG.items():
+        sample = signals if key == "all" else [item for item in signals if short_strategy_key(item) == key]
+        completed = [
+            float((item.get("performance") or {}).get("ret_5d"))
+            for item in sample
+            if (item.get("performance") or {}).get("ret_5d") is not None
+        ]
+        win_rate = (sum(value > 0 for value in completed) / len(completed) * 100) if completed else None
+        avg_return = (sum(completed) / len(completed)) if completed else None
+        cards.append(
+            {
+                "key": key,
+                **meta,
+                "count": len(sample),
+                "completed_count": len(completed),
+                "win_rate_text": f"{win_rate:.1f}%" if win_rate is not None else "待积累",
+                "avg_return_text": f"{avg_return:+.2f}%" if avg_return is not None else "待积累",
+            }
+        )
+    return cards
+
+
 def get_recent_signals(
     signal_db: str | Path = DEFAULT_DB_PATH,
     history_db: str | Path | None = DEFAULT_HISTORY_DB_PATH,
@@ -101,6 +167,10 @@ def get_recent_signals(
         if query:
             signals = _filter_signals_by_query(signals, query)
         _attach_explanation_status(signals, conn)
+        if history_db:
+            from web_app.services.history_price_service import attach_history_price_context
+
+            attach_history_price_context(signals, history_db, signal_date_key="trade_date")
         return signals[:limit]
     finally:
         conn.close()
@@ -120,13 +190,22 @@ def get_active_longterm_pool(signal_db: str | Path = DEFAULT_DB_PATH) -> list[di
             select mode, profile, ts_code, name, industry, state,
                    first_seen_date, last_seen_date, removed_date,
                    entry_score, latest_score, highest_score,
-                   days_in_pool, last_reason
+                   days_in_pool, last_reason,
+                   (
+                       select p.trade_date
+                       from signal_pool p
+                       where p.ts_code = pool_state.ts_code and p.mode = 'longterm'
+                       order by p.trade_date desc, p.id desc
+                       limit 1
+                   ) as trade_date
             from pool_state
             where mode = 'longterm' and state = 'active'
             order by latest_score desc, last_seen_date desc
             """
         ).fetchall()
-        return [dict(row) for row in rows]
+        pool = [dict(row) for row in rows]
+        _attach_explanation_status(pool, conn)
+        return pool
     finally:
         conn.close()
 
@@ -416,6 +495,10 @@ def get_stock_signals(
         _attach_current_risk_guard_status(signals, history_db)
         _attach_confidence_status(signals)
         _attach_explanation_status(signals, conn)
+        if history_db:
+            from web_app.services.history_price_service import attach_history_price_context
+
+            attach_history_price_context(signals, history_db, signal_date_key="trade_date")
         return signals[:limit]
     finally:
         conn.close()
@@ -529,6 +612,9 @@ def _longterm_pool_label(pool_type: str | None) -> str:
 def _attach_longterm_current_paths(samples: list[dict], history_db: str | Path | None) -> None:
     if not samples or not history_db or not Path(history_db).exists():
         return
+    from web_app.services.history_price_service import attach_history_price_context
+
+    attach_history_price_context(samples, history_db, signal_date_key="select_date")
     conn = sqlite3.connect(history_db)
     conn.row_factory = sqlite3.Row
     try:
@@ -1257,8 +1343,16 @@ def _row_to_signal(row: sqlite3.Row) -> dict:
     item["mae_risk_label"] = _mae_risk_label(item)
     item["mae_risk_tone"] = _mae_risk_tone(item["mae_risk_label"])
     item["result_tag"] = _result_tag(item)
-    item["source_label"] = "历史回测" if item.get("source") == "backtest_ic_short" else "实盘记录"
+    source_labels = {
+        "backtest_ic_short": "历史回测",
+        "research_shadow": "冻结研究",
+        "live_observe": "观察记录",
+    }
+    item["source_label"] = source_labels.get(item.get("source"), "实盘记录")
     item["profile_label"] = _signal_profile_label(item.get("profile"), item.get("mode"))
+    item["strategy_key"] = short_strategy_key(item)
+    item["strategy_label"] = SHORT_STRATEGY_CATALOG[item["strategy_key"]]["label"]
+    item["strategy_badge"] = SHORT_STRATEGY_CATALOG[item["strategy_key"]]["badge"]
     return item
 
 
@@ -1269,7 +1363,11 @@ def _merge_duplicate_short_review_signals(signals: list[dict]) -> list[dict]:
         if str(item.get("mode") or "").lower() != "short":
             merged.append(item)
             continue
-        key = (str(item.get("trade_date") or ""), str(item.get("ts_code") or ""), "short")
+        key = (
+            str(item.get("trade_date") or ""),
+            str(item.get("ts_code") or ""),
+            short_strategy_key(item),
+        )
         existing = by_key.get(key)
         if existing is None:
             by_key[key] = item
@@ -1298,6 +1396,8 @@ def _short_review_source_priority(item: dict) -> int:
         "live": 0,
         "live_report": 1,
         "backtest_ic_short": 2,
+        "live_observe": 0,
+        "research_shadow": 0,
     }.get(source, 3)
 
 
@@ -1594,6 +1694,17 @@ def _attach_explanation_status(signals: list[dict], conn: sqlite3.Connection) ->
     for item in signals:
         item["explanation_label"] = "生成AI解释"
         item["explanation_tone"] = ""
+        item["ai_view"] = {
+            "available": False,
+            "source_label": "AI待生成",
+            "style": "等待独立判断",
+            "summary": "当前还没有这只股票的AI观察，量化结果不受影响。",
+            "positive": "",
+            "risk": "",
+            "watch_plan": "",
+            "tone": "neutral",
+            "independent_note": "独立AI观察，不参与量化评分、排名和入池。",
+        }
     exists = conn.execute(
         "select name from sqlite_master where type='table' and name='ai_analysis_documents'"
     ).fetchone()
@@ -1609,18 +1720,40 @@ def _attach_explanation_status(signals: list[dict], conn: sqlite3.Connection) ->
     keys = [_signal_explanation_cache_key(item) for item in signals]
     placeholders = ",".join(["?"] * len(keys))
     rows = conn.execute(
-        f"select cache_key, source from {table_name} where cache_key in ({placeholders})",
+        f"select cache_key, source, doc_json from {table_name} where cache_key in ({placeholders})",
         keys,
     ).fetchall()
-    source_by_key = {row["cache_key"]: row["source"] for row in rows}
+    document_by_key = {
+        row["cache_key"]: {"source": row["source"], "doc": _json_dict(row["doc_json"])}
+        for row in rows
+    }
     for item in signals:
-        source = source_by_key.get(_signal_explanation_cache_key(item))
+        cached = document_by_key.get(_signal_explanation_cache_key(item)) or {}
+        source = cached.get("source")
+        doc = cached.get("doc") or {}
         if source == "ai":
             item["explanation_label"] = "AI已缓存"
             item["explanation_tone"] = "ok"
         elif source:
             item["explanation_label"] = "规则解释"
             item["explanation_tone"] = "warn"
+        if not source:
+            continue
+        positives = _string_list(doc.get("positives"))
+        risks = _string_list(doc.get("risks"))
+        style = str(doc.get("style") or "独立观察")
+        tone = "bad" if "暂避" in style else "warn" if "防守" in style else "ok" if source == "ai" else "neutral"
+        item["ai_view"] = {
+            "available": True,
+            "source_label": "独立AI观察" if source == "ai" else "规则观察（AI待生成）",
+            "style": style,
+            "summary": str(doc.get("summary") or "暂无观察结论。"),
+            "positive": positives[0] if positives else "",
+            "risk": risks[0] if risks else "",
+            "watch_plan": str(doc.get("watch_plan") or ""),
+            "tone": tone,
+            "independent_note": "独立AI观察，不参与量化评分、排名和入池。",
+        }
 
 
 def _signal_explanation_cache_key(item: dict) -> str:

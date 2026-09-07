@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260722-short-results-v1">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260727-short-score-v2">
 </head>
 <body class="page-{{ active_nav or 'default' }}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -25,6 +25,7 @@
       <a class="{{ 'active' if active_nav == 'dragon' else '' }}" href="/dragon">热门龙头</a>
       <a class="{{ 'active' if active_nav == 'longterm' else '' }}" href="/longterm">长线池</a>
       <a class="{{ 'active' if active_nav == 'sectors' else '' }}" href="/sectors">市场雷达</a>
+      <a class="{{ 'active' if active_nav == 'reports' else '' }}" href="/reports">市场日报</a>
       <a class="{{ 'active' if active_nav == 'stock' else '' }}" href="/stock/000001">单股体检</a>
       <a class="{{ 'active' if active_nav == 'db' else '' }}" href="/db">数据状态</a>
     </nav>

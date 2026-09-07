@@ -15,7 +15,9 @@ class TestAIConfig(unittest.TestCase):
         self.assertEqual(config.AI_CONFIG["provider"], "deepseek")
         self.assertEqual(config.AI_CONFIG["api_key"], os.environ.get("DEEPSEEK_API_KEY", ""))
         self.assertEqual(config.AI_CONFIG["base_url"], "https://api.deepseek.com/v1/chat/completions")
-        self.assertEqual(config.AI_CONFIG["model"], "deepseek-chat")
+        self.assertEqual(config.AI_CONFIG["model"], "deepseek-v4-flash")
+        self.assertEqual(config.AI_CONFIG["fast_model"], "deepseek-v4-flash")
+        self.assertEqual(config.AI_CONFIG["reasoning_model"], "deepseek-v4-pro")
 
     def test_tushare_uses_project_relay_by_default(self):
         with patch.dict(os.environ, {}, clear=True):

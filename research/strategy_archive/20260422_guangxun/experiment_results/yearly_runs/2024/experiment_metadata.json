@@ -1,0 +1,101 @@
+{
+  "generated_at": "2026-07-27T18:46:13.122055+08:00",
+  "python": "3.14.2",
+  "pandas": "2.3.3",
+  "requested_start": "20240101",
+  "requested_end": "20241231",
+  "actual_signal_start": "20240102",
+  "actual_signal_end": "20241231",
+  "common_date_count": 242,
+  "price_forward_end": "20241231",
+  "archive_main_sha256": "AF0884D4F3E52348D80074EB904828D1B8C69181C38764FFD19061873826658D",
+  "variants": [
+    {
+      "name": "A_recovered_proxy_vr1.5",
+      "volume_ratio_threshold": 1.5,
+      "news_proxy": true,
+      "ablate": ""
+    },
+    {
+      "name": "B_pure_quant_vr1.5",
+      "volume_ratio_threshold": 1.5,
+      "news_proxy": false,
+      "ablate": ""
+    },
+    {
+      "name": "A_recovered_proxy_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": true,
+      "ablate": ""
+    },
+    {
+      "name": "D_pure_quant_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": false,
+      "ablate": ""
+    },
+    {
+      "name": "E_ablate_sector_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": false,
+      "ablate": "sector"
+    },
+    {
+      "name": "E_ablate_inflow_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": false,
+      "ablate": "inflow"
+    },
+    {
+      "name": "E_ablate_wyckoff_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": false,
+      "ablate": "wyckoff"
+    },
+    {
+      "name": "E_ablate_accel_vr1.2",
+      "volume_ratio_threshold": 1.2,
+      "news_proxy": false,
+      "ablate": "accel"
+    }
+  ],
+  "regime_params": {
+    "BULL_TREND": {
+      "position": 1.0,
+      "threshold": 45.0,
+      "max_hold": 8
+    },
+    "BULL_PULLBACK": {
+      "position": 0.67,
+      "threshold": 60.0,
+      "max_hold": 5
+    },
+    "BEAR_BOUNCE": {
+      "position": 0.33,
+      "threshold": 75.0,
+      "max_hold": 3
+    },
+    "BEAR_TREND": {
+      "position": 0.0,
+      "threshold": 999.0,
+      "max_hold": 0
+    },
+    "BEAR_BOUNCE_OVERRIDE": {
+      "position": 0.33,
+      "threshold": 80.0,
+      "max_hold": 3
+    },
+    "BULL_PULLBACK_OVERRIDE": {
+      "position": 0.5,
+      "threshold": 65.0,
+      "max_hold": 4
+    }
+  },
+  "limitations": [
+    "历史新闻、AI板块映射与概念热度时序不可恢复",
+    "静态 stock_basic 存在生存者偏差",
+    "指数缓存缺少 amount，Override 成交额条件不可计算",
+    "历史 config.py 因含明文密钥未读取或复制，非源码内参数采用注释证据近似",
+    "目标日本地缓存按归档源码得到的状态与基础分均无法对齐原报告，视为未闭合证据冲突"
+  ]
+}

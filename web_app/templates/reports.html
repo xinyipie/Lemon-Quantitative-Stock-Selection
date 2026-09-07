@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}市场日报{% endblock %}
+{% block content %}
+<div class="report-archive">
+  <header class="report-archive__header">
+    <div>
+      <p class="eyebrow">Daily Market Research</p>
+      <h1>市场日报</h1>
+      <p>按日期、公司、行业、事件或风险词查找每日研究记录。</p>
+    </div>
+  </header>
+
+  <form class="report-search" method="get" action="/reports">
+    <label>关键词<input name="q" value="{{ query }}" placeholder="公司、行业、事件或风险"></label>
+    <label>开始日期<input type="date" name="start" value="{{ start|fmt_date_input }}"></label>
+    <label>结束日期<input type="date" name="end" value="{{ end|fmt_date_input }}"></label>
+    <button type="submit">查询</button>
+  </form>
+
+  {% if items %}
+  <ol class="report-archive__list">
+    {% for item in items %}
+    <li>
+      <time datetime="{{ item.report_date }}">{{ item.report_date|fmt_date }}</time>
+      <div>
+        <h2><a href="/reports/{{ item.report_date }}">{{ item.title }}</a></h2>
+        <p>{{ item.snippet }}</p>
+        <small>行情截至 {{ item.market_date|fmt_date }}</small>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty-state">当前条件下没有找到报告。</p>
+  {% endif %}
+</div>
+{% endblock %}

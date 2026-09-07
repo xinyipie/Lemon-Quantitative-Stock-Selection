@@ -118,14 +118,18 @@ class UpdateServiceTest(unittest.TestCase):
     def test_update_worker_entrypoint_runs_command_and_writes_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
+            log_path = Path(tmpdir) / "worker.log"
             command = [sys.executable, "-c", "print('worker ok')"]
 
-            returncode = update_worker_main([json.dumps(command), str(status_path)])
+            returncode = update_worker_main([json.dumps(command), str(status_path), str(log_path)])
             status = read_update_status(status_path=status_path)
+            log_text = log_path.read_text(encoding="utf-8")
 
         self.assertEqual(returncode, 0)
         self.assertEqual(status["state"], "finished")
         self.assertIn("worker ok", status.get("stdout_tail", ""))
+        self.assertIn("worker ok", log_text)
+        self.assertIn("update finished", log_text)
 
     def test_read_update_status_handles_missing_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:

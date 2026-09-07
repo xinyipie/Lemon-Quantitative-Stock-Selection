@@ -180,8 +180,11 @@ def run_update_job(
     command: list[str],
     status_path: str | Path = DEFAULT_STATUS_PATH,
     runner: Callable | None = None,
+    log_path: str | Path | None = None,
 ) -> None:
     path = Path(status_path)
+    persistent_log = Path(log_path) if log_path else None
+    _append_run_log(persistent_log, f"\n===== update started {_now()} mode={_extract_mode(command)} =====\n")
     _write_status(
         path,
         {
@@ -198,8 +201,11 @@ def run_update_job(
         result = (
             runner(command, cwd=Path.cwd(), text=True, capture_output=True, check=False)
             if runner is not None
-            else _run_streaming_process(command, path)
+            else _run_streaming_process(command, path, persistent_log)
         )
+        if runner is not None:
+            _append_run_log(persistent_log, str(getattr(result, "stdout", "") or ""))
+            _append_run_log(persistent_log, str(getattr(result, "stderr", "") or ""))
         state = "finished" if int(result.returncode or 0) == 0 else "failed"
         _write_status(
             path,
@@ -217,7 +223,9 @@ def run_update_job(
                 "message": "同步完成。" if state == "finished" else "同步失败，请查看错误摘要。",
             },
         )
+        _append_run_log(persistent_log, f"===== update finished {_now()} state={state} returncode={int(result.returncode or 0)} =====\n")
     except Exception as exc:  # pragma: no cover - fallback status for unexpected runner errors
+        _append_run_log(persistent_log, f"worker exception: {exc}\n===== update failed {_now()} =====\n")
         _write_status(
             path,
             {
@@ -241,7 +249,7 @@ class _ProcessResult:
         self.stderr = stderr
 
 
-def _run_streaming_process(command: list[str], status_path: Path) -> _ProcessResult:
+def _run_streaming_process(command: list[str], status_path: Path, log_path: Path | None = None) -> _ProcessResult:
     process = subprocess.Popen(
         command,
         cwd=Path.cwd(),
@@ -262,6 +270,7 @@ def _run_streaming_process(command: list[str], status_path: Path) -> _ProcessRes
         for line in iter(pipe.readline, ""):
             with lock:
                 lines.append(line)
+                _append_run_log(log_path, line)
                 patch = {
                     "state": "running",
                     "running": True,
@@ -284,6 +293,17 @@ def _run_streaming_process(command: list[str], status_path: Path) -> _ProcessRes
     stdout_thread.join(timeout=2)
     stderr_thread.join(timeout=2)
     return _ProcessResult(returncode, "".join(stdout_lines), "".join(stderr_lines))
+
+
+def _append_run_log(log_path: Path | None, text: str) -> None:
+    if log_path is None or not text:
+        return
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(text)
+    except OSError:
+        return
 
 
 def _write_status(status_path: str | Path, status: dict) -> None:

@@ -8,7 +8,7 @@ import pickle
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -25,6 +25,7 @@ from web_app.services.sector_service import (
     build_strategy_overlap,
 )
 from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
+from web_app.services.report_service import build_report_archive_context, build_report_detail_context
 from web_app.services.ui_service import (
     display_source_label,
     format_date_input,
@@ -53,6 +54,7 @@ from web_app.services.signal_service import (
     get_signal_runs,
     get_stock_signals,
     summarize_short_signal_performance,
+    summarize_short_strategy_cards,
     summarize_longterm_audit_sample_filter,
     summarize_stock_strategy_history,
     split_longterm_pool,
@@ -81,7 +83,7 @@ templates.env.filters["display_source_label"] = display_source_label
 _SECTOR_PAGE_CACHE_TTL_SECONDS = 120
 _sector_page_cache: dict[tuple, tuple[float, dict]] = {}
 _SECTOR_PAGE_DISK_CACHE = Path("data") / "web_sector_page_cache.pkl"
-_SECTOR_PAGE_CACHE_VERSION = 1
+_SECTOR_PAGE_CACHE_VERSION = 6
 _SECTOR_BUILDERS = (
     build_sector_radar,
     build_concept_news_radar,
@@ -98,6 +100,28 @@ def _update_start_response(request: Request, status: dict | None, redirect_url: 
     if _wants_json(request):
         return JSONResponse(status or {"state": "running"})
     return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@app.get("/reports")
+def report_archive(request: Request, q: str = "", start: str = "", end: str = ""):
+    context = build_report_archive_context(DEFAULT_SIGNAL_DB_PATH, q, start, end)
+    return templates.TemplateResponse(
+        request,
+        "reports.html",
+        {"request": request, "active_nav": "reports", **context},
+    )
+
+
+@app.get("/reports/{report_date}")
+def report_detail(request: Request, report_date: str):
+    context = build_report_detail_context(DEFAULT_SIGNAL_DB_PATH, report_date)
+    if context is None:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    return templates.TemplateResponse(
+        request,
+        "report_detail.html",
+        {"request": request, "active_nav": "reports", **context},
+    )
 
 
 @app.get("/")
@@ -298,13 +322,17 @@ def _get_sector_page_payload(end: str = "", use_persisted_cache: bool = True) ->
     key = _sector_page_cache_key(end)
     cached = _sector_page_cache.get(key)
     now = time.monotonic()
-    if cached and now - cached[0] < _SECTOR_PAGE_CACHE_TTL_SECONDS:
+    if (
+        cached
+        and now - cached[0] < _SECTOR_PAGE_CACHE_TTL_SECONDS
+        and _is_current_sector_page_payload(cached[1])
+    ):
         return cached[1]
 
     disk_key = _sector_page_disk_cache_key(end)
     if use_persisted_cache and _using_default_sector_builders():
         persisted = load_sector_page_cache(_SECTOR_PAGE_DISK_CACHE, disk_key)
-        if persisted is not None:
+        if _is_current_sector_page_payload(persisted):
             _sector_page_cache[key] = (now, persisted)
             return persisted
 
@@ -313,6 +341,20 @@ def _get_sector_page_payload(end: str = "", use_persisted_cache: bool = True) ->
     if use_persisted_cache and _using_default_sector_builders():
         save_sector_page_cache(_SECTOR_PAGE_DISK_CACHE, disk_key, payload)
     return payload
+
+
+def _is_current_sector_page_payload(payload: dict | None) -> bool:
+    """拒绝字段不完整的旧版页面缓存，避免模板升级后直接返回500。"""
+    required = {
+        "radar",
+        "concept_news",
+        "decision",
+        "strategy_overlap",
+        "latest_radar_snapshot",
+        "freshness",
+        "ai_news_brief",
+    }
+    return isinstance(payload, dict) and required.issubset(payload)
 
 
 def _sector_page_disk_cache_key(end: str = "") -> tuple:
@@ -335,6 +377,8 @@ def load_sector_page_cache(path: Path, key: tuple) -> dict | None:
     except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
         return None
     if not isinstance(cached, dict) or cached.get("version") != _SECTOR_PAGE_CACHE_VERSION:
+        return None
+    if key and str(key[0]) == "latest" and time.time() - float(cached.get("created_at") or 0) > 1800:
         return None
     entries = cached.get("entries")
     if not isinstance(entries, dict):
@@ -376,10 +420,23 @@ def _sector_page_cache_key(end: str = "") -> tuple:
 
 
 def _build_sector_page_payload(end: str = "") -> dict:
+    from market_radar.ai_news_brief import load_ai_news_brief
+
     radar = build_sector_radar(DEFAULT_HISTORY_DB_PATH, end_date=end or None)
-    concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
+    target_date = end or str(radar.get("end_date") or "")
+    concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=target_date or None)
+    ai_news_brief = load_ai_news_brief(target_date)
     decision = build_market_radar_decision(radar, concept_news)
     strategy_overlap = build_strategy_overlap(DEFAULT_SIGNAL_DB_PATH, radar, concept_news)
+    from market_radar.freshness import build_market_freshness
+
+    freshness = build_market_freshness(radar, concept_news, strategy_overlap)
+    decision = dict(decision)
+    decision["freshness"] = freshness
+    if not freshness["decision_eligible"]:
+        decision["alignment"] = "数据未就绪"
+        decision["confidence"] = "低"
+        decision["primary_action"] = "等待行业行情与目标交易日对齐后再判断。"
     try:
         latest_radar_snapshot = get_latest_market_radar_snapshot(DEFAULT_SIGNAL_DB_PATH)
     except Exception:
@@ -390,12 +447,15 @@ def _build_sector_page_payload(end: str = "") -> dict:
         "decision": decision,
         "strategy_overlap": strategy_overlap,
         "latest_radar_snapshot": latest_radar_snapshot,
+        "freshness": freshness,
+        "ai_news_brief": ai_news_brief,
     }
 
 
 def refresh_market_radar_snapshot_for_page(end: str = "") -> int | None:
     radar = build_sector_radar(DEFAULT_HISTORY_DB_PATH, end_date=end or None)
-    concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=end or None)
+    target_date = end or str(radar.get("end_date") or "")
+    concept_news = build_concept_news_radar(DEFAULT_SIGNAL_DB_PATH, today=target_date or None)
     decision = build_market_radar_decision(radar, concept_news)
     brief = decision.get("research_brief") if isinstance(decision, dict) else None
     if not isinstance(brief, dict) or not brief:
@@ -506,6 +566,7 @@ def signals(
     industry: str = "",
     page: str = "1",
     view: str = "completed",
+    strategy: str = "all",
 ):
     default_window_days = 100
     review_sources = ["backtest_ic_short", "live"]
@@ -559,8 +620,47 @@ def signals(
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     normalized_start = normalize_date_input(start)
     normalized_end = normalize_date_input(end)
-    effective_start = normalized_start or build_default_signal_start(latest_signal_date, days=default_window_days)
-    all_signals = get_recent_signals(
+    allowed_strategies = {"all", "steady", "balance", "repair"}
+    active_strategy = strategy if strategy in allowed_strategies else "all"
+    effective_start = normalized_start or (
+        None
+        if active_strategy == "repair"
+        else build_default_signal_start(latest_signal_date, days=default_window_days)
+    )
+    history_sources = ["backtest_ic_short", "live", "live_observe", "research_shadow"]
+    history_profiles = [
+        "short_v9_final",
+        "profile_v9_sector_quality_guard",
+        "short_live_observe_best_balance",
+        "short_defensive_quality_reentry_v16",
+    ]
+    all_strategy_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=900,
+        source=history_sources,
+        profile=history_profiles,
+        mode="short",
+        query=q or None,
+        start=effective_start or None,
+        end=normalized_end or None,
+        industry=industry or None,
+    )
+    strategy_summary_signals = get_recent_signals(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=None,
+        limit=3000,
+        source=history_sources,
+        profile=history_profiles,
+        mode="short",
+    )
+    strategy_cards = summarize_short_strategy_cards(strategy_summary_signals)
+    all_signals = (
+        all_strategy_signals
+        if active_strategy == "all"
+        else [item for item in all_strategy_signals if item.get("strategy_key") == active_strategy]
+    )
+    official_kpi_signals = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=DEFAULT_HISTORY_DB_PATH,
         limit=300,
@@ -568,11 +668,11 @@ def signals(
         profile=review_profiles,
         mode="short",
         query=q or None,
-        start=effective_start or None,
+        start=(normalized_start or build_default_signal_start(latest_signal_date, days=default_window_days)),
         end=normalized_end or None,
         industry=industry or None,
     )
-    short_stats = summarize_short_signal_performance(all_signals, limit=300)
+    short_stats = summarize_short_signal_performance(official_kpi_signals, limit=300)
     result_context = _build_short_result_context(all_signals, view=view)
     recent_signals, page_info = paginate_items(result_context["items"], page, page_size=30)
     return templates.TemplateResponse(
@@ -584,6 +684,8 @@ def signals(
             "all_signals": all_signals,
             "page_info": page_info,
             "short_stats": short_stats,
+            "strategy_cards": strategy_cards,
+            "active_strategy": active_strategy,
             "result_view": result_context["view"],
             "result_counts": result_context["counts"],
             "latest_signal_run": latest_signal_run,
@@ -600,6 +702,7 @@ def signals(
                 "default_window_days": default_window_days,
                 "is_default_window": not any([start, end, q, industry]),
                 "view": result_context["view"],
+                "strategy": active_strategy,
             },
             "active_nav": "signals",
         },

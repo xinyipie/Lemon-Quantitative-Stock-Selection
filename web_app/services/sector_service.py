@@ -67,6 +67,7 @@ def build_sector_radar(
     decorated_healthy = [_decorate_sector(item) for item in healthy.head(top_sectors).to_dict("records")]
     decorated_risky = [_decorate_sector(item) for item in risky.head(top_sectors).to_dict("records")]
     decorated_candidates = [_decorate_candidate(item) for item in candidates.to_dict("records")]
+    news_stock_universe = _build_news_stock_universe(stocks)
     summary["healthy_display_count"] = len(decorated_healthy)
     summary["risky_display_count"] = len(decorated_risky)
     return {
@@ -75,10 +76,23 @@ def build_sector_radar(
         "healthy": decorated_healthy,
         "risky": decorated_risky,
         "candidates": decorated_candidates,
+        "news_stock_universe": news_stock_universe,
         "candidate_groups": _group_candidates_by_sector(decorated_candidates, decorated_healthy),
         "all_count": len(heat),
         "message": "",
     }
+
+
+def _build_news_stock_universe(stocks) -> list[dict]:
+    """给消息入口提供全市场名称映射和量价快照，不参与正式策略评分。"""
+    if stocks is None or stocks.empty:
+        return []
+    fields = (
+        "ts_code", "name", "industry", "ret_5d", "ret_10d", "above_ma20",
+        "position_20d", "amount_ratio_5d", "net_mf_amount", "turnover_rate",
+    )
+    available = [field for field in fields if field in stocks.columns]
+    return stocks[available].fillna(0).to_dict("records")
 
 
 def build_concept_news_radar(
@@ -88,20 +102,116 @@ def build_concept_news_radar(
     limit: int = 8,
 ) -> dict:
     """Build cached concept heat and news/concept impact summaries."""
-    news_cache = _load_news_sector_cache(cache_dir=cache_dir, today=today, limit=limit)
-    signal_news = _summarize_signal_news_impacts(signal_db=signal_db, limit=limit)
-    news = news_cache if news_cache.get("positive") or news_cache.get("negative") or news_cache.get("items") else signal_news
+    news = _load_news_sector_cache(cache_dir=cache_dir, today=today, limit=limit)
     concepts = _load_concept_heat(cache_dir=cache_dir, today=today, limit=limit)
     if not concepts.get("items"):
         concepts = _concepts_from_news_impacts(news, limit=limit) or concepts
     events = list(news.get("events") or [])
+    reading_events = list(news.get("reading_events") or events)
     event_summary = news.get("event_summary") or build_event_summary(events)
     return {
         "concepts": concepts,
         "news": news,
         "events": events,
+        "reading_events": reading_events,
         "event_summary": event_summary,
+        "pipeline_health": _build_news_pipeline_health(news),
         "theme_filter": _load_theme_filter(cache_dir=cache_dir, today=today, limit=limit),
+        "historical_signal_context": _summarize_signal_news_impacts(signal_db=signal_db, limit=limit),
+    }
+
+
+def _build_news_pipeline_health(news: dict) -> dict:
+    """汇总消息采集与 AI 映射状态，仅用于页面解释，不参与任何评分。"""
+    raw_news = list(news.get("raw_news") or [])
+    unverified_news = list(news.get("unverified_news") or [])
+    titles = list(news.get("titles") or [])
+    ai_titles = list(news.get("ai_titles") or [])
+    mapped_items = list(news.get("items") or [])
+
+    raw_count = int(
+        news.get("raw_news_total")
+        or len(raw_news)
+        or len(unverified_news)
+        or len(titles)
+    )
+    ai_candidate_count = len(ai_titles)
+    mapped_count = len(mapped_items)
+    positive_count = 0
+    negative_count = 0
+    neutral_count = 0
+    for item in mapped_items:
+        impact = str(item.get("impact") or item.get("direction") or "").strip().lower()
+        if impact in {"positive", "bullish", "利多", "利好"}:
+            positive_count += 1
+        elif impact in {"negative", "bearish", "利空", "风险"}:
+            negative_count += 1
+        else:
+            neutral_count += 1
+
+    directional_count = positive_count + negative_count
+    unresolved_count = max(raw_count - directional_count, 0)
+    source_names: list[str] = []
+    for item in raw_news + unverified_news:
+        source = str(item.get("source") or item.get("provider") or "").strip()
+        if source and source not in source_names:
+            source_names.append(source)
+
+    source_reused = bool(news.get("source_reused"))
+    if source_reused:
+        source_state, source_label, source_tone = "cache_fallback", "新闻缓存复用", "watch"
+    elif raw_count > 0:
+        source_state, source_label, source_tone = "live", "本批新闻可用", "ok"
+    else:
+        source_state, source_label, source_tone = "failed", "未取得新闻", "danger"
+
+    if source_names:
+        source_detail = f"本批次识别到 {len(source_names)} 个新闻来源"
+    elif source_reused:
+        source_detail = "本批次使用最近一次可用新闻缓存"
+    else:
+        source_detail = "当前缓存中没有可供研判的原始新闻"
+
+    ai_status = str(news.get("ai_status") or "missing").strip().lower()
+    if ai_status == "ok" and mapped_count > 0:
+        ai_label, ai_tone = "AI 映射成功", "ok"
+    elif ai_status == "ok":
+        ai_label, ai_tone = "AI 完成但无有效映射", "watch"
+    elif ai_status == "missing_api_key":
+        ai_label, ai_tone = "AI 密钥缺失", "danger"
+    elif ai_status == "empty_result":
+        ai_label, ai_tone = "AI 未返回有效结果", "watch"
+    else:
+        ai_label, ai_tone = "AI 映射未完成", "danger" if raw_count else "neutral"
+
+    return {
+        "source_state": source_state,
+        "source_label": source_label,
+        "source_tone": source_tone,
+        "source_detail": source_detail,
+        "source_message": str(news.get("source_message") or "").strip(),
+        "ai_status": ai_status,
+        "ai_label": ai_label,
+        "ai_tone": ai_tone,
+        "ai_message": str(news.get("ai_message") or "").strip(),
+        "raw_count": raw_count,
+        "ai_candidate_count": ai_candidate_count,
+        "mapped_count": mapped_count,
+        "positive_count": positive_count,
+        "negative_count": negative_count,
+        "neutral_count": neutral_count,
+        "directional_count": directional_count,
+        "unresolved_count": unresolved_count,
+        "funnel": [
+            {"label": "原始新闻", "count": raw_count, "note": "采集或缓存可读"},
+            {"label": "AI 候选", "count": ai_candidate_count, "note": "价值筛选后送入研判"},
+            {"label": "行业映射", "count": mapped_count, "note": "通过严格行业校验"},
+            {
+                "label": "方向结果",
+                "count": directional_count,
+                "note": f"利多 {positive_count} / 利空 {negative_count} / 待判 {unresolved_count}",
+            },
+        ],
     }
 
 
@@ -282,20 +392,29 @@ def build_strategy_overlap(
         if radar_date:
             source_row = conn.execute(
                 """
-                select max(p.trade_date) as trade_date
-                from signal_pool p
-                where p.trade_date <= ?
-                  and p.score is not null
+                select max(r.trade_date) as trade_date
+                from signal_runs r
+                where r.trade_date <= ?
+                  and r.source in ('live', 'live_observe', 'backtest_ic_short')
                 """,
                 (radar_date,),
             ).fetchone()
         else:
             source_row = conn.execute(
-                "select max(trade_date) as trade_date from signal_pool where score is not null"
+                """
+                select max(trade_date) as trade_date
+                from signal_runs
+                where source in ('live', 'live_observe', 'backtest_ic_short')
+                """
             ).fetchone()
         source_date = str(source_row["trade_date"] or "") if source_row else ""
         if not source_date:
             return _empty_strategy_overlap("暂无可用于共振判断的策略信号。")
+        if radar_date and source_date != radar_date:
+            return _empty_strategy_overlap(
+                f"策略信号日期 {source_date} 与雷达日期 {radar_date} 不一致，已停止共振判断。",
+                source_date=source_date,
+            )
         rows = conn.execute(
             """
             select p.trade_date, p.mode, p.profile, p.ts_code, p.name, p.industry,
@@ -312,6 +431,9 @@ def build_strategy_overlap(
         ).fetchall()
     finally:
         conn.close()
+
+    if not rows:
+        return _empty_strategy_overlap("当日策略已运行，但没有可展示的候选信号。", source_date=source_date)
 
     risk_codes = _load_signal_display_risk_codes(
         history_db=history_db,
@@ -471,7 +593,8 @@ def _load_concept_heat(cache_dir: str | Path, today: str | None = None, limit: i
     if today:
         text = str(today).replace("-", "")[:8]
         candidates.append(cache_path / f"hot_concepts_{text}.json")
-    candidates.extend(sorted(cache_path.glob("hot_concepts_*.json"), key=lambda path: path.name, reverse=True))
+    if not today:
+        candidates.extend(sorted(cache_path.glob("hot_concepts_*.json"), key=lambda path: path.name, reverse=True))
     seen = set()
     for path in candidates:
         if path in seen or not path.exists():
@@ -537,7 +660,8 @@ def _load_theme_filter(cache_dir: str | Path, today: str | None = None, limit: i
     if today:
         text = str(today).replace("-", "")[:8]
         candidates.append(cache_path / f"theme_filter_{text}.json")
-    candidates.extend(sorted(cache_path.glob("theme_filter_*.json"), key=lambda path: path.name, reverse=True))
+    if not today:
+        candidates.extend(sorted(cache_path.glob("theme_filter_*.json"), key=lambda path: path.name, reverse=True))
     seen = set()
     for path in candidates:
         if path in seen or not path.exists():
@@ -665,7 +789,8 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
     if today:
         text = str(today).replace("-", "")[:8]
         candidates.append(cache_path / f"news_sector_{text}.json")
-    candidates.extend(sorted(cache_path.glob("news_sector_*.json"), key=lambda path: path.name, reverse=True))
+    if not today:
+        candidates.extend(sorted(cache_path.glob("news_sector_*.json"), key=lambda path: path.name, reverse=True))
     seen = set()
     for path in candidates:
         if path in seen or not path.exists():
@@ -675,12 +800,32 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        payload = _filter_news_payload_for_freshness(payload)
         positive, negative = _news_payload_to_groups(payload, limit=limit)
-        items = _decorate_news_items(payload, limit=limit)
-        if positive or negative or items:
+        decision_items = _decorate_news_items(payload, limit=limit)
+        post_target = list(payload.get("post_target_news") or [])
+        post_target_payload = {"raw_news": post_target, "items": []}
+        post_target_items = _decorate_news_items(post_target_payload, limit=limit)
+        items = (decision_items + post_target_items)[: max(limit * 2, limit)]
+        unverified = list(payload.get("unverified_news") or [])
+        if positive or negative or items or unverified or post_target:
             source_date = str(payload.get("date") or path.stem.replace("news_sector_", ""))
-            selection = _build_news_selection_summary(payload, positive, negative, items)
+            selection = _build_news_selection_summary(payload, positive, negative, decision_items)
             events = build_events_from_news_payload(payload, limit=max(limit * 2, limit))
+            reading_events = list(events)
+            if not reading_events:
+                reading_events.extend(
+                    _build_unverified_news_events(
+                        list(payload.get("raw_news") or []),
+                        source_date,
+                        limit=limit,
+                        verified=True,
+                    )
+                )
+            reading_events.extend(
+                _build_unverified_news_events(post_target, source_date, limit=limit, verified=True, post_target=True)
+            )
+            reading_events.extend(_build_unverified_news_events(unverified, source_date, limit=limit))
             return {
                 "source_date": source_date,
                 "source_name": path.name,
@@ -688,7 +833,20 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
                 "negative": negative,
                 "items": items,
                 "events": events,
+                "reading_events": reading_events,
+                "raw_news": list(payload.get("raw_news") or []),
+                "unverified_news": unverified,
+                "post_target_news": post_target,
+                "titles": list(payload.get("titles") or []),
+                "ai_titles": list(payload.get("ai_titles") or []),
+                "raw_news_total": int(payload.get("raw_news_total") or len(payload.get("raw_news") or [])),
+                "ai_status": payload.get("ai_status"),
+                "ai_message": payload.get("ai_message"),
+                "source_reused": bool(payload.get("source_reused")),
+                "source_message": str(payload.get("source_message") or ""),
                 "event_summary": build_event_summary(events),
+                "unverified": unverified[:limit],
+                "freshness": payload.get("freshness") or {},
                 "selection": selection,
                 "message": str(payload.get("ai_message") or "") if not positive and not negative else "",
             }
@@ -701,6 +859,243 @@ def _load_news_sector_cache(cache_dir: str | Path, today: str | None = None, lim
         "selection": _empty_news_selection(),
         "message": "新闻板块缓存为空。",
     }
+
+
+def _filter_news_payload_for_freshness(payload: dict) -> dict:
+    """只让发布时间可靠且不超过48小时的新闻进入雷达决策。"""
+    from market_radar.freshness import classify_news_time
+
+    result = dict(payload or {})
+    payload_date = _date_key(result.get("date"))
+    reference_time = result.get("generated_at")
+    if not reference_time and payload_date:
+        reference_time = f"{payload_date[:4]}-{payload_date[4:6]}-{payload_date[6:8]} 23:59:59"
+    verified = []
+    unverified = []
+    expired = []
+    post_target = []
+    valid_titles = {}
+    source_rows = list(result.get("raw_news") or []) + list(result.get("unverified_news") or [])
+    seen_source_titles = set()
+    for row in source_rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        source_key = _news_title_key(item.get("title"))
+        if source_key and source_key in seen_source_titles:
+            continue
+        if source_key:
+            seen_source_titles.add(source_key)
+        publish_date = _date_key(item.get("publish_time"))
+        if payload_date and publish_date and publish_date > payload_date:
+            timing = classify_news_time(item.get("publish_time"), now=reference_time, record=item)
+            item.update(timing)
+            item.update(
+                {
+                    "decision_eligible": False,
+                    "freshness_status": "post_target",
+                    "freshness_label": "盘后新消息",
+                    "freshness_reason": "发布时间晚于雷达目标交易日，仅供阅读，等待下一交易日验证。",
+                    "freshness_factor": 0.0,
+                }
+            )
+            post_target.append(item)
+            continue
+        timing = classify_news_time(item.get("publish_time"), now=reference_time, record=item)
+        item.update(timing)
+        title_key = _news_title_key(item.get("title"))
+        if timing["decision_eligible"]:
+            verified.append(item)
+            if title_key:
+                valid_titles[title_key] = item
+        elif timing["freshness_status"] == "unknown":
+            unverified.append(item)
+        else:
+            expired.append(item)
+
+    verified_index = _raw_news_index({"raw_news": verified})
+    filtered_items = []
+    for row in result.get("items") or []:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        item_title = item.get("news") or item.get("title")
+        source = valid_titles.get(_news_title_key(item_title))
+        if not source:
+            source = _find_raw_news_source(str(item_title or ""), verified_index)
+        if not source:
+            continue
+        item.update(
+            {
+                "publish_time": source.get("publish_time"),
+                "freshness_status": source.get("freshness_status"),
+                "freshness_label": source.get("freshness_label"),
+                "age_hours": source.get("age_hours"),
+                "age_text": source.get("age_text"),
+                "freshness_factor": source.get("freshness_factor", 1.0),
+            }
+        )
+        if item.get("strength") is not None and source.get("freshness_factor") == 0.5:
+            item["strength"] = max(1, round(float(item.get("strength") or 0) * 0.5))
+        filtered_items.append(item)
+
+    result["raw_news"] = verified
+    result["items"] = filtered_items
+    result["titles"] = [item.get("title") for item in verified if item.get("title")]
+    result["ai_titles"] = [item.get("news") or item.get("title") for item in filtered_items]
+    result["unverified_news"] = unverified
+    result["expired_news"] = expired
+    result["post_target_news"] = post_target
+    result["freshness"] = {
+        "verified_count": len(verified),
+        "unverified_count": len(unverified),
+        "expired_count": len(expired),
+        "post_target_count": len(post_target),
+        "generated_at": result.get("generated_at") or "",
+    }
+    return result
+
+
+def _build_unverified_news_events(
+    rows: list[dict],
+    source_date: str,
+    limit: int = 8,
+    verified: bool = False,
+    post_target: bool = False,
+) -> list[dict]:
+    """把原始新闻作为只读事件展示，不参与板块判断。"""
+    events = []
+    for index, row in enumerate(rows[: max(0, int(limit))]):
+        if not isinstance(row, dict):
+            continue
+        title = str(row.get("title") or "").strip()
+        if not title:
+            continue
+        source = str(row.get("source") or row.get("provider") or "来源待核验").strip()
+        url = str(row.get("url") or "").strip()
+        impact, tone, impact_label, direction_reason = _infer_raw_news_direction(row)
+        reason = _raw_news_excerpt(row) or direction_reason
+        sectors = _raw_news_sectors(row)
+        event_type = _raw_news_event_type(row)
+        publish_time = str(row.get("publish_time") or "未知")
+        event_bucket = "background" if verified else "unverified"
+        freshness_label = str(
+            row.get("freshness_label")
+            or ("盘后新消息" if post_target else "近期原始新闻" if verified else "时效待核验")
+        )
+        events.append(
+            {
+                "event_id": f"readonly-{source_date}-{index}",
+                "title": title[:120],
+                "event_type": event_type if verified else "来源待核验",
+                "impact": impact,
+                "impact_label": impact_label,
+                "impact_tone": tone,
+                "materiality": "",
+                "impact_degree_text": f"{impact_label} · 规则初判，不参与量化与板块加分",
+                "duration": "待研判",
+                "novelty": "近期" if verified else "待核验",
+                "source_quality": source if verified else "来源待核验",
+                "source_score": float(row.get("news_value_score") or 0),
+                "mapped_industries": sectors,
+                "mapping_confidence": "unmapped",
+                "evidence_urls": ([{"title": title, "source": source, "url": url}] if url else []),
+                "verification_points": [direction_reason, "核对原文关键数字，并观察相关板块是否出现量价响应"],
+                "invalidation_points": ["无法确认发布时间", "缺少可追溯原文"],
+                "risk_note": (
+                    "发布时间晚于目标交易日，等待下一交易日行情验证。"
+                    if post_target
+                    else "原始新闻未完成AI行业映射，不可作为当日交易依据。"
+                    if verified
+                    else "发布时间未核验，不可作为当日交易依据。"
+                ),
+                "strength": 0,
+                "reasons": [direction_reason],
+                "source_date": source_date,
+                "source_name": source,
+                "original_source": source,
+                "collection_source": "新闻缓存",
+                "source_url": url,
+                "publish_time": publish_time,
+                "collected_at": str(row.get("collected_at") or source_date),
+                "catalyst_age_days": None,
+                "catalyst_clock": freshness_label,
+                "freshness_bucket": "background" if verified else "unknown",
+                "freshness_label": freshness_label,
+                "source_channel": "新闻缓存",
+                "source_confidence_note": (
+                    "盘后新消息，仅供阅读"
+                    if post_target
+                    else "AI 映射不可用，展示原始新闻"
+                    if verified
+                    else "发布时间待核验"
+                ),
+                "trade_priority": "background" if verified else "source_gap",
+                "event_bucket": event_bucket,
+                "effect_summary": reason,
+                "industry_anchor": "mainline-view" if sectors else "",
+                "stock_anchor": "sector-candidates" if sectors else "",
+            }
+        )
+    return events
+
+
+def _infer_raw_news_direction(row: dict) -> tuple[str, str, str, str]:
+    """用可解释关键词给原始新闻添加只读方向，不写入任何量化分数。"""
+    text = " ".join(str(row.get(key) or "") for key in ("title", "content_excerpt", "value_reason_text"))
+    positive_terms = (
+        "中标", "订单", "签约", "合同", "增持", "回购", "预增", "扭亏", "业绩增长", "获批",
+        "上调评级", "涨价", "提价", "扩产", "战略合作", "降息", "风险有限", "风险可控",
+        "上涨空间", "申购旗下基金", "员工持股", "奖励基金购买",
+    )
+    negative_terms = (
+        "减持", "行政处罚", "立案调查", "业绩亏损", "大幅下调", "终止", "违约", "诉讼",
+        "召回", "退市", "暴雷", "下跌", "跌停", "裁员", "质押风险", "禁令", "反倾销",
+    )
+    positive_hits = [term for term in positive_terms if term in text]
+    negative_hits = [term for term in negative_terms if term in text]
+    if len(positive_hits) > len(negative_hits):
+        return "positive", "ok", "规则偏利多", f"利多线索：{'、'.join(positive_hits[:3])}；仍需原文和量价确认"
+    if len(negative_hits) > len(positive_hits):
+        return "negative", "bad", "规则偏利空", f"利空线索：{'、'.join(negative_hits[:3])}；先核对影响范围和持续性"
+    return "mixed", "neutral", "方向待定", "未命中明确方向词，仅保留为信息线索"
+
+
+def _raw_news_excerpt(row: dict) -> str:
+    excerpt = str(row.get("content_excerpt") or "").strip()
+    title = str(row.get("title") or "").strip()
+    return excerpt[:180] if excerpt and _news_title_key(excerpt) != _news_title_key(title) else ""
+
+
+def _raw_news_sectors(row: dict) -> list[str]:
+    sectors = []
+    reasons = row.get("value_reasons") or []
+    if isinstance(reasons, str):
+        reasons = [reasons]
+    for reason in reasons:
+        text = str(reason or "")
+        if text.startswith("映射行业:"):
+            for sector in re.split(r"[、,，]", text.split(":", 1)[1]):
+                sector = sector.strip()
+                if sector and sector not in sectors:
+                    sectors.append(sector)
+    return sectors[:4]
+
+
+def _raw_news_event_type(row: dict) -> str:
+    reasons = row.get("value_reasons") or []
+    if isinstance(reasons, str):
+        reasons = [reasons]
+    ignored = ("映射行业:", "近期", "有原文链接", "普通新闻")
+    for reason in reasons:
+        text = str(reason or "").strip()
+        if text and not any(text.startswith(prefix) for prefix in ignored):
+            return text[:12]
+    return "行业动态"
+
+
+def _news_title_key(value) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
 
 
 def _news_payload_to_groups(payload: dict, limit: int = 8) -> tuple[list[dict], list[dict]]:
@@ -884,31 +1279,33 @@ def _decorate_raw_news_items(payload: dict, limit: int = 8) -> list[dict]:
     for item in ranked[: max(0, int(limit))]:
         score = float(item.get("news_value_score") or 0)
         grade = "B" if score >= 50 else "C" if score >= 30 else "D"
-        reason = str(item.get("value_reason_text") or "原始新闻按信息价值排序展示。")
+        impact, tone, impact_text, direction_reason = _infer_raw_news_direction(item)
+        sectors = _raw_news_sectors(item)
+        reason = _raw_news_excerpt(item) or direction_reason
         decorated.append(
             {
                 "title": str(item.get("title") or "").strip()[:120],
-                "quality": "原始新闻",
-                "impact": "neutral",
-                "impact_text": "未映射",
-                "tone": "neutral",
+                "quality": _raw_news_event_type(item),
+                "impact": impact,
+                "impact_text": impact_text,
+                "tone": tone,
                 "strength": 0,
                 "strength_text": "未映射",
-                "duration": "待研判",
-                "sectors": [],
-                "sectors_text": "未进行 AI 行业映射",
+                "duration": str(item.get("freshness_label") or "近期"),
+                "sectors": sectors,
+                "sectors_text": "、".join(sectors) if sectors else "行业待映射",
                 "mapping_confidence": "unmapped",
-                "mapping_confidence_text": "未映射",
-                "mapping_note": message,
+                "mapping_confidence_text": "关键词规则",
+                "mapping_note": f"{message} 当前方向为规则初判，不参与量化评分。",
                 "reason": reason,
                 "grade": grade,
                 "boost_total": 0.0,
                 "boost_text": "+0.0",
-                "impact_path": "原始新闻 → 待人工研判",
-                "trading_hint": "仅作信息浏览，不参与板块加分",
-                "verification_points": ["核对原文与发布时间", "等待行业映射恢复后再评估影响"],
+                "impact_path": f"原始新闻 → {impact_text}",
+                "trading_hint": "规则初判仅辅助阅读，不参与板块加分",
+                "verification_points": [direction_reason, "核对原文关键数字和行业影响范围"],
                 "risk_note": "未完成行业映射，不可单独作为选股依据。",
-                "why_selected": reason,
+                "why_selected": direction_reason,
                 "source_title": str(item.get("title") or "").strip(),
                 "source": str(item.get("source") or item.get("provider") or ""),
                 "source_url": str(item.get("url") or ""),

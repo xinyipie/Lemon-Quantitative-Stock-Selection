@@ -15,8 +15,9 @@ def build_research_brief(
     sector_theses = list(decision.get("sector_theses") or [])
     stock_watchlist = list(decision.get("stock_watchlist") or [])
     events = list(concept_news.get("events") or [])
-    event_groups = _event_groups(events)
-    trade_event_groups = _trade_event_groups(events)
+    reading_events = list(concept_news.get("reading_events") or events)
+    event_groups = _event_groups(reading_events)
+    trade_event_groups = _trade_event_groups(reading_events)
     risk_board = _risk_board(review, sector_theses, stock_watchlist)
     verification = _verification_checklist(review, sector_theses, events)
     risk_blocker = _risk_blocker(data_quality, sector_theses, events, risk_board)
@@ -25,7 +26,7 @@ def build_research_brief(
         "market_regime_note": _market_note(decision, radar),
         "risk_blocker": risk_blocker,
         "mainlines": _mainlines(sector_theses),
-        "event_watchlist": events[:8],
+        "event_watchlist": reading_events[:8],
         "event_groups": event_groups,
         "trade_event_groups": trade_event_groups,
         "sector_theses": sector_theses[:12],

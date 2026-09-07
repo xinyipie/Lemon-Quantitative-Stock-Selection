@@ -1,0 +1,26 @@
+<section class="strategy-showcase" aria-label="短线策略切换">
+  <div class="strategy-summary-grid">
+    {% for card in strategy_cards %}
+    <a class="strategy-summary-card strategy-tone-{{ card.tone }}{% if active_strategy == card.key %} is-active{% endif %}"
+       href="/signals?strategy={{ card.key }}&view={{ result_view }}&q={{ filters.q }}&start={{ filters.start }}&end={{ filters.end }}&industry={{ filters.industry }}">
+      <div class="strategy-card-heading">
+        <span class="strategy-mini-icon" aria-hidden="true">
+          {% if card.key == 'all' %}▦{% elif card.key == 'steady' %}◇{% elif card.key == 'balance' %}↔{% else %}↻{% endif %}
+        </span>
+        <strong>{{ card.label }}</strong>
+        <span class="strategy-card-badge">{{ card.badge }}</span>
+      </div>
+      <p>{{ card.description }}</p>
+      <div class="strategy-card-metrics">
+        <span><b>{{ card.count }}</b><small>历史信号</small></span>
+        <span><b>{{ card.win_rate_text }}</b><small>5日正收益</small></span>
+        <span><b>{{ card.avg_return_text }}</b><small>平均5日</small></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<style>
+.strategy-showcase{margin:14px 0}.strategy-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.strategy-summary-card{min-width:0;padding:12px 14px;border:1px solid #d7e0ec;border-top:3px solid #6b7f99;border-radius:10px;background:#fff;color:#132238;text-decoration:none;box-shadow:0 3px 12px rgba(28,48,74,.04);transition:border-color .16s ease,background .16s ease,transform .16s ease}.strategy-summary-card:hover{transform:translateY(-1px);border-color:#9fb3ca}.strategy-summary-card.is-active{background:#f3f7fc;border-color:#9eb7d5;box-shadow:0 0 0 2px rgba(54,112,189,.08)}.strategy-summary-card.strategy-tone-repair.is-active{background:#fff8ea;border-color:#edca8c;box-shadow:0 0 0 2px rgba(201,122,9,.07)}.strategy-tone-steady{border-top-color:#2f6fe4}.strategy-tone-balance{border-top-color:#6b83a3}.strategy-tone-repair{border-top-color:#c97a09}.strategy-card-heading{display:flex;align-items:center;gap:7px;min-width:0}.strategy-card-heading strong{font-size:15px;white-space:nowrap}.strategy-mini-icon{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:5px;background:#eef3f9;color:#356da8;font-size:11px;line-height:1;flex:none}.strategy-card-badge{margin-left:auto;padding:3px 7px;border-radius:999px;background:#f1f5f9;color:#52657c;font-size:10px;white-space:nowrap}.strategy-summary-card p{min-height:34px;margin:7px 0 9px;color:#66778e;font-size:11px;line-height:1.5}.strategy-card-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.strategy-card-metrics span{display:flex;flex-direction:column;gap:2px}.strategy-card-metrics b{font-size:15px}.strategy-card-metrics small{color:#8290a2;font-size:10px}[aria-label="历史短线结果"] th:nth-child(2),[aria-label="历史短线结果"] td:nth-child(2){min-width:154px}.short-score-line{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:7px}.short-score-line span{min-width:0;white-space:normal;line-height:1.25}.short-verdict.shadow-strategy .tag:last-child{display:none}.short-verdict.shadow-strategy:after{content:"影子验证";display:inline-flex;padding:3px 7px;border-radius:999px;background:#fff3d8;color:#9a5a00;font-size:11px}@media(max-width:1100px){.strategy-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.strategy-summary-grid{grid-template-columns:1fr 1fr}.strategy-summary-card{padding:11px}.strategy-card-badge{display:none}.strategy-card-metrics b{font-size:14px}}@media(max-width:460px){.strategy-summary-grid{grid-template-columns:1fr}}
+</style>

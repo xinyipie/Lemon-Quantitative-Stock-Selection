@@ -1,0 +1,20 @@
+<div class="ai-observation-layer compact {{ item.ai_view.tone }}">
+  <div class="ai-observation-head">
+    <span>{{ item.ai_view.source_label }}</span>
+    <strong>{{ item.ai_view.style }}</strong>
+  </div>
+  <p class="ai-observation-summary">{{ item.ai_view.summary }}</p>
+  {% if item.ai_view.available %}
+  <details class="ai-observation-details">
+    <summary>展开证据与风险</summary>
+    <div class="ai-observation-points">
+      {% if item.ai_view.positive %}<span class="positive"><b>支持</b>{{ item.ai_view.positive }}</span>{% endif %}
+      {% if item.ai_view.risk %}<span class="risk"><b>风险</b>{{ item.ai_view.risk }}</span>{% endif %}
+    </div>
+    <small class="ai-observation-note">{{ item.ai_view.independent_note }}</small>
+    <a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">查看完整判断</a>
+  </details>
+  {% else %}
+  <a class="ai-observation-pending" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">需要时生成判断 →</a>
+  {% endif %}
+</div>

@@ -12,6 +12,7 @@
 {% set chart = detail.price_chart %}
 {% set found = detail.found if detail.found is defined else true %}
 {% set query_text = detail.query if detail.query is defined else '' %}
+{% set asset_type_label = detail.asset_type_label|default('股票') %}
 {% set strategy_summary = strategy_summary|default({}) %}
 
 <header class="terminal-header compact">
@@ -21,7 +22,7 @@
     <p>股票体检卡：行情、质量、资金、信号状态放在一起看。</p>
   </div>
   <form class="command-search" action="/stock" method="get">
-    <input name="code" placeholder="输入股票代码或中文名，例 000001 / 平安银行">
+    <input name="code" placeholder="输入股票、指数或ETF代码/名称">
     <button type="submit">查询</button>
   </form>
 </header>
@@ -30,19 +31,19 @@
 <section class="panel attention-panel">
   <div class="panel-head">
     <div>
-      <h2>未找到股票</h2>
-      <p>没有在本地历史库中找到“{{ query_text }}”。请检查股票代码或中文名，例如 000001 / 平安银行 / 贵州茅台。</p>
+      <h2>未找到该品种</h2>
+      <p>没有在本地历史库中找到“{{ query_text }}”。支持股票、常用指数和已上市ETF的代码或中文名称。</p>
     </div>
   </div>
   <form class="quick-box" action="/stock" method="get">
-    <input name="code" placeholder="重新输入股票代码或中文名">
+    <input name="code" placeholder="重新输入股票、指数或ETF">
     <button type="submit">重新查询</button>
   </form>
 </section>
 {% else %}
 <section class="stock-card">
   <div>
-    <div class="stock-code">{{ stock.ts_code }}</div>
+    <div class="stock-code">{{ stock.ts_code }} · {{ asset_type_label }}</div>
     <h2>{{ stock.name or '' }}</h2>
     <p>{{ stock.industry or '-' }} · 最新交易日 {{ detail.latest_trade_date or '-' }}</p>
   </div>
@@ -195,7 +196,7 @@
       <td><span class="tag {{ 'ok' if item.quality_label == '初筛通过' else 'warn' if item.quality_label == '线索不足' else 'bad' if item.quality_label == '质量偏弱' else '' }}">{{ item.quality_label }}</span></td>
       <td><span class="tag {{ 'ok' if item.outcome_label == '短线盈利' else 'bad' if item.outcome_label == '短线亏损' else '' }}">{{ item.outcome_label }}</span></td>
       <td><span class="tag {{ item.process_tone }}">{{ item.process_label }}</span></td>
-      <td><a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a></td>
+      <td>{% include "partials/ai_observation.html" %}</td>
     </tr>
     {% else %}
     <tr><td colspan="14">这只股票暂无历史信号记录。</td></tr>

@@ -15,7 +15,8 @@ import requests
 
 import config
 from concept_heat_provider import fetch_real_concept_heat
-from news_source_provider import fetch_market_news
+from news_source_provider import fetch_market_news, select_ai_news_records
+from market_radar.freshness import classify_news_time
 import news_analyzer
 
 
@@ -33,12 +34,12 @@ def write_market_context_snapshot(
     date_text = normalize_date(snapshot_date or datetime.now().strftime("%Y%m%d"))
     cache_path = Path(cache_dir)
     cache_path.mkdir(parents=True, exist_ok=True)
+    news_cache_file = cache_path / f"news_sector_{date_text}.json"
+    previous_news_payload = _read_json(news_cache_file) if news_cache_file.exists() else {}
 
     concept_top_n = config.NEWS_ANALYSIS_CONFIG.get("concept_top_n", 10)
     concept_cache_file = cache_path / f"hot_concepts_{date_text}.json"
-    hot_concepts = _read_json(concept_cache_file)
-    if not isinstance(hot_concepts, list) or not hot_concepts:
-        hot_concepts = fetch_real_concept_heat(top_n=concept_top_n)
+    hot_concepts = fetch_real_concept_heat(top_n=concept_top_n)
     if not hot_concepts:
         old_enable_concepts = config.NEWS_ANALYSIS_CONFIG.get("enable_hot_concepts", False)
         try:
@@ -48,13 +49,39 @@ def write_market_context_snapshot(
             config.NEWS_ANALYSIS_CONFIG["enable_hot_concepts"] = old_enable_concepts
     _write_json(concept_cache_file, hot_concepts)
 
-    raw_news = fetch_market_news(days=5, limit=100)
-    news_df = _raw_news_to_frame(raw_news)
-    if not raw_news:
+    raw_news_candidates = fetch_market_news(
+        days=2,
+        limit=100,
+        provider_attempts=2,
+        include_unverified=True,
+    )
+    news_df = _raw_news_to_frame(raw_news_candidates)
+    source_reused = False
+    source_reused_from = ""
+    if not raw_news_candidates:
         news_df = news_analyzer.get_policy_news(days=3, prefer_rich=False)
-        raw_news = _legacy_news_records(news_df)
+        raw_news_candidates = _legacy_news_records(news_df)
+    if not raw_news_candidates and isinstance(previous_news_payload, dict):
+        raw_news_candidates = list(previous_news_payload.get("raw_news") or []) + list(
+            previous_news_payload.get("unverified_news") or []
+        )
+        source_reused = bool(raw_news_candidates)
+        source_reused_from = date_text if source_reused else ""
+    if not raw_news_candidates:
+        raw_news_candidates, source_reused_from = _load_recent_news_fallback(cache_path, date_text)
+        source_reused = bool(raw_news_candidates)
+    raw_news = []
+    unverified_news = []
+    for record in raw_news_candidates or []:
+        item = dict(record)
+        item.update(classify_news_time(item.get("publish_time"), record=item))
+        if item["decision_eligible"]:
+            raw_news.append(item)
+        elif item["freshness_status"] == "unknown":
+            unverified_news.append(item)
     titles = [str(item.get("title") or "") for item in raw_news if item.get("title")]
-    ai_titles = titles[:30]
+    ai_input_news = select_ai_news_records(raw_news, limit=30)
+    ai_titles = [str(item.get("title") or "") for item in ai_input_news if item.get("title")]
     ai_parser = call_ai_api_fn or call_ai_api
     ai_news = news_analyzer.ai_parse_news_to_sectors(ai_titles, ai_parser, max_titles=30) if ai_titles else []
     sector_boosts = news_analyzer.build_sector_boosts(ai_news)
@@ -76,17 +103,35 @@ def write_market_context_snapshot(
         ai_message = f"{failure_detail} 展示原始新闻但不参与板块加分。"
     news_payload = {
         "date": date_text,
+        "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "titles": titles,
         "ai_titles": ai_titles,
+        "ai_input_sources": [
+            {
+                "title": item.get("title"),
+                "provider": item.get("provider"),
+                "source": item.get("source"),
+                "information_type": item.get("information_type"),
+            }
+            for item in ai_input_news
+        ],
         "raw_news_total": len(raw_news or []),
         "raw_news": raw_news,
+        "unverified_news": unverified_news,
         "items": ai_news,
         "boosts": sector_boosts,
         "sentiment": sentiment,
         "ai_status": ai_status,
         "ai_message": ai_message,
+        "source_reused": source_reused,
+        "source_reused_from": source_reused_from,
+        "source_message": (
+            f"本次实时新闻源不可用，沿用 {source_reused_from} 缓存中仍通过时效检查的新闻。"
+            if source_reused
+            else ("实时新闻源不可用，且没有可安全复用的近期新闻。" if not raw_news else "")
+        ),
     }
-    _write_json(cache_path / f"news_sector_{date_text}.json", news_payload)
+    _write_json(news_cache_file, news_payload)
     theme_filter = _get_or_create_theme_filter(
         cache_path=cache_path,
         date_text=date_text,
@@ -97,13 +142,48 @@ def write_market_context_snapshot(
     return {
         "date": date_text,
         "concept_count": len(hot_concepts or []),
+        "raw_news_count": len(raw_news or []),
         "news_item_count": len(ai_news or []),
         "news_sector_count": len(sector_boosts or {}),
         "theme_count": len(theme_filter.get("items") or []),
+        "news_source_status": "cache_fallback" if source_reused else ("live" if raw_news else "failed"),
     }
 
 
-def call_ai_api(prompt: str, system: str = "") -> str | None:
+def _load_recent_news_fallback(cache_path: Path, date_text: str, max_calendar_days: int = 4) -> tuple[list[dict], str]:
+    """实时源失败时，仅复用近期缓存；后续仍会逐条执行发布时间校验。"""
+    try:
+        target_date = datetime.strptime(date_text, "%Y%m%d")
+    except ValueError:
+        return [], ""
+    for candidate in sorted(cache_path.glob("news_sector_*.json"), reverse=True):
+        match = re.search(r"news_sector_(\d{8})\.json$", candidate.name)
+        if not match or match.group(1) == date_text:
+            continue
+        cache_date_text = match.group(1)
+        try:
+            age_days = (target_date - datetime.strptime(cache_date_text, "%Y%m%d")).days
+        except ValueError:
+            continue
+        if age_days < 0 or age_days > max_calendar_days:
+            continue
+        payload = _read_json(candidate)
+        if not isinstance(payload, dict):
+            continue
+        records = list(payload.get("raw_news") or []) + list(payload.get("unverified_news") or [])
+        if records:
+            return records, cache_date_text
+    return [], ""
+
+
+def call_ai_api(
+    prompt: str,
+    system: str = "",
+    *,
+    model: str | None = None,
+    thinking: bool | None = None,
+    json_mode: bool = False,
+) -> str | None:
     AI_CALL_DIAGNOSTICS.update(status="idle", message="", attempts=0)
     if not prompt:
         return None
@@ -115,12 +195,21 @@ def call_ai_api(prompt: str, system: str = "") -> str | None:
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
+    selected_model = str(model or config.AI_CONFIG["model"])
     payload = {
-        "model": config.AI_CONFIG["model"],
+        "model": selected_model,
         "messages": messages,
         "temperature": config.AI_CONFIG["temperature"],
         "max_tokens": config.AI_CONFIG["max_tokens"],
     }
+    if thinking is not None:
+        payload["thinking"] = (
+            {"type": "enabled", "reasoning_effort": "high"}
+            if thinking
+            else {"type": "disabled"}
+        )
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     for attempt in range(1, 3):
         AI_CALL_DIAGNOSTICS["attempts"] = attempt
         try:
@@ -133,7 +222,7 @@ def call_ai_api(prompt: str, system: str = "") -> str | None:
             response.raise_for_status()
             content = str(response.json()["choices"][0]["message"]["content"] or "").strip()
             if content:
-                AI_CALL_DIAGNOSTICS.update(status="ok", message="")
+                AI_CALL_DIAGNOSTICS.update(status="ok", message="", model=selected_model)
                 return content
             error_message = "DeepSeek 返回了空内容。"
         except requests.Timeout:
@@ -217,13 +306,14 @@ def _get_or_create_theme_filter(
     call_ai_api_fn: Callable,
 ) -> dict:
     target = cache_path / f"theme_filter_{date_text}.json"
-    cached = _read_json(target)
-    if isinstance(cached, dict) and isinstance(cached.get("items"), list):
-        return cached
-
     candidates = _theme_candidates(hot_concepts, ai_news)
     if not candidates:
-        payload = {"date": date_text, "items": [], "message": "暂无可供AI筛选的概念或新闻题材。"}
+        payload = {
+            "date": date_text,
+            "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+            "items": [],
+            "message": "暂无可供AI筛选的概念或新闻题材。",
+        }
         _write_json(target, payload)
         return payload
 
@@ -232,6 +322,7 @@ def _get_or_create_theme_filter(
     items = _parse_theme_filter(raw)
     payload = {
         "date": date_text,
+        "generated_at": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "items": items,
         "message": "" if items else "AI未返回有效题材分级，保留原始概念热度供人工观察。",
     }
@@ -349,6 +440,8 @@ def main() -> None:
         f"date={result['date']} concepts={result['concept_count']} "
         f"news_items={result['news_item_count']} news_sectors={result['news_sector_count']}"
     )
+    if int(result.get("raw_news_count") or 0) <= 0:
+        raise SystemExit("市场上下文更新失败：实时新闻源不可用，且没有通过时效检查的近期缓存。")
 
 
 if __name__ == "__main__":

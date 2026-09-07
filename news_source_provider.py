@@ -11,10 +11,15 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
 import pandas as pd
+import requests
+
+
+from market_radar.freshness import classify_news_time
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +32,11 @@ URL_COLUMNS = ("url", "链接", "新闻链接", "地址")
 CONTENT_COLUMNS = ("content", "内容", "正文", "summary", "摘要")
 
 SOURCE_WEIGHTS = {
+    "cninfo_announcements": 22.0,
+    "csrc_policy": 22.0,
+    "ndrc_policy": 21.0,
+    "miit_policy": 21.0,
+    "pbc_policy": 22.0,
     "cls_key": 16.0,
     "cls_all": 13.0,
     "cctv": 12.0,
@@ -76,6 +86,8 @@ def fetch_market_news(
     limit: int = 30,
     providers: Iterable[tuple[str, Callable[[], pd.DataFrame]]] | None = None,
     provider_timeout: int = 20,
+    provider_attempts: int = 1,
+    include_unverified: bool = False,
 ) -> list[dict]:
     """拉取并合并多源新闻。
 
@@ -88,10 +100,26 @@ def fetch_market_news(
     provider_list = list(providers) if providers is not None else _default_providers()
     merged: dict[str, dict] = {}
 
-    for provider, fetcher in provider_list:
-        df = _call_provider(provider, fetcher, timeout=provider_timeout)
-        if df is None or df.empty:
-            continue
+    provider_results: list[tuple[str, pd.DataFrame]] = []
+    pending = provider_list
+    for _attempt in range(max(1, int(provider_attempts))):
+        if not pending:
+            break
+        retry: list[tuple[str, Callable[[], pd.DataFrame]]] = []
+        with ThreadPoolExecutor(max_workers=max(1, len(pending))) as executor:
+            futures = [
+                (provider, fetcher, executor.submit(_call_provider, provider, fetcher, provider_timeout))
+                for provider, fetcher in pending
+            ]
+            for provider, fetcher, future in futures:
+                df = future.result()
+                if df is None or df.empty:
+                    retry.append((provider, fetcher))
+                    continue
+                provider_results.append((provider, df))
+        pending = retry
+
+    for provider, df in provider_results:
         for record in normalize_news_records(df, provider=provider):
             key = _normalize_title(record.get("title"))
             if not key:
@@ -108,9 +136,14 @@ def fetch_market_news(
 
     records = [_decorate_news_value(_normalize_news_timing(item)) for item in merged.values()]
     if providers is None:
-        records = _filter_recent_records(records, days=days)
+        records = _filter_recent_records(records, days=days, include_unverified=include_unverified)
     records.sort(key=_news_sort_key, reverse=True)
-    return records[:limit]
+    return _select_balanced_records(records, limit=limit)
+
+
+def select_ai_news_records(records: list[dict], limit: int = 30) -> list[dict]:
+    """为 AI 保留媒体、公告和政策三类证据，避免高频媒体挤掉官方来源。"""
+    return _select_balanced_records(records, limit=limit, strict_ai_caps=True)
 
 
 def normalize_news_records(df: pd.DataFrame, provider: str) -> list[dict]:
@@ -213,7 +246,7 @@ def _industry_hits(text: str) -> list[str]:
 def _recency_score(value) -> float:
     publish_time = _parse_publish_time(value)
     if publish_time is None:
-        return 2.0
+        return 0.0
     age_hours = max(0.0, (datetime.now() - publish_time).total_seconds() / 3600)
     if age_hours <= 12:
         return 8.0
@@ -226,16 +259,17 @@ def _recency_score(value) -> float:
     return 0.0
 
 
-def _filter_recent_records(records: list[dict], days: int) -> list[dict]:
+def _filter_recent_records(records: list[dict], days: int, include_unverified: bool = False) -> list[dict]:
     if days <= 0:
         return records
     filtered = []
     for item in records:
-        publish_time = _parse_publish_time(item.get("publish_time"))
-        if publish_time is None:
+        freshness = classify_news_time(item.get("publish_time"), record=item)
+        item.update(freshness)
+        if freshness["freshness_status"] == "unknown" and include_unverified:
+            filtered.append(item)
             continue
-        age_days = (datetime.now().date() - publish_time.date()).days
-        if 0 <= age_days <= days:
+        if freshness["decision_eligible"]:
             filtered.append(item)
     return filtered
 
@@ -251,6 +285,56 @@ def _news_sort_key(item: dict) -> tuple[float, float, int, str]:
     )
 
 
+def _select_balanced_records(records: list[dict], limit: int, strict_ai_caps: bool = False) -> list[dict]:
+    """按来源类型保留低频高可信信息，剩余名额仍按时效与价值回填。"""
+    maximum = max(0, int(limit))
+    if maximum == 0:
+        return []
+    ordered = sorted(records, key=_news_sort_key, reverse=True)
+    quotas = {
+        "media": min(16, maximum),
+        "announcement": min(8, maximum),
+        "policy": min(6, maximum),
+    }
+    buckets = {name: [] for name in quotas}
+    for item in ordered:
+        buckets[_news_bucket(item)].append(item)
+
+    selected: list[dict] = []
+    selected_ids: set[int] = set()
+    for bucket in ("announcement", "policy", "media"):
+        for item in buckets[bucket][: quotas[bucket]]:
+            selected.append(item)
+            selected_ids.add(id(item))
+
+    if not strict_ai_caps or len(selected) < maximum:
+        for item in ordered:
+            if len(selected) >= maximum:
+                break
+            if id(item) in selected_ids:
+                continue
+            if strict_ai_caps and len(buckets[_news_bucket(item)]) > quotas[_news_bucket(item)]:
+                # 仅在其他类型名额不足时回填，不突破总量上限。
+                pass
+            selected.append(item)
+            selected_ids.add(id(item))
+
+    selected.sort(key=_news_sort_key, reverse=True)
+    return selected[:maximum]
+
+
+def _news_bucket(item: dict) -> str:
+    provider = str(item.get("provider") or "").strip()
+    source = str(item.get("source") or "").strip()
+    if provider == "cninfo_announcements" or source == "巨潮资讯":
+        return "announcement"
+    if provider in {"csrc_policy", "ndrc_policy", "miit_policy", "pbc_policy"} or source in {
+        "中国证监会", "国家发改委", "工业和信息化部", "中国人民银行"
+    }:
+        return "policy"
+    return "media"
+
+
 def _normalize_news_timing(record: dict) -> dict:
     """统一发布时间；字段缺失时只信任 URL 中明确的年月日。"""
     item = dict(record)
@@ -259,15 +343,11 @@ def _normalize_news_timing(record: dict) -> dict:
     if publish_time is None:
         publish_time = _publish_time_from_url(item.get("url"))
         timing_source = "url" if publish_time is not None else "unknown"
-    if publish_time is not None:
-        item["publish_time"] = publish_time.strftime("%Y-%m-%d %H:%M:%S")
-        age_days = (datetime.now().date() - publish_time.date()).days
-        item["news_age_days"] = age_days
-        item["freshness_bucket"] = "fresh" if age_days <= 2 else "background" if age_days <= 5 else "expired"
-    else:
-        item["publish_time"] = ""
-        item["news_age_days"] = None
-        item["freshness_bucket"] = "unknown"
+    timing = classify_news_time(publish_time, record=item)
+    item.update(timing)
+    item["publish_time"] = timing["as_of_time"]
+    item["news_age_days"] = round(timing["age_hours"] / 24, 2) if timing["age_hours"] is not None else None
+    item["freshness_bucket"] = timing["freshness_status"]
     item["publish_time_source"] = timing_source
     return item
 
@@ -310,15 +390,81 @@ def _parse_publish_time(value) -> datetime | None:
 
 def _default_providers() -> list[tuple[str, Callable[[], pd.DataFrame]]]:
     import akshare as ak
+    from official_information_provider import (
+        fetch_cninfo_announcements,
+        fetch_csrc_policy,
+        fetch_miit_policy,
+        fetch_ndrc_policy,
+        fetch_pbc_policy,
+    )
 
     today = datetime.now().strftime("%Y%m%d")
     return [
-        ("cls_key", lambda: ak.stock_info_global_cls(symbol="重点")),
-        ("cls_all", lambda: ak.stock_info_global_cls(symbol="全部")),
+        ("cninfo_announcements", fetch_cninfo_announcements),
+        ("csrc_policy", fetch_csrc_policy),
+        ("ndrc_policy", fetch_ndrc_policy),
+        ("miit_policy", fetch_miit_policy),
+        ("pbc_policy", fetch_pbc_policy),
+        ("cls_key", lambda: _fetch_cls_news(important_only=True)),
+        ("cls_all", lambda: _fetch_cls_news(important_only=False)),
         ("caixin", ak.stock_news_main_cx),
-        ("eastmoney", lambda: ak.stock_news_em(symbol="全部")),
+        ("eastmoney", lambda: _fetch_eastmoney_news(ak)),
         ("cctv", lambda: ak.news_cctv(date=today)),
     ]
+
+
+def _fetch_cls_news(important_only: bool = False) -> pd.DataFrame:
+    """读取财联社当前电报接口，替代已返回 404 的旧 AkShare 接口。"""
+    url = "https://www.cls.cn/api/cache"
+    params = {
+        "rn": 20,
+        "lastTime": int(datetime.now().timestamp()),
+        "name": "telegraph",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.cls.cn/telegraph",
+    }
+    last_error: Exception | None = None
+    for _attempt in range(2):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=8)
+            response.raise_for_status()
+            payload = response.json()
+            rows = ((payload.get("data") or {}).get("roll_data") or [])
+            if not isinstance(rows, list) or not rows:
+                raise ValueError("财联社接口未返回电报数据")
+
+            frame = pd.DataFrame(rows)
+            for column in ("title", "content", "ctime", "level"):
+                if column not in frame.columns:
+                    frame[column] = ""
+            frame = frame[["title", "content", "ctime", "level"]].copy()
+            frame["ctime"] = pd.to_datetime(frame["ctime"], unit="s", utc=True).dt.tz_convert(
+                "Asia/Shanghai"
+            ).dt.tz_localize(None)
+            frame.rename(
+                columns={"title": "标题", "content": "内容", "ctime": "发布时间", "level": "等级"},
+                inplace=True,
+            )
+            if important_only:
+                frame = frame[frame["等级"].isin(("A", "B"))].copy()
+            frame.reset_index(drop=True, inplace=True)
+            return frame
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            last_error = exc
+    raise RuntimeError(f"财联社新闻获取失败：{last_error}")
+
+
+def _fetch_eastmoney_news(ak) -> pd.DataFrame:
+    """东方财富个股新闻异常时切换到全球财经快讯接口。"""
+    try:
+        return ak.stock_news_em(symbol="全部")
+    except Exception as primary_error:
+        fallback = getattr(ak, "stock_info_global_em", None)
+        if not callable(fallback):
+            raise primary_error
+        return fallback()
 
 
 def _call_provider(provider: str, fetcher: Callable[[], pd.DataFrame], timeout: int) -> pd.DataFrame:
@@ -395,6 +541,11 @@ def _normalize_title(title) -> str:
 
 def _provider_label(provider: str) -> str:
     labels = {
+        "cninfo_announcements": "巨潮资讯",
+        "csrc_policy": "中国证监会",
+        "ndrc_policy": "国家发改委",
+        "miit_policy": "工业和信息化部",
+        "pbc_policy": "中国人民银行",
         "cls_key": "财联社重点",
         "cls_all": "财联社",
         "caixin": "财新",

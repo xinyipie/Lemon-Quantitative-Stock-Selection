@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 
@@ -15,6 +16,27 @@ from signal_store import SignalRecord, SignalStore
 
 
 class LiveSignalPersistenceTest(unittest.TestCase):
+    def test_daily_selection_snapshot_preserves_empty_scan_result(self):
+        selection = {
+            "trade_date": "20260722",
+            "regime": "BULL_TREND",
+            "stock_pool": pd.DataFrame(),
+            "short_observe_pool": pd.DataFrame(),
+            "longterm_pool": pd.DataFrame(),
+        }
+        with mock.patch("daily_report.selection_snapshot.save_selection_snapshot") as save:
+            main._persist_daily_selection_snapshot(
+                selection,
+                include_longterm=True,
+                longterm_watch=pd.DataFrame(),
+                longterm_elite=pd.DataFrame(),
+                db_path="ignored.db",
+            )
+
+        snapshot = save.call_args.args[1]
+        self.assertEqual(snapshot["short_scan"]["status"], "completed_empty")
+        self.assertEqual(snapshot["longterm_scan"]["status"], "completed_empty")
+
     def test_persist_signal_snapshot_saves_short_watch_and_elite_profiles(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "signals.db"

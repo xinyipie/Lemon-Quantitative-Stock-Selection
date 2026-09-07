@@ -79,6 +79,7 @@
     <a class="pool-row" href="/stock/{{ item.ts_code }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
     </a>
     {% else %}
     <div class="empty-mini">暂无强提醒。Elite宁可少，不要凑。</div>
@@ -90,6 +91,7 @@
     <a class="pool-row" href="/stock/{{ item.ts_code }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
     </a>
     {% else %}
     <div class="empty-mini">暂无观察中标的。</div>
@@ -101,6 +103,7 @@
     <a class="pool-row" href="/stock/{{ item.ts_code }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
     </a>
     {% else %}
     <div class="empty-mini">暂无其他 active 状态。</div>
@@ -270,11 +273,15 @@
     {% endif %}
   </div>
   <div class="table-shell longterm-result-table-shell" role="region" aria-label="历史长线收益结果" tabindex="0"><table class="dense-table longterm-result-table">
-    <thead><tr><th>股票 / 入池日</th><th>80日最终收益</th><th>同期沪深300</th><th>超额收益</th><th>最大回撤</th><th>收益路径</th><th>结果</th></tr></thead>
+    <thead><tr><th>股票 / 入池日</th><th>基准买入价</th><th>自推荐至今最低价</th><th>自推荐至今最高价</th><th>最新价 / 浮盈亏</th><th>80日最终收益</th><th>同期沪深300</th><th>超额收益</th><th>最大回撤</th><th>收益路径</th><th>结果</th></tr></thead>
     <tbody>
     {% for item in audit_samples %}
     <tr class="longterm-result-row {{ item.result_tone }}">
       <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }} · {{ item.industry or '-' }}</div></a><small>{{ item.select_date|fmt_date }} 入池 · {{ item.period }}</small></td>
+      <td class="history-price-cell"><strong>{{ item.history_entry_price_text }}</strong><small>{{ item.history_entry_source }}</small></td>
+      <td class="history-price-cell history-trough-cell"><strong>{{ item.history_trough_price_text }}</strong><small>{{ item.history_trough_date|fmt_date if item.history_trough_date else '-' }} · <span class="{{ item.history_trough_return_tone }}">最低 {{ item.history_trough_return_text }}</span></small></td>
+      <td class="history-price-cell history-peak-cell"><strong>{{ item.history_peak_price_text }}</strong><small>{{ item.history_peak_date|fmt_date if item.history_peak_date else '-' }} · <span class="{{ item.history_peak_return_tone }}">峰值 {{ item.history_peak_return_text }}</span></small></td>
+      <td class="history-price-cell"><strong>{{ item.history_latest_price_text }}</strong><small>{{ item.history_latest_date|fmt_date if item.history_latest_date else '-' }} · <span class="{{ item.history_current_return_tone }}">{{ item.history_current_return_text }}</span></small></td>
       <td class="result-main {{ item.ret_80d_tone }}"><strong>{{ item.ret_80d_text if item.ret_80d is not none else item.stage_return_text }}</strong><small>{{ item.lifecycle_label }}</small></td>
       <td class="{{ item.benchmark_ret_80d_tone }}">{{ item.benchmark_ret_80d_text }}</td>
       <td class="{{ item.excess_80d_tone }}"><strong>{{ item.excess_80d_text }}</strong></td>
@@ -283,7 +290,7 @@
       <td><span class="result-verdict {{ item.result_tone }}">{{ item.result_label }}</span><small class="result-risk-note">{{ item.result_risk_label }}</small></td>
     </tr>
     {% else %}
-    <tr><td colspan="7">当前筛选下暂无样本。</td></tr>
+    <tr><td colspan="11">当前筛选下暂无样本。</td></tr>
     {% endfor %}
     </tbody>
   </table></div>

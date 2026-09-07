@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }}{% endblock %}
+{% block content %}
+<nav class="report-navigation" aria-label="日报导航">
+  <a href="/reports">返回日报归档</a>
+  <span>
+    {% if previous_date %}<a href="/reports/{{ previous_date }}">上一篇</a>{% endif %}
+    {% if next_date %}<a href="/reports/{{ next_date }}">下一篇</a>{% endif %}
+  </span>
+</nav>
+
+<article class="research-report">
+  <header class="research-report__header">
+    <p class="eyebrow">A股市场研究日报</p>
+    <h1>{{ report.title }}</h1>
+    {% if report.document.ai_model == "deepseek-v4-pro" %}
+    <p class="report-meta">研判方式：DeepSeek V4 Pro 深度研判</p>
+    {% elif report.document.generation_mode %}
+    <p class="report-meta">研判方式：历史研判</p>
+    {% endif %}
+    <p class="report-meta">报告日期：{{ report.report_date|fmt_date }} · 行情截至：{{ report.market_date|fmt_date }}</p>
+    <p class="report-meta">数据截至：{{ report.data_cutoff }} · 消息截至：{{ report.news_cutoff }}</p>
+  </header>
+  {% for section in report.document.sections %}
+  <section class="research-report__section" id="{{ section.key }}">
+    <h2>{{ section.heading }}</h2>
+    {% for paragraph in section.paragraphs %}
+    <p>{{ paragraph.text }}</p>
+    {% endfor %}
+  </section>
+  {% endfor %}
+  <footer>本文基于公开市场数据进行研究整理，仅供内部研究参考。</footer>
+</article>
+{% endblock %}

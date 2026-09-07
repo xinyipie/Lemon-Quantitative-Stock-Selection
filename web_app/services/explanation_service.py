@@ -35,6 +35,7 @@ SYSTEM_EXPLANATION_ANALYST = (
 )
 
 PROMPT_VERSION = "signal_explanation_v1"
+MAIN_REPORT_PROMPT_VERSION = "main_ai_observation_v2"
 DAILY_BRIEF_PROMPT_VERSION = "daily_brief_v1"
 
 SYSTEM_DAILY_BRIEF_ANALYST = (
@@ -620,6 +621,50 @@ def _migrate_legacy_documents(conn: sqlite3.Connection) -> None:
                 row[8],
             ),
         )
+
+
+def store_main_ai_observations(
+    trade_date: str,
+    items: list[dict],
+    mode: str,
+    profile: str,
+    signal_db: str | Path = DEFAULT_DB_PATH,
+) -> int:
+    """保存main.py生成的唯一AI判断；网站只读取，不参与量化计算。"""
+    saved = 0
+    for item in items or []:
+        code = _normalize_ts_code(str(item.get("code") or item.get("ts_code") or ""))
+        summary = str(item.get("summary") or item.get("reason") or "").strip()
+        if not code or not summary:
+            continue
+        doc = sanitize_observation_copy({
+            "title": f"{item.get('name') or code} {code} 独立AI观察",
+            "summary": summary,
+            "positives": _ensure_list(item.get("positives"))[:2],
+            "risks": _ensure_list(item.get("risks"))[:2],
+            "watch_plan": str(item.get("watch_plan") or "等待关键条件进一步确认。"),
+            "invalidation": str(item.get("invalidation") or "证据不足时停止沿用当前判断。"),
+            "style": str(item.get("style") or ("短线观察" if mode == "short" else "长线观察")),
+            "confidence_note": str(item.get("confidence_note") or "仅基于主流程提供的量化和消息事实。"),
+        })
+        cache_key = f"signal:{_date_text(trade_date)}:{code}"
+        _write_document_cache(
+            cache_key=cache_key,
+            doc=doc,
+            source="ai",
+            signal_db=signal_db,
+            doc_type="signal_explanation",
+            trade_date=_date_text(trade_date),
+            ts_code=code,
+            mode=mode,
+            profile=profile,
+            source_ref=f"main.py:{mode}:{profile}",
+            model=config.AI_CONFIG.get("model", ""),
+            prompt_version=MAIN_REPORT_PROMPT_VERSION,
+            input_hash=_input_hash(item),
+        )
+        saved += 1
+    return saved
 
 
 def _write_cache(

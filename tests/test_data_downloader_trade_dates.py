@@ -169,6 +169,100 @@ class DataDownloaderTradeDatesTest(unittest.TestCase):
             self.assertEqual(list(saved.columns), ["cal_date", "is_open"])
             self.assertTrue(saved.empty)
 
+    def test_save_writes_temporary_file_before_replacing_existing_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "owned-by-another-user.parquet"
+            pd.DataFrame({"value": [1]}).to_parquet(path, index=False)
+            original_to_parquet = pd.DataFrame.to_parquet
+            written_paths = []
+
+            def reject_direct_overwrite(frame, target, *args, **kwargs):
+                target_path = Path(target)
+                written_paths.append(target_path)
+                if target_path == path:
+                    raise PermissionError("direct overwrite is not allowed")
+                return original_to_parquet(frame, target, *args, **kwargs)
+
+            pd.DataFrame.to_parquet = reject_direct_overwrite
+            try:
+                data_downloader._save(pd.DataFrame({"value": [2]}), str(path))
+            finally:
+                pd.DataFrame.to_parquet = original_to_parquet
+
+            self.assertNotEqual(written_paths[0], path)
+            self.assertEqual(pd.read_parquet(path)["value"].tolist(), [2])
+
+    def test_retry_uses_exponential_backoff(self):
+        attempts = []
+        waits = []
+        original_sleep = data_downloader.time.sleep
+        data_downloader.time.sleep = waits.append
+
+        def flaky_call():
+            attempts.append(len(attempts) + 1)
+            if len(attempts) < 3:
+                raise RuntimeError("Rate limit exceeded")
+            return "ok"
+
+        try:
+            result = data_downloader._retry(flaky_call, retries=3, wait=2.0)
+        finally:
+            data_downloader.time.sleep = original_sleep
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(waits, [2.0, 4.0])
+
+    def test_retry_fails_immediately_when_tushare_token_is_invalid(self):
+        attempts = []
+        waits = []
+        original_sleep = data_downloader.time.sleep
+        data_downloader.time.sleep = waits.append
+
+        def invalid_token_call():
+            attempts.append(1)
+            raise RuntimeError("Invalid token")
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Tushare Token"):
+                data_downloader._retry(invalid_token_call, retries=3, wait=2.0)
+        finally:
+            data_downloader.time.sleep = original_sleep
+
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(waits, [])
+
+    def test_completed_target_date_requires_all_core_market_caches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old_cache_dir = data_downloader.CACHE_DIR
+            data_downloader.CACHE_DIR = tmp
+            try:
+                data_downloader._ensure_dirs()
+                date = "20260630"
+                pd.DataFrame({"value": range(1000)}).to_parquet(Path(tmp) / "daily" / f"{date}.parquet")
+                pd.DataFrame({"value": range(1000)}).to_parquet(Path(tmp) / "daily_basic" / f"{date}.parquet")
+                pd.DataFrame({"value": range(500)}).to_parquet(Path(tmp) / "moneyflow" / f"{date}.parquet")
+                pd.DataFrame({"value": range(2)}).to_parquet(Path(tmp) / "index_daily" / f"{date}.parquet")
+
+                data_downloader._validate_completed_core_downloads(
+                    [date],
+                    date,
+                    "20260701",
+                    require_index=True,
+                    now=data_downloader.datetime(2026, 7, 1, 2, 0),
+                )
+
+                (Path(tmp) / "moneyflow" / f"{date}.parquet").unlink()
+                with self.assertRaisesRegex(RuntimeError, "20260630:moneyflow"):
+                    data_downloader._validate_completed_core_downloads(
+                        [date],
+                        date,
+                        "20260701",
+                        require_index=True,
+                        now=data_downloader.datetime(2026, 7, 1, 2, 0),
+                    )
+            finally:
+                data_downloader.CACHE_DIR = old_cache_dir
+
     def test_download_trade_cal_does_not_overwrite_valid_cache_with_invalid_response(self):
         with tempfile.TemporaryDirectory() as tmp:
             old_cache_dir = data_downloader.CACHE_DIR

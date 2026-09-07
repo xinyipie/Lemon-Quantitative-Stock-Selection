@@ -150,6 +150,23 @@ python -m uvicorn web_app.app:app --host 127.0.0.1 --port 8000
 
 打开 `http://127.0.0.1:8000`。当前 Web 端只读展示本地 SQLite 数据，不包含任何交易执行功能。
 
+### 每日市场研究报告
+
+报告归档位于 `http://127.0.0.1:8000/reports`，支持按发布日期、正文关键词、公司、行业、事件和风险词查询。`--mode full` 的末尾会执行夜间主生成；早晨的 `--mode radar` 会在当天没有有效报告时补生成。失败任务只记录错误，不会用模板稿覆盖上一份有效报告。
+
+```bash
+# 手动生成当天日报
+python daily_research_report.py --report-date 20260723 --market-date 20260722 --slot manual
+
+# 仅在当天尚无有效报告时补生成
+python daily_research_report.py --report-date 20260723 --market-date 20260722 --slot morning --retry-if-missing
+
+# 强制生成修订版
+python daily_research_report.py --report-date 20260723 --market-date 20260722 --slot manual --force
+```
+
+部署调度中，凌晨 2:00 的全量更新负责主生成，早晨 8:30 的市场雷达更新负责缺失补偿；同一发布日期只展示最新有效版，同时保留历史修订记录。
+
 日常查看顺序建议：
 
 1. 盘后先跑 `python daily_web_update.py --mode full --end 最新交易日`，把行情、实盘、短线复盘、长线审计和市场上下文一次补齐。

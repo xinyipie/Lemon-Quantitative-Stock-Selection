@@ -13,11 +13,12 @@ from web_app.services.update_service import run_update_job
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 2:
+    if len(args) not in {2, 3}:
         return 2
     command = json.loads(args[0])
     status_path = Path(args[1])
-    run_update_job(command, status_path=status_path)
+    log_path = Path(args[2]) if len(args) == 3 else None
+    run_update_job(command, status_path=status_path, log_path=log_path)
     return 0
 
 

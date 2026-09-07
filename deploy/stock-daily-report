@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+exec 9>/run/lock/stock-daily-report.lock
+/usr/bin/flock -n 9 || exit 0
+
+cd /opt/stock
+set -a
+. /opt/stock/.env
+set +a
+
+mkdir -p /opt/stock/logs
+command_json='["/opt/stock/.venv/bin/python", "daily_research_report.py", "--slot", "morning", "--retry-if-missing"]'
+exec /opt/stock/.venv/bin/python -m web_app.services.update_worker \
+  "$command_json" \
+  "data/daily_report_status.json" \
+  "logs/daily_report_update.log" \
+  >> /opt/stock/logs/daily_report_scheduler.log 2>&1

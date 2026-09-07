@@ -104,6 +104,7 @@
       <div class="eyebrow">Five-Day Results</div>
       <h2>历史信号结果</h2>
       <p>默认先看已经走满5个交易日的样本。红色表示上涨，绿色表示下跌；MFE是盘中最大机会，MAE是持有过程最大回撤。</p>
+      {% include "partials/short_strategy_selector.html" %}
     </div>
   </div>
 
@@ -112,7 +113,8 @@
     <label class="sr-only" for="signal-start">开始日期</label>
     <label class="sr-only" for="signal-end">结束日期</label>
     <label class="sr-only" for="signal-industry">行业</label>
-    <input type="hidden" name="view" value="{{ result_view }}">
+        <input type="hidden" name="view" value="{{ result_view }}">
+        <input type="hidden" name="strategy" value="{{ active_strategy }}">
     <input id="signal-query" name="q" value="{{ filters.get('q', '') }}" placeholder="股票代码或中文名">
     <input id="signal-start" type="date" name="start" value="{{ filters.get('start', '')|fmt_date_input }}">
     <input id="signal-end" type="date" name="end" value="{{ filters.get('end', '')|fmt_date_input }}">
@@ -137,12 +139,16 @@
       <thead>
         <tr>
           <th>股票 / 信号日</th>
-          <th>信号质量</th>
+          <th>评分</th>
+          <th>基准买入价</th>
+          <th>自推荐至今最低价</th>
+          <th>自推荐至今最高价</th>
+          <th>最新价 / 浮盈亏</th>
+          <th>3日最终收益</th>
           <th>5日最终收益</th>
-          <th>盘中最大机会</th>
-          <th>最大回撤</th>
+          <th>8日最终收益</th>
+          <th>盘中机会 / 最大回撤</th>
           <th>最终结论</th>
-          <th>依据与详情</th>
         </tr>
       </thead>
       <tbody>
@@ -153,40 +159,78 @@
             <div class="muted">{{ item.display_code }} · {{ item.trade_date|fmt_date }}</div>
             <div class="short-result-caption">{{ item.industry or '行业未知' }} · 第{{ item.rank or '-' }}名</div>
           </td>
-          <td>
-            <strong title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong>
-            <div class="short-result-caption">{{ item.quality_label }}</div>
+          {% set base_score = item.factors.get('original_score') %}
+          {% if base_score is none %}{% set base_score = item.factors.get('score_base') %}{% endif %}
+          <td class="short-score-cell">
+            <div class="short-score-line">
+                <span>{% if item.strategy_key == 'repair' %}质量动量分{% else %}基础策略分 · {{ item.strategy_label }}{% endif %}</span>
+              <strong>{% if base_score is not none %}{{ "%.1f"|format(base_score) }}{% else %}暂无{% endif %}</strong>
+            </div>
+            <div class="short-score-line v9 {% if item.score is not none and item.score < 30 %}low{% elif item.score is not none and item.score < 60 %}mid{% else %}high{% endif %}">
+                <span>{% if item.strategy_key == 'repair' %}领先幅度(%) {% else %}v9 风控复评分{% endif %}</span>
+              <strong>{% if item.score is not none %}{{ "%.1f"|format(item.score) }}{% else %}暂无{% endif %}</strong>
+            </div>
+            <button class="score-reason-trigger" type="button" onclick="document.getElementById('score-reason-{{ loop.index }}').showModal()">查看评分理由</button>
+            <dialog class="score-reason-dialog" id="score-reason-{{ loop.index }}" aria-labelledby="score-reason-title-{{ loop.index }}" onclick="if(event.target===this)this.close()">
+              <div class="score-reason-dialog-head">
+                <div>
+                  <span class="eyebrow">Score Review</span>
+                  <h3 id="score-reason-title-{{ loop.index }}">{{ item.display_name }} · 评分理由</h3>
+                  <p>{{ item.display_code }} · 信号日 {{ item.trade_date|fmt_date }}</p>
+                </div>
+                <form method="dialog"><button class="score-dialog-close" type="submit" aria-label="关闭评分理由">关闭</button></form>
+              </div>
+              <div class="score-reason-compare">
+                <div>
+                  <span>基础策略分</span>
+                  <strong>{% if base_score is not none %}{{ "%.1f"|format(base_score) }}{% else %}暂无{% endif %}</strong>
+                  <small>技术形态、量价与板块初筛</small>
+                </div>
+                <div class="v9 {% if item.score is not none and item.score < 30 %}low{% elif item.score is not none and item.score < 60 %}mid{% else %}high{% endif %}">
+                  <span>v9 风控复评分</span>
+                  <strong>{% if item.score is not none %}{{ "%.1f"|format(item.score) }}{% else %}暂无{% endif %}</strong>
+                  <small>市场风格、回撤与风险复核</small>
+                </div>
+              </div>
+              <section class="score-reason-rule">
+                <h4>量化规则解释</h4>
+                <p>{{ item.recommend_reason }}</p>
+                {% if item.score_tooltip %}<p class="score-factor-breakdown">{{ item.score_tooltip }}</p>{% endif %}
+                {% if item.current_risk_blocked %}<p class="market-down">{{ item.current_risk_reason }}</p>{% endif %}
+                <small>两套分数用于不同阶段；AI 判断独立展示，不参与量化评分。</small>
+              </section>
+              <section class="score-reason-ai">
+                <h4>独立 AI 判断</h4>
+                {% include "partials/ai_observation.html" %}
+              </section>
+            </dialog>
           </td>
+          <td class="history-price-cell"><strong>{{ item.history_entry_price_text }}</strong><small>{{ item.history_entry_source }}</small></td>
+          <td class="history-price-cell history-trough-cell"><strong>{{ item.history_trough_price_text }}</strong><small>{{ item.history_trough_date|fmt_date if item.history_trough_date else '-' }} · <span class="{{ item.history_trough_return_tone }}">最低 {{ item.history_trough_return_text }}</span></small></td>
+          <td class="history-price-cell history-peak-cell"><strong>{{ item.history_peak_price_text }}</strong><small>{{ item.history_peak_date|fmt_date if item.history_peak_date else '-' }} · <span class="{{ item.history_peak_return_tone }}">峰值 {{ item.history_peak_return_text }}</span></small></td>
+          <td class="history-price-cell"><strong>{{ item.history_latest_price_text }}</strong><small>{{ item.history_latest_date|fmt_date if item.history_latest_date else '-' }} · <span class="{{ item.history_current_return_tone }}">{{ item.history_current_return_text }}</span></small></td>
+          <td class="history-horizon-cell"><strong class="{{ item.history_ret_3d_tone }}">{{ item.history_ret_3d_text }}</strong><small>{{ item.history_ret_3d_date|fmt_date if item.history_ret_3d_date else '观察中' }}</small></td>
           <td>
             <strong class="short-result-value {{ item.final_return_tone }}">{{ item.final_return_text }}</strong>
             <div class="short-result-caption">收盘结果</div>
           </td>
+          <td class="history-horizon-cell"><strong class="{{ item.history_ret_8d_tone }}">{{ item.history_ret_8d_text }}</strong><small>{{ item.history_ret_8d_date|fmt_date if item.history_ret_8d_date else '观察中' }}</small></td>
           <td>
             <strong class="short-result-value {% if item.performance.mfe_pct is not none and item.performance.mfe_pct > 0 %}market-up{% endif %}">{{ item.mfe_text }}</strong>
-            <div class="short-result-caption">MFE，可兑现空间</div>
-          </td>
-          <td>
+            <div class="short-result-caption">最大机会 MFE</div>
             <strong class="short-result-value {{ item.mae_risk_tone }}">{{ item.mae_text }}</strong>
-            <div class="short-result-caption">MAE，过程风险</div>
+            <div class="short-result-caption">最大回撤 MAE</div>
           </td>
           <td>
-            <div class="short-verdict">
+            <div class="short-verdict{% if item.strategy_key == 'repair' %} shadow-strategy{% endif %}">
               <span class="tag {{ item.short_result_tone }}">{{ item.short_result_label }}</span>
               <span class="tag {{ item.short_risk_tone }}">{{ item.short_risk_label }}</span>
               <span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">{{ item.confidence_label }}</span>
             </div>
           </td>
-          <td>
-            <details class="short-reason-details">
-              <summary>查看入选依据</summary>
-              <p>{{ item.recommend_reason }}</p>
-              {% if item.current_risk_blocked %}<p class="market-down">{{ item.current_risk_reason }}</p>{% endif %}
-            </details>
-            <a class="mini-button {{ item.explanation_tone }}" href="/explain/signal/{{ item.trade_date }}/{{ item.ts_code }}">{{ item.explanation_label }}</a>
-          </td>
         </tr>
       {% else %}
-        <tr><td colspan="7"><div class="empty-state soft">当前条件没有匹配的短线结果。</div></td></tr>
+        <tr><td colspan="11"><div class="empty-state soft">当前条件没有匹配的短线结果。</div></td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -200,5 +244,14 @@
     </div>
   </nav>
 </section>
+<script>
+document.querySelectorAll('a[href^="/signals"]').forEach(function(link){
+  var url = new URL(link.href, window.location.origin);
+  if (!url.searchParams.has('strategy')) {
+    url.searchParams.set('strategy', '{{ active_strategy }}');
+    link.href = url.pathname + url.search;
+  }
+});
+</script>
 {% endblock %}
 

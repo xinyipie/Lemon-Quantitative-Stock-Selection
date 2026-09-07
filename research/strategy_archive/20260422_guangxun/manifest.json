@@ -1,0 +1,33 @@
+{
+  "case": "20260422_guangxun_002281",
+  "signal_date": "2026-04-22",
+  "recovered_at": "2026-07-27",
+  "files": [
+    {
+      "archive_file": "main_20260420_vscode_history.py",
+      "source": "VS Code Local History/-537c7c56/OYAp.py",
+      "source_time": "2026-04-20 11:12:03+08:00",
+      "sha256": "AF0884D4F3E52348D80074EB904828D1B8C69181C38764FFD19061873826658D"
+    },
+    {
+      "archive_file": "ai_prompts_20260310_vscode_history.py",
+      "source": "VS Code Local History/5bbd558b/23va.py",
+      "source_time": "2026-03-10 15:56:05+08:00",
+      "sha256": "BE0559F12F5B061C9577857CAA7222AD08E9E0EB7105983DF0DC9F0830F67DC5"
+    },
+    {
+      "archive_file": "report_20260422.txt",
+      "source": "reports/report_20260422.txt",
+      "source_time": "2026-04-23 18:20:42+08:00"
+    }
+  ],
+  "related_not_copied": [
+    {
+      "file": "config.py",
+      "source": "VS Code Local History/7b680a81/kema.py",
+      "source_time": "2026-03-25 14:54:09+08:00",
+      "sha256": "AD962F2F63D0EB59375C37FCEE284B29862DB7948559703E8F4CBB295F80502C",
+      "reason": "Contains plaintext credentials; intentionally excluded"
+    }
+  ]
+}

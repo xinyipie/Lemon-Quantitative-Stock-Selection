@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""预注册的公告后质量改善短线漂移研究。"""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+import sys
+
+import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from research.all_market_multi_engine_research import (  # noqa: E402
+    _available_dates,
+    _build_regimes,
+    _load_stock_info,
+    build_year_panel,
+)
+from research.contrarian_candidate_stress import annual_path_metrics, max_drawdown  # noqa: E402
+from research.high_confidence_abstention_audit import overlap_adjusted_portfolio  # noqa: E402
+from research.point_in_time_financials import merge_point_in_time, prepare_financial_events  # noqa: E402
+from research.two_stage_walkforward_research import _bootstrap_probability, _metrics, _period, _prepare, walk_forward  # noqa: E402
+
+
+CACHE = ROOT / "data" / "cache"
+FINANCIAL_CACHE = CACHE / "fina_indicator_history.parquet"
+PREREG = ROOT / "reports" / "research" / "prereg_post_earnings_quality_drift_20260808.json"
+CANDIDATES = ROOT / "reports" / "research" / "post_earnings_quality_drift_candidates_20260808.csv"
+REPORT = ROOT / "reports" / "research" / "post_earnings_quality_drift_validation_20260808.md"
+FORBIDDEN_COLUMNS = {"ret_3d", "ret_5d", "ret_8d", "mfe_8d", "mae_8d", "opportunity_score", "opportunity_rank"}
+SCORE_COLUMNS = {
+    "netprofit_yoy", "roe", "debt_to_assets", "days_since_announcement",
+    "industry_rs_20", "ret_20", "volume_ratio",
+}
+FROZEN_CONFIG = {
+    "topn": 2,
+    "rank_ridge": 100.0,
+    "gate_ridge": 100.0,
+    "gate_window_years": 99,
+    "gate_quantile": 0.8,
+    "cost": 0.25,
+    "regime_mode": "all",
+}
+
+
+def _rank(frame: pd.DataFrame, values: pd.Series, higher: bool) -> pd.Series:
+    return values.groupby(frame["trade_date"]).rank(pct=True, ascending=higher, method="average") * 100
+
+
+def build_candidates(panel: pd.DataFrame, financial_events: pd.DataFrame, topn: int = 60) -> pd.DataFrame:
+    work = merge_point_in_time(panel, financial_events)
+    numeric_columns = SCORE_COLUMNS | {
+        "history_count", "pct_chg", "turnover_rate", "entry_gap_pct", "ret_60",
+        "drawdown_20", "rsi_14", "ma_20", "ma_60", "close",
+    }
+    for column in numeric_columns:
+        work[column] = pd.to_numeric(work[column], errors="coerce")
+    mask = (
+        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
+        & (work["history_count"] >= 120)
+        & work["days_since_announcement"].between(1, 30)
+        & work["roe"].between(8.0, 60.0)
+        & work["netprofit_yoy"].between(15.0, 300.0)
+        & work["debt_to_assets"].between(0.0, 70.0)
+        & work["pct_chg"].between(-2.0, 6.0)
+        & work["turnover_rate"].between(0.5, 15.0)
+        & work["volume_ratio"].between(0.5, 3.0)
+        & work["entry_gap_pct"].between(-3.0, 5.0)
+        & work["ret_60"].between(-5.0, 60.0)
+        & work["ret_20"].between(0.0, 25.0)
+        & work["drawdown_20"].between(0.0, 15.0)
+        & work["rsi_14"].between(45.0, 80.0)
+        & work["industry_rs_20"].ge(-2.0)
+        & work["ma_20"].gt(work["ma_60"])
+        & work["close"].ge(work["ma_20"] * 0.98)
+    )
+    work = work[mask].copy()
+    if work.empty:
+        return work
+    volume_quality = -(work["volume_ratio"] - 1.2).abs()
+    work["post_earnings_quality_score"] = (
+        _rank(work, work["netprofit_yoy"], True) * 0.25
+        + _rank(work, work["roe"], True) * 0.20
+        + _rank(work, work["debt_to_assets"], False) * 0.10
+        + _rank(work, work["days_since_announcement"], False) * 0.15
+        + _rank(work, work["industry_rs_20"], True) * 0.15
+        + _rank(work, work["ret_20"], True) * 0.10
+        + _rank(work, volume_quality, True) * 0.05
+    ).round(4)
+    selected = (
+        work.sort_values(["trade_date", "post_earnings_quality_score", "ts_code"], ascending=[True, False, True])
+        .groupby("trade_date", group_keys=False)
+        .head(topn)
+        .drop_duplicates(["trade_date", "ts_code"])
+        .copy()
+    )
+    selected["engine"] = "post_earnings_quality_drift"
+    selected["engine_score"] = selected["post_earnings_quality_score"]
+    selected["engine_rank"] = selected.groupby("trade_date")["engine_score"].rank(ascending=False, method="first")
+    return selected
+
+
+def evaluate(path: Path, validation_allowed: bool) -> tuple[bool, pd.DataFrame]:
+    frame, market = _prepare(path)
+    trades, _ = walk_forward(frame, market, **FROZEN_CONFIG)
+    train = _metrics(_period(trades, 2019, 2021))
+    train_pass = bool(
+        train["trades"] >= 100
+        and train["avg_net"] > 0
+        and train["profit_factor"] > 1.10
+        and train["positive_years"] == train["years"] == 3
+    )
+    print(f"training_gate={train_pass} train={train}")
+    if not validation_allowed or not train_pass:
+        return train_pass, trades
+
+    validation = _metrics(_period(trades, 2022, 2024))
+    recent = _metrics(_period(trades, 2025, 2026))
+    yearly = trades.assign(year=trades["trade_date"].astype(str).str[:4].astype(int)).groupby("year").apply(
+        lambda group: pd.Series(_metrics(group)), include_groups=False
+    ).reset_index()
+    validation_days = _period(trades.groupby("trade_date", as_index=False)["net_ret"].mean(), 2022, 2024)
+    ci_low, ci_high, p_nonpositive = _bootstrap_probability(validation_days, block=20, repetitions=10000)
+    overlap = overlap_adjusted_portfolio(trades, CACHE, cost=0.25)
+    path_yearly = annual_path_metrics(overlap)
+    path_drawdown = max_drawdown(overlap["net_ret"]) if not overlap.empty else float("nan")
+    validation_path = path_yearly[path_yearly["year"].between(2022, 2024)]
+    strict_pass = bool(
+        validation["trades"] >= 100
+        and validation["avg_net"] > 0
+        and validation["profit_factor"] > 1.10
+        and validation["positive_years"] == validation["years"] == 3
+        and recent["trades"] >= 40
+        and recent["avg_net"] > 0
+        and recent["profit_factor"] > 1.10
+        and recent["positive_years"] == recent["years"] == 2
+        and ci_low > 0
+        and p_nonpositive < 0.05
+        and len(validation_path) == 3
+        and (validation_path["return_pct"] > 0).all()
+        and path_drawdown > -20.0
+    )
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
+    trades.to_csv(REPORT.with_name(REPORT.stem + "_trades.csv"), index=False, encoding="utf-8-sig")
+    summary = pd.DataFrame([
+        {"period": "train_oos", **train},
+        {"period": "validation", **validation},
+        {"period": "recent", **recent},
+    ])
+    lines = [
+        "# 预注册公告后质量改善短线漂移首次验证",
+        "",
+        f"- 预注册 SHA256：`{hashlib.sha256(PREREG.read_bytes()).hexdigest()}`。",
+        f"- 训练门槛：通过。严格首次验证：{'通过' if strict_pass else '不通过'}。",
+        f"- 验证期 Bootstrap 95% 区间：{ci_low:+.4f}% 至 {ci_high:+.4f}%，均值不大于0概率 {p_nonpositive:.2%}。",
+        f"- 真实重叠持仓最大回撤：{path_drawdown:.2f}%。",
+        "",
+        summary.to_markdown(index=False, floatfmt=".4f"),
+        "",
+        yearly.to_markdown(index=False, floatfmt=".4f"),
+        "",
+        path_yearly.to_markdown(index=False, floatfmt=".4f"),
+        "",
+        "- 所有财务记录均按公告日点时合并，且公告日至少早于选股日1个自然日。",
+        "- v1首次验证后不得改参，失败结果原样保留。",
+        "- 本研究未修改正式策略，也不生成交易执行代码。",
+    ]
+    REPORT.write_text("\n".join(lines), encoding="utf-8")
+    print(f"strict_pass={strict_pass} validation={validation} recent={recent}")
+    print(yearly.to_string(index=False))
+    print(f"bootstrap=({ci_low:.4f},{ci_high:.4f}) p_nonpositive={p_nonpositive:.4f} path_drawdown={path_drawdown:.2f}")
+    return strict_pass, trades
+
+
+def run() -> None:
+    prereg_hash = hashlib.sha256(PREREG.read_bytes()).hexdigest()
+    print(f"prereg_sha256={prereg_hash}")
+    financial_events = prepare_financial_events(pd.read_parquet(FINANCIAL_CACHE))
+    print(
+        f"financial_events={len(financial_events)} stocks={financial_events['ts_code'].nunique()} "
+        f"ann={financial_events['ann_date'].min()}..{financial_events['ann_date'].max()}"
+    )
+    dates = _available_dates(CACHE, "20160101", "20260807")
+    regimes = _build_regimes(CACHE, dates)
+    stock_info = _load_stock_info(CACHE)
+    frames = []
+    for year in range(2016, 2022):
+        panel = build_year_panel(CACHE, stock_info, regimes, dates, year, f"{year}0101", f"{year}1231")
+        frames.append(build_candidates(panel, financial_events))
+        print(f"training_year={year} panel={len(panel)} candidates={len(frames[-1])}")
+    training_candidates = pd.concat(frames, ignore_index=True)
+    training_path = CANDIDATES.with_name(CANDIDATES.stem + "_training_only.csv")
+    training_candidates.to_csv(training_path, index=False, encoding="utf-8-sig")
+    train_pass, _ = evaluate(training_path, validation_allowed=False)
+    if not train_pass:
+        REPORT.write_text(
+            f"# 公告后质量改善短线漂移\n\n- 预注册 SHA256：`{prereg_hash}`。\n"
+            "- 训练期内部OOS门槛未通过，按预注册规则未读取2022-2026验证收益。\n",
+            encoding="utf-8",
+        )
+        print(f"training_failed wrote={REPORT}")
+        return
+    for year in range(2022, 2027):
+        end_date = "20260807" if year == 2026 else f"{year}1231"
+        panel = build_year_panel(CACHE, stock_info, regimes, dates, year, f"{year}0101", end_date)
+        frames.append(build_candidates(panel, financial_events))
+        print(f"validation_year={year} panel={len(panel)} candidates={len(frames[-1])}")
+    all_candidates = pd.concat(frames, ignore_index=True)
+    all_candidates.to_csv(CANDIDATES, index=False, encoding="utf-8-sig")
+    evaluate(CANDIDATES, validation_allowed=True)
+
+
+if __name__ == "__main__":
+    run()

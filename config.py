@@ -165,19 +165,25 @@ def get_official_longterm_profile():
 # 3. 修改密钥：直接修改下方的字符串即可
 
 # AI API Keys
-# Keep real keys in environment variables; never commit them to Git.
-DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+# 真实密钥只从环境变量读取，并清理 Windows 换行和误带的外层引号。
+def _read_env_secret(name: str) -> str:
+    return str(os.environ.get(name, "") or "").strip().strip('"').strip("'")
+
+
+DASHSCOPE_API_KEY = _read_env_secret("DASHSCOPE_API_KEY")
+DEEPSEEK_API_KEY = _read_env_secret("DEEPSEEK_API_KEY")
 
 # ==================== AI模型配置（可切换） ====================
 # 支持的模型配置（取消注释即可切换）
 
-# 方案1：DeepSeek Chat（当前使用，OpenAI-compatible）
+# 方案1：DeepSeek V4 分层模型（OpenAI-compatible）
 AI_CONFIG = {
     "provider": "deepseek",
     "api_key": DEEPSEEK_API_KEY,
     "base_url": "https://api.deepseek.com/v1/chat/completions",
-    "model": "deepseek-chat",
+    "model": "deepseek-v4-flash",
+    "fast_model": "deepseek-v4-flash",
+    "reasoning_model": "deepseek-v4-pro",
     "timeout": 60,
     "temperature": 0.1,
     "max_tokens": 6000

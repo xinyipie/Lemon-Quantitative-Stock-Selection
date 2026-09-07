@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+exec 9>/tmp/stock-market-radar-update.lock
+/usr/bin/flock -n 9 || exit 0
+
+cd /opt/stock
+set -a
+. /opt/stock/.env
+set +a
+
+mkdir -p /opt/stock/logs
+command_json='["/opt/stock/.venv/bin/python", "daily_web_update.py", "--mode", "radar", "--skip-download", "--skip-history-import", "--skip-daily-report"]'
+exec /opt/stock/.venv/bin/python -m web_app.services.update_worker \
+  "$command_json" \
+  "data/web_update_status.json" \
+  "logs/market_radar_update.log" \
+  >> /opt/stock/logs/market_radar_scheduler.log 2>&1
