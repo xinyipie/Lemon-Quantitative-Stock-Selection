@@ -597,7 +597,7 @@ def stock_redirect(request: Request, code: str = ""):
 def stock_detail(request: Request, code: str):
     detail = get_stock_detail(code, history_db=DEFAULT_HISTORY_DB_PATH, signal_db=DEFAULT_SIGNAL_DB_PATH)
     stock_signals = []
-    if detail.get("asset_type") == "stock":
+    if detail.get("asset_type") == "stock" and detail.get("found"):
         stock_signals = get_stock_signals(
             detail["stock"]["ts_code"],
             signal_db=DEFAULT_SIGNAL_DB_PATH,

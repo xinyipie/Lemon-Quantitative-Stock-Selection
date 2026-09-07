@@ -64,15 +64,17 @@ def query_stock_history(
             # 指数基础表未导入时，仍用规范简称展示已识别的指数行情。
             instrument["name"] = INDEX_CANONICAL_NAMES.get(ts_code) or query or ts_code
         daily_table = ASSET_TABLES[asset_type][1]
-        daily_rows = conn.execute(
-            f"""
-            select trade_date, close, pct_chg from {daily_table}
-            where ts_code = ?
-            order by trade_date desc
-            limit 120
-            """,
-            (ts_code,),
-        ).fetchall()
+        daily_rows = []
+        if _table_exists(conn, daily_table):
+            daily_rows = conn.execute(
+                f"""
+                select trade_date, close, pct_chg from {daily_table}
+                where ts_code = ?
+                order by trade_date desc
+                limit 120
+                """,
+                (ts_code,),
+            ).fetchall()
         latest_daily = dict(daily_rows[0]) if daily_rows else {}
         latest_trade_date = latest_daily.get("trade_date")
         latest_basic = _query_latest_by_trade_date(conn, "stock_daily_basic", ts_code) if asset_type == "stock" else {}
@@ -272,6 +274,8 @@ def _format_code(code: str) -> str:
 
 
 def _query_latest_by_trade_date(conn: sqlite3.Connection, table: str, ts_code: str) -> dict:
+    if not _table_exists(conn, table):
+        return {}
     row = conn.execute(
         f"""
         select * from {table}
@@ -285,6 +289,8 @@ def _query_latest_by_trade_date(conn: sqlite3.Connection, table: str, ts_code: s
 
 
 def _query_latest_finance(conn: sqlite3.Connection, ts_code: str) -> dict:
+    if not _table_exists(conn, "fina_indicator"):
+        return {}
     row = conn.execute(
         """
         select * from fina_indicator
@@ -321,6 +327,8 @@ def _query_signal_state(ts_code: str, signal_db: str | Path) -> dict:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        if not _table_exists(conn, "pool_state"):
+            return {}
         row = conn.execute(
             """
             select * from pool_state

@@ -1,7 +1,20 @@
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from fastapi.testclient import TestClient
+
+
+def test_downloader_import_initializes_missing_runtime_directory(tmp_path):
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), LEMON_SKIP_TUSHARE_INIT="1")
+    result = subprocess.run(
+        [sys.executable, "-c", "import data_downloader"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "data" / "downloader.log").is_file()
 
 
 def test_legacy_systemd_entrypoint_uses_packaged_gateway():

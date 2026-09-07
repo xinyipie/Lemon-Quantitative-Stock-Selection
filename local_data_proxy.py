@@ -282,10 +282,13 @@ class LocalDataProxy:
                 else:
                     listed = df['list_date'].astype('string').str.replace(r'\.0$', '', regex=True)
                     delisted = df['delist_date'].astype('string').str.replace(r'\.0$', '', regex=True)
-                    valid_list = listed.str.fullmatch(r'\d{8}', na=False)
-                    valid_delist = delisted.str.fullmatch(r'\d{8}', na=False)
+                    valid_list = listed.str.fullmatch(r'\d{8}', na=False).astype(bool)
+                    valid_delist = delisted.str.fullmatch(r'\d{8}', na=False).astype(bool)
                     if list_status == 'L':
-                        df = df[valid_list & (listed <= cutoff) & (~valid_delist | (delisted > cutoff))].copy()
+                        # Arrow字符串的缺失比较结果不能直接与布尔数组混算。
+                        listed_before = listed.le(cutoff).fillna(False).astype(bool)
+                        delisted_after = delisted.gt(cutoff).fillna(False).astype(bool)
+                        df = df[valid_list & listed_before & (~valid_delist | delisted_after)].copy()
                     elif list_status:
                         # P 表示暂停上市，生命周期日期不能还原历史暂停状态；仅保留当前标签并标不可靠。
                         df = df[df['list_status'].astype(str) == str(list_status)].copy()

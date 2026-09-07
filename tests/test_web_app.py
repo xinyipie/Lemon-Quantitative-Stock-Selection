@@ -14,8 +14,41 @@ class WebAppTest(unittest.TestCase):
         self.addCleanup(self.local_write.stop)
         self.client = TestClient(app, client=("127.0.0.1", 41000))
 
+    @staticmethod
+    def stock_detail_fixture(query="000001", found=True):
+        """提供旧页面结构测试所需的固定服务结果，不读取生产数据库。"""
+        return {
+            "query": query,
+            "found": found,
+            "stock": {"ts_code": "000001.SZ", "name": "平安银行", "industry": "银行"},
+            "asset_type": "stock",
+            "asset_type_label": "股票",
+            "latest_daily": {"trade_date": "20260630", "close": 12.5, "pct_chg": 0.8},
+            "latest_basic": {},
+            "latest_moneyflow": {},
+            "latest_finance": {},
+            "returns": {"10d": None, "40d": None, "80d": None},
+            "signal_state": {},
+            "latest_trade_date": "20260630" if found else None,
+            "verdict": {"level": "数据不足", "score": 0, "reasons": [], "risks": []},
+            "price_chart": {"point_count": 0, "close_path": "", "ma20_path": "", "ma60_path": ""},
+        }
+
     def test_dashboard_page_renders(self):
-        response = self.client.get("/")
+        status = {"latest_trade_date": "20260630", "latest_daily_stock_count": 1, "stock_count": 1}
+        brief = {
+            "source": "cache",
+            "facts": {"trade_date": "20260630"},
+            "doc": {"summary": "固定测试摘要", "positives": [], "risks": [], "confidence_note": "测试"},
+        }
+        with patch("web_app.app.get_db_status", return_value=status), patch(
+            "web_app.app.read_update_status", return_value={}
+        ), patch("web_app.app.get_recent_signals", return_value=[]), patch(
+            "web_app.app.get_signal_runs", return_value=[]
+        ), patch("web_app.app.get_active_longterm_pool", return_value=[]), patch(
+            "web_app.app.get_longterm_runs", return_value=[]
+        ), patch("web_app.app.get_daily_brief", return_value=brief):
+            response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("策略工作台", response.text)
         self.assertTrue("最近运行决策" in response.text or "历史判断" in response.text)
@@ -136,7 +169,10 @@ class WebAppTest(unittest.TestCase):
         self.assertNotIn("页面只读，不会自动拉取数据", response.text)
 
     def test_stock_page_renders_for_code(self):
-        response = self.client.get("/stock/000001")
+        with patch("web_app.app.get_stock_detail", return_value=self.stock_detail_fixture()), patch(
+            "web_app.app.get_stock_signals", return_value=[]
+        ):
+            response = self.client.get("/stock/000001")
         self.assertEqual(response.status_code, 200)
         self.assertIn("单股查询", response.text)
         self.assertIn("系统结论", response.text)
@@ -144,12 +180,18 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("历史信号记录", response.text)
 
     def test_stock_page_accepts_chinese_name(self):
-        response = self.client.get("/stock/平安银行")
+        with patch("web_app.app.get_stock_detail", return_value=self.stock_detail_fixture("平安银行")), patch(
+            "web_app.app.get_stock_signals", return_value=[]
+        ):
+            response = self.client.get("/stock/平安银行")
         self.assertEqual(response.status_code, 200)
         self.assertIn("平安银行", response.text)
 
     def test_stock_page_shows_not_found_for_invalid_input(self):
-        response = self.client.get("/stock/abcdef")
+        detail = self.stock_detail_fixture("abcdef", found=False)
+        detail["stock"] = {"ts_code": "ABCDEF.SZ", "name": "", "industry": ""}
+        with patch("web_app.app.get_stock_detail", return_value=detail):
+            response = self.client.get("/stock/abcdef")
         self.assertEqual(response.status_code, 200)
         self.assertIn("未找到该品种", response.text)
         self.assertIn("abcdef", response.text)
@@ -328,7 +370,27 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("if (!response.ok)", response.text)
 
     def test_signal_explanation_page_renders(self):
-        response = self.client.get("/explain/signal/20260525/000012.SZ")
+        cached = {
+            "source": "cache",
+            "signal": {
+                "trade_date": "20260525", "ts_code": "000012.SZ", "name": "测试股票",
+                "display_name": "测试股票", "display_code": "000012", "industry": "测试行业",
+                "profile": "short_v9_final", "profile_label": "短线策略", "score": 70,
+                "outcome_label": "待验证", "basis_text": "固定入选依据",
+                "performance_text": "尚未形成结果", "process_label": "观察中",
+            },
+            "doc": {
+                "title": "固定解释",
+                "summary": "固定缓存内容",
+                "positives": ["当时可见的量价因素"],
+                "risks": ["样本风险"],
+                "watch_plan": "等待量价确认",
+                "invalidation": "跌破观察位",
+                "confidence_note": "固定测试快照",
+            },
+        }
+        with patch("web_app.app.get_signal_explanation", return_value=cached):
+            response = self.client.get("/explain/signal/20260525/000012.SZ")
         self.assertEqual(response.status_code, 200)
         self.assertIn("AI解释文档", response.text)
         self.assertIn("当时已知的支持因素", response.text)

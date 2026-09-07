@@ -250,6 +250,10 @@ class DataIntegrityRemediationTest(unittest.TestCase):
             self.assertFalse(result["name_industry_point_in_time_reliable"].iloc[0])
             self.assertEqual(result["point_in_time_as_of_date"].iloc[0], "20240101")
 
+    def test_local_stock_basic_lifecycle_supports_arrow_string_missing_dates(self):
+        with pd.option_context("mode.string_storage", "pyarrow"):
+            self.test_local_stock_basic_filters_lifecycle_at_historical_date()
+
     def test_local_stock_basic_strict_mode_requires_exact_historical_snapshot(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             pd.DataFrame([

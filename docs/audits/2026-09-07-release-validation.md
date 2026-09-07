@@ -2,7 +2,7 @@
 
 ## 已完成的本地验收
 
-- 全量 `python -m pytest -q`：990 passed、22 skipped；另有两条既有 pandas FutureWarning。
+- 全量 `python -m pytest -q`：997 passed、22 skipped；另有两条既有 pandas FutureWarning。
 - `node --test tests/js/*.test.cjs`：5 passed。
 - 实际 Chromium 页面回归见 `2026-09-07-release-browser-regression.md`。
 - `git diff --check` 通过。pytest 默认范围固定为正式 tests 和已有归档复现测试，避免自动收集 tmp 中的联网探测脚本。
@@ -22,3 +22,10 @@
 - 具体问题状态见算法、研究和浏览器三份 `*-fixes.md`。方法限制已降低证据等级，不能将自动化测试通过理解为策略收益已获证明。
 
 生产兼容测试、最终提交与部署验收将在发布后追加记录。
+
+## 生产隔离验收追加修复
+
+- 全新检出缺少 `data` 目录时下载模块导入失败：先初始化日志目录；独立子进程空目录回归通过。
+- pandas 3/Arrow 缺失退市日期导致布尔计算异常：生命周期比较显式处理缺失并统一布尔类型；以 Arrow 字符串在本地复现后修复。
+- Windows Git 打包会转换 shell 换行：增加 `deploy/* text eol=lf` 属性，最终发布包重新执行 Linux `bash -n`。
+- Python 3.12/pandas 3 隔离回归最终通过 126 项；空库页面及旧测试数据隔离均已修复。

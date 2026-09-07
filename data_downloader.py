@@ -73,6 +73,8 @@ INDEX_NAMES = {
 }
 
 # ==================== 日志 ====================
+# 全新检出不包含运行目录，先创建目录再初始化日志。
+os.makedirs("data", exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',

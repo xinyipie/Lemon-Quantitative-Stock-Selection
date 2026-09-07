@@ -105,6 +105,23 @@ def test_mounted_explicit_index_code_uses_index_daily_without_index_basic(tmp_pa
     get_signals.assert_not_called()
 
 
+@pytest.mark.parametrize("query", ["000001", "abcdef"])
+def test_empty_history_database_returns_a_readable_empty_state(client, tmp_path, query):
+    history_db = tmp_path / "empty.db"
+    sqlite3.connect(history_db).close()
+    signal_db = tmp_path / "empty-signals.db"
+    sqlite3.connect(signal_db).close()
+
+    with patch("web_app.app.DEFAULT_HISTORY_DB_PATH", history_db), patch(
+        "web_app.app.DEFAULT_SIGNAL_DB_PATH", signal_db
+    ):
+        response = client.get(f"/stock/{query}")
+
+    assert response.status_code == 200
+    assert "未找到该品种" in response.text
+    assert query in response.text
+
+
 def test_served_stylesheet_exposes_close_line_and_readable_content_navigation(client):
     css = client.get("/static/app.css").text
     close_rule = css.split(".chart-close", 1)[1].split("}", 1)[0]

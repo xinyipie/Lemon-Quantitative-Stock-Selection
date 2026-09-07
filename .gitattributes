@@ -1,0 +1,2 @@
+# Linux 部署脚本必须使用 LF，避免 Windows 打包后破坏 shell 语法。
+deploy/* text eol=lf
