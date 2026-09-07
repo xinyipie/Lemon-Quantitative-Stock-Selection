@@ -89,7 +89,7 @@ def init_tushare():
         pro = ts.pro_api(token=token, timeout=config.TUSHARE_CONFIG["timeout"])
         pro._DataApi__http_url = tushare_http_url
         _patch_tushare_http_errors(pro)
-        logger.info("Tushare接口使用自定义HTTPS地址")
+        logger.info("Tushare接口使用已配置的%s地址", tushare_http_url.split(":", 1)[0].upper())
         logger.info("✅ Tushare接口初始化成功")
         return pro
     except Exception as e:

@@ -78,11 +78,11 @@ pip install -r requirements.txt
 
 ```powershell
 $env:TUSHARE_TOKEN="你的 tushare token"
-$env:TUSHARE_HTTP_URL="服务提供方确认可用的 HTTPS 接口地址"
+$env:TUSHARE_HTTP_URL="http://111.170.34.57:8010"
 $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 ```
 
-2026-09-07 审查修复后的配置、历史数据要求与验证记录见 [修复说明](docs/audits/2026-09-07-remediation.md)。行情接口不再默认使用明文 HTTP；Web 未配置令牌时默认只读；严格历史回测需要对应日期的股票基础信息快照。
+2026-09-07 审查修复后的配置、历史数据要求与验证记录见 [修复说明](docs/audits/2026-09-07-remediation.md)。按用户后续确认，行情接口继续使用原 HTTP 中转地址，也支持通过环境变量指定 HTTPS 地址；Web 未配置令牌时默认只读；严格历史回测需要对应日期的股票基础信息快照。
 
 日常更新 Web 看板数据（推荐）：
 

@@ -258,16 +258,19 @@ AI_CONFIG = {
 # 获取地址：https://tushare.pro/register
 # 要求：积分 >= 5000（通过签到、分享等方式获取）
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
-TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "")
+# 用户确认继续使用原行情中转；环境变量仍可覆盖为其他HTTPS服务。
+LEGACY_TUSHARE_HTTP_URL = "http://111.170.34.57:8010"
+TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "").strip() or LEGACY_TUSHARE_HTTP_URL
 
 
 def require_secure_tushare_url(url: str) -> str:
-    """拒绝明文传输令牌，也不猜测第三方服务的HTTPS地址。"""
+    """校验行情地址；保留旧函数名，允许用户确认的原HTTP中转。"""
     from urllib.parse import urlsplit
     value = str(url or "").strip().rstrip("/")
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError("请设置 TUSHARE_HTTP_URL 为服务方提供的 HTTPS 地址（不能包含用户名或密码）")
+    allowed_transport = parsed.scheme == "https" or value == LEGACY_TUSHARE_HTTP_URL
+    if not allowed_transport or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("行情地址须为原中转地址或服务方HTTPS地址，不能包含用户名、密码、查询参数或片段")
     return value
 
 TUSHARE_CONFIG = {
