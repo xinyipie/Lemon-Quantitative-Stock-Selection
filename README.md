@@ -15,7 +15,7 @@
 
 本次修复统一了受影响研究脚本的时点、成交和标签契约；旧报告不会因为代码更新而自动成为新的有效验证。使用研究结果前，应核对生成版本、执行参数、数据完整性和证据资格。已反复参与选参的历史区间不能再当独立封存样本。旧 clean store 缺少标签实际结束日期时必须重建。
 
-详细审查及修复状态见 `docs/audits/2026-09-07-full-strategy-browser-review.md` 和同目录专项修复报告。Python 建议使用 3.12（生产环境）；本地测试另覆盖当前 3.14 环境。
+当前配置、修改文件及验证边界见 [本轮修改总览](docs/audits/2026-09-07-change-summary.md)，逐项问题见 [完整审查](docs/audits/2026-09-07-full-strategy-browser-review.md)。Python 建议使用 3.12（生产环境）；本地测试另覆盖当前 3.14 环境。
 
 ## 目录结构
 
@@ -87,33 +87,33 @@ $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 日常更新 Web 看板数据（推荐）：
 
 ```bash
-python daily_web_update.py --mode full --end 20260616
+python daily_web_update.py --mode daily
 ```
 
 日常同步只做高频经营所需步骤：补行情缓存、导入 `stock_history.db`、刷新市场上下文、运行 `main.py` 写入当天实盘信号，并为当天短线/长线 live 信号补齐 AI 解释缓存和首页“今日AI摘要”。短线历史复盘和长线历史审计比较慢，默认跳过。
 
-如果当天只想刷新数据、不调用大模型生成解释：
+如果需要跳过信号解释和首页 AI 摘要生成（其他步骤仍可能使用 AI）：
 
 ```bash
-python daily_web_update.py --mode daily --end 20260616 --skip-ai-explanations
+python daily_web_update.py --mode daily --skip-ai-explanations
 ```
 
 如果只想预览将要执行哪些步骤：
 
 ```bash
-python daily_web_update.py --mode daily --end 20260616 --dry-run
+python daily_web_update.py --mode daily --dry-run
 ```
 
 如果需要补齐短线复盘和当前半年度长线审计：
 
 ```bash
-python daily_web_update.py --mode full --end 20260616
+python daily_web_update.py --mode full
 ```
 
 如果需要重刷 2024H1 至今的全部半年度长线历史池：
 
 ```bash
-python daily_web_update.py --mode full --end 20260616 --full-history
+python daily_web_update.py --mode full --full-history
 ```
 
 下载离线数据：
@@ -174,11 +174,11 @@ python daily_research_report.py --report-date 20260723 --market-date 20260722 --
 python daily_research_report.py --report-date 20260723 --market-date 20260722 --slot manual --force
 ```
 
-部署调度中，凌晨 2:00 的全量更新负责主生成，早晨 8:30 的市场雷达更新负责缺失补偿；同一发布日期只展示最新有效版，同时保留历史修订记录。
+当前生产调度（北京时间）：02:00 完整更新，04:00 / 06:00 按状态重试；工作日 07:30 / 12:30 更新市场雷达，08:00 独立生成日报。更新任务与日报分开调度；同一发布日期只展示最新有效版，同时保留历史修订记录。
 
 日常查看顺序建议：
 
-1. 盘后先跑 `python daily_web_update.py --mode full --end 最新交易日`，把行情、实盘、短线复盘、长线审计和市场上下文一次补齐。
+1. 盘后先跑 `python daily_web_update.py --mode daily`，同步行情、实盘信号和市场上下文；历史复盘与长线审计按需运行完整重算。
 2. 打开 Web 首页，看“数据同步提醒”和“今日决策”。
 3. 短线复盘页先看近 100 日，重点看“系统原因”“收益路径”“AI状态”。日常同步会自动补当天 AI 解释。
 4. 只有需要批量补历史解释时再跑：
@@ -213,7 +213,7 @@ python trade_diagnostics.py --trades backtest_results/trades_xxx.csv
 
 | 脚本 | 何时使用 | 常用命令 |
 |------|----------|----------|
-| `daily_web_update.py` | Web 日常推荐入口；默认建议用 `--mode full` 补齐行情、实盘、短线复盘、长线审计和市场上下文；只想快速刷新当日信号时用 `--mode daily` | `python daily_web_update.py --mode full --end 20260616` |
+| `daily_web_update.py` | Web 日常同步入口，默认 `--mode daily`；需要补历史复盘和长线审计时使用 `--mode full` | `python daily_web_update.py --mode daily` |
 | `data_downloader.py` | 单独补 Tushare/离线 Parquet 缓存 | `python data_downloader.py --start 20260616 --end 20260616 --skip-financial` |
 | `history_db_importer.py` | 把 `data/cache` 的 Parquet 导入 `data/stock_history.db`，供 Web/单股体检查询 | `python history_db_importer.py --cache-dir data/cache --db data/stock_history.db --start 20260616 --end 20260616 --tables daily daily_basic moneyflow index_daily stock_basic` |
 | `history_db_check.py` | 检查历史数据库覆盖范围和最新日期 | `python history_db_check.py --db data/stock_history.db` |

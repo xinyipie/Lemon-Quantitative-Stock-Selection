@@ -1,6 +1,16 @@
 # Stock 选股助手 — Codex 工作手册
 
-> 每次对话开始前自动读取本文件，无需重新阅读代码。
+> 更新于 2026-09-07。定位和修改前以当前代码核对，本手册下方 v4.0 算法参数保留为历史说明，不代表当前正式配置。
+
+## 当前运行口径
+
+- 当前短线：`profile_v9_sector_quality_guard + adaptive_quality_v6 + v39`；观察层 `best_balance`。
+- 长线已启用：`longterm_quality_lifecycle_v18_market_sync` 观察池与 Elite 提醒。
+- 行情默认地址：`http://14.nat0.cn:32817`，来自发布前代码与生产备份，用户已确认继续使用；配置位于 `config.py`，可由 `TUSHARE_HTTP_URL` 覆盖。
+- 当前 AI 使用 `DEEPSEEK_API_KEY`；真实凭据只保存在环境配置中。
+- 网页未配置 `STOCK_WEB_TOKEN` 时默认只读。生产入口为 `gateway:app`，服务名 `stock-web`。
+- 严格历史回测需要对应日期的股票主数据快照；研究训练需要标签实际退出日期。缺数据不能以静态当前值或未来标签替代。
+- [修改总览](docs/audits/2026-09-07-change-summary.md) 汇总代码变更、验证和未重跑事项；旧收益结果不作为本次修复后的有效验证。
 
 ## 快速启动
 
@@ -14,7 +24,7 @@ python ic_analysis.py                   # IC分析（评估选股评分预测能
 python patch_fina_netprofit_yoy.py      # 补丁：给现有parquet追加netprofit_yoy列
 ```
 
-依赖全局安装（无虚拟环境）：tushare、pandas、requests、scipy
+运行依赖见 `requirements.txt`，开发测试见 `requirements-dev.txt`，模型研究见 `requirements-research.txt`。生产使用 Python 3.12 虚拟环境；本地验收另覆盖 Python 3.14。
 
 ## 核心文件职责
 
@@ -110,7 +120,7 @@ check_regime_override() → 4条微观结构信号（仅对 BEAR_TREND 生效）
 ```
 python ic_analysis.py                          # 分析最新trades CSV，10/20/30日
 python ic_analysis.py --forward 10 20          # 指定前瞻天数
-python ic_analysis.py --use-profit             # 旧CSV无longterm_score时降级用profit
+# 缺有效预测评分时 IC 明确不可用，不允许用已实现 profit 冒充评分。
 
 IC值参考：> 0.10=优秀  0.05~0.10=良好  < 0.02=无效
 高低分差（高分1/3组 - 低分1/3组平均涨幅）比IC值更直观
@@ -166,7 +176,8 @@ python batch_backtest.py --skip-backtest # 只做IC分析（用已有CSV）
 
 ```
 TUSHARE_TOKEN      → https://tushare.pro
-DASHSCOPE_API_KEY  → https://dashscope.console.aliyun.com
+TUSHARE_HTTP_URL   → 可选，默认 http://14.nat0.cn:32817
+DEEPSEEK_API_KEY   → 当前 AI 服务凭据
 ```
 
-Tushare中转站地址已硬编码在 main.py 第43行：`http://111.170.34.57:8010/`
+Tushare 中转地址由 `config.py` 的 `LEGACY_TUSHARE_HTTP_URL` / `TUSHARE_HTTP_URL` 配置，`main.py` 初始化时校验并注入客户端；不再通过固定代码行号定位。

@@ -1,14 +1,17 @@
 # 文档入口
 
-更新时间：2026-06-03
+更新时间：2026-09-07
 
-这个目录用于保存策略研究、版本治理和实验结论。新一轮工作先读下面三个文件即可，不需要从完整流水账里重新找线索。
+这个目录用于保存运行说明、策略研究、版本治理和验收记录。当前状态以最新代码修改总览和配置为准，旧实验文档保留当时的结论，不作为修复后的新收益证据。
 
 ## 当前必读
 
+- [2026-09-07 修改总览](audits/2026-09-07-change-summary.md)：当前行情地址、短线/长线配置、前后端及算法修改、部署版本和验证边界。
+- [原行情服务恢复](audits/2026-09-07-legacy-relay-restoration.md)：实际中转为 `http://14.nat0.cn:32817`，真实接口查询已验证成功。
+
 1. [CURRENT_BASELINE.md](CURRENT_BASELINE.md)
    - 当前短线定板版本。
-   - 为什么选择 `profile_v4_adaptive_quality_v6 + baseline exit + fixed Top3`。
+   - 当前 v9 评分、v39 强推荐与 best_balance 观察层，以及保留的历史选型依据。
    - 买卖点后续如何用于选股工具。
 
 2. [STRATEGY_RESEARCH_PLAN.md](STRATEGY_RESEARCH_PLAN.md)

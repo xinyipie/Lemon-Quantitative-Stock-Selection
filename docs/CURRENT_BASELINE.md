@@ -1,6 +1,8 @@
 # 当前短线基准
 
-更新日期：2026-06-04
+更新日期：2026-09-07
+
+当前配置已经同步到本节；下方跨区间收益与选型实验保留 2026-06 的历史记录，尚未按本次因果与成交修复重算。最新验证边界见 [修改总览](audits/2026-09-07-change-summary.md)。
 
 ## 定板版本
 
@@ -12,7 +14,9 @@
 出场规则：baseline exit
 排序方向：desc
 推荐容量：固定 Top3
-实盘入口：默认只跑短线，波段暂时关闭
+强推荐层：v39
+观察候选：best_balance（Top2）
+实盘入口：短线与 v18 market-sync 长线观察池均启用
 ```
 
 对应代码配置：
@@ -21,7 +25,10 @@
 SHORT_LIVE_FACTOR_PROFILE = "profile_v9_sector_quality_guard"
 SHORT_LIVE_STYLE_GATE = "adaptive_quality_v6"
 SHORT_LIVE_SCORE_ORDER = "desc"
-ENABLE_LONGTERM_LIVE = False
+SHORT_LIVE_CONSENSUS_PROFILE = "v39"
+SHORT_LIVE_OBSERVE_PROFILE = "best_balance"
+ENABLE_LONGTERM_LIVE = True
+LONGTERM_LIVE_PROFILE = "longterm_quality_lifecycle_v18_market_sync"
 ```
 
 回测入口：
