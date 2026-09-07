@@ -78,7 +78,7 @@ pip install -r requirements.txt
 
 ```powershell
 $env:TUSHARE_TOKEN="你的 tushare token"
-$env:TUSHARE_HTTP_URL="http://111.170.34.57:8010"
+$env:TUSHARE_HTTP_URL="http://14.nat0.cn:32817"
 $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 ```
 

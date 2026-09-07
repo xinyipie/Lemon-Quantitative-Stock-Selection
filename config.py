@@ -259,7 +259,7 @@ AI_CONFIG = {
 # 要求：积分 >= 5000（通过签到、分享等方式获取）
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
 # 用户确认继续使用原行情中转；环境变量仍可覆盖为其他HTTPS服务。
-LEGACY_TUSHARE_HTTP_URL = "http://111.170.34.57:8010"
+LEGACY_TUSHARE_HTTP_URL = "http://14.nat0.cn:32817"
 TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "").strip() or LEGACY_TUSHARE_HTTP_URL
 
 
