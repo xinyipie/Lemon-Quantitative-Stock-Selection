@@ -219,7 +219,7 @@ class DailyWebUpdateTest(unittest.TestCase):
         command_texts = [" ".join(command) for command in calls]
         main_index = next(i for i, text in enumerate(command_texts) if "main.py" in text)
         self.assertIn("--local-data-live", command_texts[main_index])
-        self.assertIn("--cache-dir data\\cache", command_texts[main_index])
+        self.assertIn(f"--cache-dir {Path('data') / 'cache'}", command_texts[main_index])
         explanation_indexes = [i for i, text in enumerate(command_texts) if "backfill_signal_explanations.py" in text]
         brief_indexes = [i for i, text in enumerate(command_texts) if "daily_ai_brief.py" in text]
         self.assertEqual(len(explanation_indexes), 2)
