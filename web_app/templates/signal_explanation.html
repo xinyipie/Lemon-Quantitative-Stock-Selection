@@ -10,7 +10,7 @@
     <p>基于本地信号、因子和复盘结果生成。AI只负责解释已有事实，不生成交易执行指令。</p>
   </div>
   {% if signal %}
-  <a class="ghost-button" href="/stock/{{ signal.ts_code }}">查看单股体检</a>
+  <a class="ghost-button" href="{{ app_url_for(request, 'stock_detail', code=signal.ts_code).path }}">查看单股体检</a>
   {% endif %}
 </header>
 
@@ -67,8 +67,9 @@
       <p>把信号当时已知的依据与事后验证结果分开阅读。</p>
     </div>
     {% if signal %}
-    <form method="post" action="/explain/signal/{{ signal.trade_date }}/{{ signal.ts_code }}/refresh">
+    <form method="post" action="{{ app_path(request, '/explain/signal/' ~ signal.trade_date ~ '/' ~ signal.ts_code ~ '/refresh') }}" data-explanation-refresh-form>
       <button class="ghost-button" type="submit">重新生成解释</button>
+      <span class="update-error" role="alert" data-explanation-error hidden></span>
     </form>
     {% endif %}
   </div>
@@ -85,4 +86,38 @@
   <div class="empty-state">没有可核对的原始信号。</div>
   {% endif %}
 </section>
+<script>
+document.querySelectorAll("[data-explanation-refresh-form]").forEach((form) => {
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button[type='submit']");
+    const errorBox = form.querySelector("[data-explanation-error]");
+    button.disabled = true;
+    button.textContent = "正在生成解释";
+    errorBox.hidden = true;
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+      });
+      if (!response.ok) {
+        let detail = `请求失败（${response.status}）`;
+        try {
+          const payload = await response.json();
+          if (payload.detail) detail = payload.detail;
+        } catch (parseError) {
+          // 非 JSON 错误保留状态码提示。
+        }
+        throw new Error(detail);
+      }
+      window.location.assign(response.url);
+    } catch (error) {
+      errorBox.hidden = false;
+      errorBox.textContent = error.message;
+      button.disabled = false;
+      button.textContent = "重新生成解释";
+    }
+  });
+});
+</script>
 {% endblock %}

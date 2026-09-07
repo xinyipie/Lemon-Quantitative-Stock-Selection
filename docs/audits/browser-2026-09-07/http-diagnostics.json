@@ -1,0 +1,37 @@
+[
+  {
+    "path": "/stock/000001",
+    "status": 404,
+    "final_url": "http://127.0.0.1:8766/stock/000001",
+    "error": "{\"detail\":\"Not Found\"}"
+  },
+  {
+    "path": "/signals",
+    "status": 200,
+    "final_url": "http://127.0.0.1:8766/stock/signals",
+    "error": ""
+  },
+  {
+    "path": "/longterm",
+    "status": 200,
+    "final_url": "http://127.0.0.1:8766/stock/longterm",
+    "error": ""
+  },
+  {
+    "path": "/stock/stock/沪深300",
+    "status": 500,
+    "final_url": "http://127.0.0.1:8766/stock/stock/%E6%B2%AA%E6%B7%B1300",
+    "error": "Internal Server Error"
+  },
+  {
+    "path": "/stock/stock/510300",
+    "status": 200,
+    "final_url": "http://127.0.0.1:8766/stock/stock/510300",
+    "error": ""
+  },
+  {
+    "path": "POST explain refresh",
+    "status": 403,
+    "error": "{\"detail\":\"Remote writes are disabled\"}"
+  }
+]

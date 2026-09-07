@@ -1,7 +1,9 @@
 ﻿import json
+import os
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -43,7 +45,79 @@ def daily_rows(code: str, closes: list[float], industry: str, name: str) -> tupl
     return rows, {"ts_code": code, "symbol": code[:6], "name": name, "industry": industry, "list_status": "L"}
 
 
+def stable_sector_page_payload() -> dict:
+    """提供页面结构测试所需的固定快照，避免读取开发机 data 目录。"""
+    sector = {
+        "industry": "稳步主线", "stage": "趋势延续", "tone": "ok", "action": "看承接",
+        "heat_score_text": "80.0", "summary": "量价保持健康", "stock_count": 3,
+        "avg_ret_5d_text": "+3.0%", "rel_ret_10d_text": "+5.0%", "above_ma20_text": "100%",
+        "volume_expansion_text": "67%",
+    }
+    candidate = {
+        "candidate_rank": 1, "ts_code": "000001.SZ", "name": "主线A", "candidate_score_text": "82.0",
+        "ret_5d": 3.0, "ret_5d_text": "+3.0%", "ret_10d": 8.0, "ret_10d_text": "+8.0%",
+        "stock_vs_sector_10d": 2.0, "stock_vs_sector_10d_text": "+2.0%", "sector_relative_label": "强于板块",
+        "tone": "ok", "action_tag": "继续跟踪", "candidate_reason": "量价健康", "risk_note": "",
+    }
+    stock = {
+        "ts_code": "000001.SZ", "name": "主线A", "industry": "稳步主线", "research_action": "可重点跟踪",
+        "resonance_level": "★★★", "resonance_label": "策略+主线共振", "stock_role": "领涨",
+        "market_behavior": "放量承接", "event_relevance": "行业主线受益",
+        "validation_conditions": ["观察下一交易日承接"], "reason_cards": [{"type": "量价", "label": "趋势健康"}],
+    }
+    brief = {
+        "headline": "主线仍需量价验证", "data_quality": {"tone": "ok"}, "market_regime_note": "固定测试快照",
+        "snapshot_summary": {"event_count": 1, "thesis_count": 1, "stock_count": 1},
+        "event_summary": {"top_materiality": "B"}, "event_groups": {"all": []}, "trade_event_groups": {},
+        "event_watchlist": [], "sector_theses": [{"industry": "稳步主线", "research_action": "可重点跟踪",
+            "thesis_label": "量价主线", "conviction": "中", "thesis_score": 70, "summary": "趋势健康", "evidence": ["量价"]}],
+        "stock_watchlist": [stock], "risk_board": [], "verification_checklist": ["观察承接"],
+    }
+    return {
+        "radar": {
+            "end_date": "20250112", "message": "", "healthy": [sector], "risky": [{**sector, "stage": "退潮中"}],
+            "candidate_groups": [{"anchor_id": "sector-main", "industry": "稳步主线", "sector": sector, "candidates": [candidate]}],
+            "summary": {"tone": "ok", "headline": "存在健康主线", "stance": "继续观察承接", "top_sector": "稳步主线",
+                "top_stage": "趋势延续", "top_score": 80, "healthy_count": 1, "healthy_display_count": 1,
+                "risky_count": 1, "risky_display_count": 1},
+        },
+        "concept_news": {
+            "concepts": {"items": [{"name": "测试概念", "change_text": "+1.0%", "heat": 50}], "source_date": "20250112", "message": ""},
+            "theme_filter": {"items": []},
+            "news": {"items": [{"title": "固定消息", "tone": "neutral", "impact_text": "背景", "boost_text": "+0.0",
+                "quality": "测试", "strength_text": "待核验", "duration": "短期", "sectors_text": "稳步主线", "reason": "固定快照",
+                "why_selected": "结构验证", "verification_points": []}], "positive": [], "negative": [], "selection": {}, "message": ""},
+            "pipeline_health": {"raw_count": 1, "unresolved_count": 0, "source_label": "固定消息快照"},
+        },
+        "decision": {"tone": "ok", "confidence": "中", "alignment": "有主线", "primary_action": "观察承接",
+            "explanation": "固定快照", "focus_industries": ["稳步主线"], "avoid_industries": [], "source_note": "测试",
+            "research_brief": brief},
+        "strategy_overlap": {"items": [], "orphan_items": [], "conflict_items": [], "message": "暂无策略共振"},
+        "latest_radar_snapshot": None,
+        "freshness": {"overall_status": "fresh", "summary": "固定测试快照", "decision_eligible": True, "modules": {}},
+        "page_time": {"is_historical": True, "display_date": "2025-01-12"},
+        "ai_news_brief": {"status": "empty", "news_count": 0, "neutral_focus": [], "risk_focus": [], "message": "固定快照"},
+    }
+
+
 class SectorWebTest(unittest.TestCase):
+    def test_sector_disk_cache_preserves_parallel_updates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "sector-cache.pkl"
+
+            def save(index):
+                save_sector_page_cache(cache_path, (f"202607{index:02d}", "v1"), {"value": index})
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(save, range(1, 9)))
+
+            values = [
+                load_sector_page_cache(cache_path, (f"202607{index:02d}", "v1"))["value"]
+                for index in range(1, 9)
+            ]
+
+        self.assertEqual(values, list(range(1, 9)))
+
     def setUp(self):
         web_app_module._sector_page_cache.clear()
 
@@ -86,7 +160,14 @@ class SectorWebTest(unittest.TestCase):
         return db_path
 
     def test_sector_radar_service_builds_user_facing_buckets(self):
-        radar = build_sector_radar(self.make_history_db(), end_date="20250112", min_stocks=3)
+        history_db = self.make_history_db()
+        connection = sqlite3.connect(history_db)
+        try:
+            stock_basic = pd.read_sql_query("select * from stock_basic", connection)
+        finally:
+            connection.close()
+        with patch("sector_heat_diagnostics.load_stock_basic_snapshot", return_value=stock_basic):
+            radar = build_sector_radar(history_db, end_date="20250112", min_stocks=3)
 
         self.assertEqual(radar["end_date"], "20250112")
         self.assertEqual(radar["summary"]["market_line"], "有主线")
@@ -102,7 +183,8 @@ class SectorWebTest(unittest.TestCase):
     def test_sector_page_renders_market_radar(self):
         client = TestClient(app)
 
-        response = client.get("/sectors")
+        with patch("web_app.app._get_sector_page_payload", return_value=stable_sector_page_payload()):
+            response = client.get("/sectors")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("市场雷达", response.text)
@@ -121,7 +203,8 @@ class SectorWebTest(unittest.TestCase):
     def test_sector_page_renders_market_radar_v2_sections(self):
         client = TestClient(app)
 
-        response = client.get("/sectors")
+        with patch("web_app.app._get_sector_page_payload", return_value=stable_sector_page_payload()):
+            response = client.get("/sectors")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("market-radar-v2-brief", response.text)
@@ -164,9 +247,11 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("更新行情并刷新雷达", response.text)
 
     def test_sector_update_button_starts_radar_refresh_and_returns_to_page(self):
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 41000))
 
-        with patch("web_app.app.start_web_update") as start_update:
+        with patch.dict(os.environ, {"STOCK_WEB_ALLOW_LOCAL_WRITE": "1"}), patch(
+            "web_app.app.start_web_update"
+        ) as start_update:
             start_update.return_value = {"state": "running", "started": True}
             response = client.post("/sectors/update", follow_redirects=False)
 
@@ -175,9 +260,11 @@ class SectorWebTest(unittest.TestCase):
         start_update.assert_called_once_with(mode="radar")
 
     def test_sector_update_button_can_start_without_page_redirect_for_ajax(self):
-        client = TestClient(app)
+        client = TestClient(app, client=("127.0.0.1", 41000))
 
-        with patch("web_app.app.start_web_update") as start_update:
+        with patch.dict(os.environ, {"STOCK_WEB_ALLOW_LOCAL_WRITE": "1"}), patch(
+            "web_app.app.start_web_update"
+        ) as start_update:
             start_update.return_value = {"state": "running", "started": True, "mode": "radar"}
             response = client.post("/sectors/update", headers={"Accept": "application/json"})
 
@@ -269,7 +356,7 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("radar-refresh-strip", response.text)
         self.assertIn("历史复盘", response.text)
-        self.assertIn("今日新增催化", response.text)
+        self.assertTrue("今日新增催化" in response.text or "该历史日新增催化" in response.text)
         self.assertIn("风险阻断", response.text)
         self.assertIn("背景消息", response.text)
         self.assertIn('id="key-events"', response.text)
@@ -330,9 +417,12 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(radar["concepts"]["items"][0]["heat_text"], "88.5")
         self.assertEqual(radar["theme_filter"]["items"][0]["theme"], "AI")
         self.assertEqual(radar["theme_filter"]["items"][0]["level"], "strong")
-        self.assertEqual(radar["news"]["positive"][0]["industry"], "Software")
-        self.assertEqual(radar["news"]["positive"][0]["top_stocks"][0]["ts_code"], "000001.SZ")
-        self.assertEqual(radar["news"]["negative"][0]["industry"], "Property")
+        history = radar["historical_signal_context"]
+        self.assertEqual(history["source_date"], "20260616")
+        self.assertEqual(history["positive"][0]["industry"], "Software")
+        self.assertEqual(history["positive"][0]["top_stocks"][0]["ts_code"], "000001.SZ")
+        self.assertEqual(history["negative"][0]["industry"], "Property")
+        self.assertEqual(radar["news"]["positive"], [])
 
     def test_sector_radar_exposes_display_counts_and_anchors(self):
         heat_rows = []
@@ -409,6 +499,10 @@ class SectorWebTest(unittest.TestCase):
                 """
                 {
                   "date": "20260616",
+                  "generated_at": "2026-06-16 15:00:00",
+                  "raw_news": [
+                    {"title": "AI算力政策继续支持", "publish_time": "2026-06-16 10:00:00", "source": "测试来源"}
+                  ],
                   "items": [
                     {"news": "AI算力政策继续支持", "sectors": ["计算机"], "impact": "positive", "strength": 8, "reason": "政策催化"}
                   ],
@@ -432,6 +526,13 @@ class SectorWebTest(unittest.TestCase):
                 """
                 {
                   "date": "20260616",
+                  "generated_at": "2026-06-16 15:00:00",
+                  "raw_news": [
+                    {"title": "两部门推动设备更新，电力设备和机械设备需求提升", "publish_time": "2026-06-16 09:00:00", "source": "测试来源"},
+                    {"title": "银行转债融资压力升温", "publish_time": "2026-06-16 10:00:00", "source": "测试来源"},
+                    {"title": "普通公司动态不构成行业催化", "publish_time": "2026-06-16 11:00:00", "source": "测试来源"},
+                    {"title": "重复报道：设备更新政策继续推进", "publish_time": "2026-06-16 12:00:00", "source": "测试来源"}
+                  ],
                   "titles": [
                     "两部门推动设备更新，电力设备和机械设备需求提升",
                     "银行转债融资压力升温",
@@ -490,6 +591,12 @@ class SectorWebTest(unittest.TestCase):
                 """
                 {
                   "date": "20260616",
+                  "generated_at": "2026-06-16 15:00:00",
+                  "raw_news": [
+                    {"title": "设备更新项目清单下达", "publish_time": "2026-06-16 09:00:00", "source": "测试来源"},
+                    {"title": "设备更新项目清单下达", "publish_time": "2026-06-16 09:05:00", "source": "测试来源"},
+                    {"title": "银行转债融资压力升温", "publish_time": "2026-06-16 10:00:00", "source": "测试来源"}
+                  ],
                   "titles": [
                     "设备更新项目清单下达",
                     "设备更新项目清单下达",
@@ -892,13 +999,14 @@ class SectorWebTest(unittest.TestCase):
         self.assertIn("\u98ce\u9669\u963b\u65ad", response.text)
         self.assertIn("\u6682\u505c\u65b0\u5173\u6ce8", response.text)
         self.assertIn("\u98ce\u9669\u4f18\u5148", response.text)
-        self.assertIn("\u4eca\u65e5\u65b0\u589e\u50ac\u5316", response.text)
+        self.assertTrue("今日新增催化" in response.text or "该历史日新增催化" in response.text)
         self.assertIn("\u6765\u6e90\u5f85\u6838\u9a8c", response.text)
         self.assertIn("\u5229\u7a7a A\u7ea7", response.text)
         self.assertIn("A\u7ea7\u5229\u7a7a\uff1a\u53ef\u80fd\u6539\u53d8\u677f\u5757\u98ce\u9669\u504f\u597d", response.text)
         self.assertIn("\u539f\u59cb\u5a92\u4f53\uff1a\u8d22\u8054\u793e", response.text)
         self.assertIn("\u91c7\u96c6\u901a\u9053\uff1a\u65b0\u95fb\u7f13\u5b58", response.text)
-        self.assertIn('href="#thesis-\u8ba1\u7b97\u673a', response.text)
+        self.assertIn('href="#mainline-view"', response.text)
+        self.assertIn('id="mainline-view"', response.text)
         self.assertIn('href="https://example.com/ai"', response.text)
         self.assertIn('class="event-title-link"', response.text)
         self.assertIn("\u53d1\u5e03\uff1a2026-06-22 09:15:00", response.text)
@@ -1409,6 +1517,14 @@ class SectorWebTest(unittest.TestCase):
                 json.dumps(
                     {
                         "date": "20260622",
+                        "generated_at": "2026-06-22 15:00:00",
+                        "raw_news": [
+                            {
+                                "title": "AI export improves",
+                                "publish_time": "2026-06-22 09:00:00",
+                                "source": "test source",
+                            }
+                        ],
                         "titles": ["AI export improves"],
                         "items": [
                             {
@@ -1443,10 +1559,11 @@ class SectorWebTest(unittest.TestCase):
                 json.dumps(
                     {
                         "date": "20260721",
+                        "generated_at": "2026-07-21 15:00:00",
                         "raw_news_total": 4,
                         "raw_news": [
-                            {"title": "新闻甲", "source": "来源A"},
-                            {"title": "新闻乙", "source": "来源B"},
+                            {"title": "新闻甲", "source": "来源A", "publish_time": "2026-07-21 09:00:00"},
+                            {"title": "新闻乙", "source": "来源B", "publish_time": "2026-07-21 10:00:00"},
                         ],
                         "ai_titles": ["新闻甲", "新闻乙", "新闻丙"],
                         "items": [
@@ -1459,14 +1576,38 @@ class SectorWebTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            cache_path = cache_dir / "news_sector_20260721.json"
+            cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            cache_payload["items"] = [
+                {
+                    "news": cache_payload["raw_news"][0]["title"],
+                    "impact": "positive",
+                    "sectors": ["test-positive"],
+                    "type": "policy",
+                    "strength": 7,
+                    "duration": "1w",
+                    "reason": "test positive",
+                },
+                {
+                    "news": cache_payload["raw_news"][1]["title"],
+                    "impact": "negative",
+                    "sectors": ["test-negative"],
+                    "type": "regulation",
+                    "strength": 6,
+                    "duration": "1w",
+                    "reason": "test negative",
+                },
+            ]
+            cache_path.write_text(json.dumps(cache_payload, ensure_ascii=False), encoding="utf-8")
 
-            radar = sector_service.build_concept_news_radar(cache_dir=cache_dir, today="20260721")
+            radar = build_concept_news_radar(cache_dir=cache_dir, today="20260721")
 
         health = radar["pipeline_health"]
         self.assertEqual(health["source_state"], "live")
         self.assertEqual(health["ai_status"], "ok")
         self.assertEqual(health["raw_count"], 4)
-        self.assertEqual(health["ai_candidate_count"], 3)
+        # 没有原始新闻证据的“新闻丙”不会被计入有效 AI 候选。
+        self.assertEqual(health["ai_candidate_count"], 2)
         self.assertEqual(health["mapped_count"], 2)
         self.assertEqual(health["positive_count"], 1)
         self.assertEqual(health["negative_count"], 1)
@@ -1512,10 +1653,12 @@ class SectorWebTest(unittest.TestCase):
         self.assertEqual(radar["news"]["source_date"], "20260714")
         self.assertEqual(len(radar["news"]["items"]), 1)
         self.assertEqual(radar["news"]["items"][0]["title"], "AI infrastructure project approved")
-        self.assertEqual(radar["news"]["items"][0]["impact"], "neutral")
+        self.assertEqual(radar["news"]["items"][0]["impact"], "mixed")
         self.assertEqual(radar["news"]["positive"], [])
-        self.assertEqual(radar["news"]["negative"], [])
-        self.assertIn("does not affect sector scores", radar["news"]["message"])
+        history = radar["historical_signal_context"]
+        self.assertIsNone(history["source_date"])
+        self.assertEqual(history["positive"], [])
+        self.assertEqual(history["negative"], [])
 
     def test_strategy_overlap_empty_db_returns_stable_bucket_schema(self):
         overlap = build_strategy_overlap(

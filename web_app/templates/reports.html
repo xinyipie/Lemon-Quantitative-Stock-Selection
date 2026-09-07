@@ -10,12 +10,13 @@
     </div>
   </header>
 
-  <form class="report-search" method="get" action="/reports">
+  <form class="report-search" method="get" action="{{ app_url_for(request, 'report_archive').path }}" data-date-range-form>
     <label>关键词<input name="q" value="{{ query }}" placeholder="公司、行业、事件或风险"></label>
     <label>开始日期<input type="date" name="start" value="{{ start|fmt_date_input }}"></label>
     <label>结束日期<input type="date" name="end" value="{{ end|fmt_date_input }}"></label>
     <button type="submit">查询</button>
   </form>
+  <p class="filter-summary warn" role="alert" data-date-range-error {% if not date_error %}hidden{% endif %}>{{ date_error }}</p>
 
   {% if items %}
   <ol class="report-archive__list">
@@ -23,7 +24,7 @@
     <li>
       <time datetime="{{ item.report_date }}">{{ item.report_date|fmt_date }}</time>
       <div>
-        <h2><a href="/reports/{{ item.report_date }}">{{ item.title }}</a></h2>
+        <h2><a href="{{ app_url_for(request, 'report_detail', report_date=item.report_date).path }}">{{ item.title }}</a></h2>
         <p>{{ item.snippet }}</p>
         <small>行情截至 {{ item.market_date|fmt_date }}</small>
       </div>
@@ -34,4 +35,20 @@
   <p class="empty-state">当前条件下没有找到报告。</p>
   {% endif %}
 </div>
+<script>
+(() => {
+  const form = document.querySelector("[data-date-range-form]");
+  const errorBox = document.querySelector("[data-date-range-error]");
+  if (!form || !errorBox) return;
+  form.addEventListener("submit", (event) => {
+    const start = form.querySelector("[name='start']").value;
+    const end = form.querySelector("[name='end']").value;
+    if (start && end && start > end) {
+      event.preventDefault();
+      errorBox.hidden = false;
+      errorBox.textContent = "开始日期不能晚于结束日期";
+    }
+  });
+})();
+</script>
 {% endblock %}

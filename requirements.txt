@@ -8,6 +8,8 @@ akshare>=1.18.0
 # 数据处理
 pandas>=2.0.0
 numpy>=1.24.0
+pyarrow>=16.0.0
+scipy>=1.13.0
 
 # HTTP请求
 requests>=2.28.0
@@ -16,6 +18,6 @@ requests>=2.28.0
 fastapi>=0.110.0
 uvicorn>=0.27.0
 jinja2>=3.1.0
+filelock>=3.16.0
 
-# 可选：更快的HTTP客户端
-# httpx>=0.24.0
+# 模型研究依赖见 requirements-research.txt

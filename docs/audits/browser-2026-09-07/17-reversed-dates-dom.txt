@@ -1,0 +1,184 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals?strategy=all
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - generic: Short Decision Desk
+  - heading "短线复盘" [level=1]
+  - paragraph: 先看今天有没有值得跟踪的信号，再用已满5日样本检验策略。实盘记录与历史回测分开呈现，避免把事后收益误认为今日推荐。
+  - heading "同步状态" [level=2]
+  - paragraph: 同步任务运行时，本页会继续监听进度；任务完成后自动刷新当前数据。
+  - generic: 当前状态：同步任务已完成，但数据未对齐：行情滞后。（完成于 2026-07-01 11:18:25）
+  - generic: Today's Short Decision
+  - heading "今日不宜勉强出手" [level=2]
+  - paragraph: 最新运行没有强推荐或观察候选。空着也是策略的一部分，先保护本金和注意力。
+  - generic: 信号日 2026-07-23
+  - generic: 无入池标的
+  - generic: v9 底层 + v39 强推荐
+  - generic "短线核心复盘指标":
+    - generic: 5日胜率
+    - strong: "-"
+    - text: 0 个满期样本
+    - generic: 平均5日收益
+    - strong: "-"
+    - text: 当前筛选样本
+    - generic: 盘中平均机会
+    - strong: "-"
+    - text: MFE
+    - generic: 机会 / 风险比
+    - strong: "-"
+    - text: 平均回撤 -
+  - generic: Strong Shortlist
+  - heading "今日无强推荐" [level=2]
+  - paragraph: 最新实盘已运行，但 v39 强推荐层没有放行标的。空着也是策略的一部分。
+  - generic: 信号日
+  - strong: 2026-07-23
+  - generic: 候选 0 / 强推荐 0
+  - generic: 最新实盘已运行，但 v39 强推荐层没有放行标的。空着也是策略的一部分。
+  - generic: 正式层只看 v39/T1 高置信信号
+  - generic: T3/T5 保留观察，不直接进入强推荐
+  - generic: 没有强推荐时不硬推股票
+  - generic: Observe Candidates
+  - heading "今日无观察候选" [level=2]
+  - paragraph: 观察层已运行，但没有通过 best_balance 扩展规则的标的。
+  - generic: 信号日
+  - strong: 2026-07-23
+  - generic: 候选 0 / 非强推荐
+  - generic: 观察层已运行，但没有通过 best_balance 扩展规则的标的。
+  - generic: 观察候选不进入强推荐统计
+  - generic: 最多 Top2，先看真实 T+1/T+3/T+5
+  - generic: 确认变弱就放弃，不为补数量硬推
+  - generic "真实实盘推送记录 最近 10 条，点击展开":
+    - generic: 真实实盘推送记录
+    - generic: 最近 10 条，点击展开
+  - generic: Five-Day Results
+  - heading "历史信号结果" [level=2]
+  - paragraph: 默认先看已经走满5个交易日的样本。红色表示上涨，绿色表示下跌；MFE是盘中最大机会，MAE是持有过程最大回撤。
+  - region "短线策略切换":
+    - link "全部策略 综合视图 汇总三套短线口径，重复命中不会合并丢失。 857 历史信号 45.9% 5日正收益 +0.31% 平均5日":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&view=completed&q=&start=20260630&end=20260101&industry=&page=1
+      - generic: ▦
+      - strong: 全部策略
+      - generic: 综合视图
+      - paragraph: 汇总三套短线口径，重复命中不会合并丢失。
+      - generic: "857"
+      - generic: 历史信号
+      - generic: 45.9%
+      - generic: 5日正收益
+      - generic: +0.31%
+      - generic: 平均5日
+    - link "稳健共振 正式策略 v9 稳健评分与 v39 高置信层共振。 745 历史信号 42.7% 5日正收益 -0.14% 平均5日":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=steady&view=completed&q=&start=20260630&end=20260101&industry=&page=1
+      - generic: ◇
+      - strong: 稳健共振
+      - generic: 正式策略
+      - paragraph: v9 稳健评分与 v39 高置信层共振。
+      - generic: "745"
+      - generic: 历史信号
+      - generic: 42.7%
+      - generic: 5日正收益
+      - generic: "-0.14%"
+      - generic: 平均5日
+    - link "均衡观察 观察候选 扩展候选层，等待量价进一步确认。 0 历史信号 待积累 5日正收益 待积累 平均5日":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=balance&view=completed&q=&start=20260630&end=20260101&industry=&page=1
+      - generic: ↔
+      - strong: 均衡观察
+      - generic: 观察候选
+      - paragraph: 扩展候选层，等待量价进一步确认。
+      - generic: "0"
+      - generic: 历史信号
+      - generic: 待积累
+      - generic: 5日正收益
+      - generic: 待积累
+      - generic: 平均5日
+    - link "逆风修复 影子试运行 弱势、反弹与回撤环境中的质量动量修复。 112 历史信号 66.1% 5日正收益 +3.09% 平均5日":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=repair&view=completed&q=&start=20260630&end=20260101&industry=&page=1
+      - generic: ↻
+      - strong: 逆风修复
+      - generic: 影子试运行
+      - paragraph: 弱势、反弹与回撤环境中的质量动量修复。
+      - generic: "112"
+      - generic: 历史信号
+      - generic: 66.1%
+      - generic: 5日正收益
+      - generic: +3.09%
+      - generic: 平均5日
+  - generic: 股票代码或中文名
+  - generic: 开始日期
+  - generic: 结束日期
+  - generic: 行业
+  - textbox "股票代码或中文名"
+  - textbox "开始日期": 2026-06-30
+  - textbox "结束日期": 2026-01-01
+  - textbox "行业":
+    - /placeholder: 行业，可留空
+  - button "筛选"
+  - link "重置":
+    - /url: /stock/signals?strategy=all
+  - generic "短线结果快捷筛选":
+    - link "已满5日 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=completed&page=1
+      - text: 已满5日
+      - generic: "0"
+    - link "观察中 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=pending&page=1
+      - text: 观察中
+      - generic: "0"
+    - link "盈利 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=winning&page=1
+      - text: 盈利
+      - generic: "0"
+    - link "亏损 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=losing&page=1
+      - text: 亏损
+      - generic: "0"
+    - link "高回撤 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=risk&page=1
+      - text: 高回撤
+      - generic: "0"
+    - link "全部 0":
+      - /url: http://127.0.0.1:8766/stock/signals?strategy=all&q=&start=2026-06-30&end=2026-01-01&industry=&view=all&page=1
+      - text: 全部
+      - generic: "0"
+  - generic: 当前显示 0 条
+  - region "历史短线结果":
+    - table:
+      - rowgroup:
+        - row "股票 / 信号日 评分 基准买入价 自推荐至今最低价 自推荐至今最高价 最新价 / 浮盈亏 3日最终收益 5日最终收益 8日最终收益 盘中机会 / 最大回撤 最终结论":
+          - columnheader "股票 / 信号日"
+          - columnheader "评分"
+          - columnheader "基准买入价"
+          - columnheader "自推荐至今最低价"
+          - columnheader "自推荐至今最高价"
+          - columnheader "最新价 / 浮盈亏"
+          - columnheader "3日最终收益"
+          - columnheader "5日最终收益"
+          - columnheader "8日最终收益"
+          - columnheader "盘中机会 / 最大回撤"
+          - columnheader "最终结论"
+      - rowgroup:
+        - row "当前条件没有匹配的短线结果。":
+          - cell "当前条件没有匹配的短线结果。":
+            - generic: 当前条件没有匹配的短线结果。
+  - navigation "短线复盘分页":
+    - generic: 第 1 / 1 页 · 第 0-0 条，共 0 条

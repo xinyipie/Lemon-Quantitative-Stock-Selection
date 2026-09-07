@@ -9,6 +9,8 @@ import pandas as pd
 from history_store import HistoryStore
 from signal_store import SignalRecord, SignalStore
 from web_app.services.explanation_service import (
+    ExplanationCacheBusyError,
+    _read_cached,
     build_fallback_explanation,
     build_fallback_daily_brief,
     get_or_create_daily_brief,
@@ -17,6 +19,22 @@ from web_app.services.explanation_service import (
 
 
 class ExplanationServiceTest(unittest.TestCase):
+    def test_cached_read_reports_an_exclusive_database_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "signals.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "create table ai_analysis_documents(cache_key text primary key, doc_json text, source text)"
+            )
+            conn.commit()
+            conn.execute("begin exclusive")
+            try:
+                with self.assertRaises(ExplanationCacheBusyError):
+                    _read_cached("signal:20260618:000001.SZ", db_path)
+            finally:
+                conn.rollback()
+                conn.close()
+
     def test_fallback_daily_brief_summarizes_current_dashboard_facts(self):
         facts = {
             "trade_date": "20260618",
@@ -402,12 +420,14 @@ class ExplanationServiceTest(unittest.TestCase):
             )
             conn = sqlite3.connect(signal_db)
             try:
-                migrated = conn.execute("select count(*) from ai_analysis_documents").fetchone()[0]
+                migrated_table = conn.execute(
+                    "select name from sqlite_master where type='table' and name='ai_analysis_documents'"
+                ).fetchone()
             finally:
                 conn.close()
 
         self.assertEqual(result["source"], "cache")
-        self.assertEqual(migrated, 1)
+        self.assertIsNone(migrated_table)
         self.assertEqual(result["doc"]["title"], legacy_doc["title"])
 
 

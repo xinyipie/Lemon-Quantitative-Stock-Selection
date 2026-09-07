@@ -95,7 +95,10 @@ def build_walk_forward_predictions(frame: pd.DataFrame) -> dict[int, tuple[pd.Da
         training = work.loc[work["year"].le(target_year - 2)].copy()
         calibration = work.loc[work["year"].eq(calibration_year)].copy()
         target = work.loc[work["year"].eq(target_year)].copy()
-        estimator = fit_model(training)
+        estimator = fit_model(
+            training,
+            prediction_start_date=f"{calibration_year}0101",
+        )
         result[target_year] = (
             daily_top_with_margin(_predict(estimator, calibration)),
             daily_top_with_margin(_predict(estimator, target)),

@@ -3,7 +3,7 @@
 ===========================
 设计原则：
   1. 严格避免未来函数：选股只用 T 日收盘前可知信息，买入用 T+1 开盘价
-  2. 涨跌停处理：次日开盘涨停则跳过不买，当日跌停按跌停价止损
+  2. 涨跌停处理：次日开盘涨停则跳过不买，封死跌停时延期退出
   3. 按需批量预取：每个回测日一次性批量拉取，不逐股请求
   4. 复现实盘逻辑：直接调用 main.py 的 get_all_stocks / select_stock_pool
   5. 指标完整：胜率、盈亏比、最大回撤、夏普比率、vs 沪深300超额
@@ -115,6 +115,29 @@ LIMIT_UP_THRESHOLD   =  9.8  # 涨停判断阈值（%）
 LIMIT_DOWN_THRESHOLD = -9.8  # 跌停判断阈值（%）
 
 
+class UnfilledExitError(RuntimeError):
+    """退出指令因封死跌停无法成交，回测结果不完整。"""
+
+    def __init__(
+        self,
+        ts_code: str,
+        pending_exit_reason: str,
+        pending_since: str,
+        last_date: Optional[str],
+        last_price: Optional[float],
+    ):
+        message = (
+            f"unfilled_limit_down: {ts_code} 自 {pending_since} 起触发"
+            f"{pending_exit_reason}，截至 {last_date or 'N/A'} 仍无法成交"
+        )
+        super().__init__(message)
+        self.ts_code = ts_code
+        self.pending_exit_reason = pending_exit_reason
+        self.pending_since = pending_since
+        self.last_date = last_date
+        self.last_price = last_price
+
+
 # ==================== 工具函数 ====================
 
 def get_trade_dates(pro, start_date: str, end_date: str) -> List[str]:
@@ -152,7 +175,7 @@ def get_index_daily(pro, ts_code: str, start_date: str, end_date: str) -> pd.Dat
 def fetch_next_day_prices(pro, ts_codes: List[str], trade_date: str) -> pd.DataFrame:
     """
     批量获取指定日期的开盘/最高/最低/收盘/涨跌幅，用于模拟交易。
-    返回 DataFrame，列：ts_code, open, high, low, close, pct_chg
+    返回 DataFrame，列：ts_code, open, high, low, close, pre_close, pct_chg
 
     离线模式（LocalDataProxy）：直接读整个日文件，不按 ts_code 过滤，
     避免多个 select_date 共享同一 buy_date/hold_date 时缓存数据残缺。
@@ -163,7 +186,7 @@ def fetch_next_day_prices(pro, ts_codes: List[str], trade_date: str) -> pd.DataF
         try:
             df = pro.daily(
                 trade_date=trade_date,
-                fields='ts_code,open,high,low,close,pct_chg'
+                fields='ts_code,open,high,low,close,pre_close,pct_chg'
             )
             # 防御：某些 parquet 文件可能不含 ts_code 列，导致下游 KeyError
             if not df.empty and 'ts_code' not in df.columns:
@@ -183,7 +206,7 @@ def fetch_next_day_prices(pro, ts_codes: List[str], trade_date: str) -> pd.DataF
             df = pro.daily(
                 ts_code=",".join(batch),
                 trade_date=trade_date,
-                fields='ts_code,open,high,low,close,pct_chg'
+                fields='ts_code,open,high,low,close,pre_close,pct_chg'
             )
             if not df.empty:
                 all_dfs.append(df)
@@ -453,7 +476,8 @@ class BacktestV2:
                     trade_date=trade_date,
                     short_filter_profile=self.short_filter_profile,
                     enable_news=False,      # 回测不拉新闻
-                    include_longterm=False  # 短线回测不执行波段模块
+                    include_longterm=False,  # 短线回测不执行波段模块
+                    apply_market_gates=getattr(self, 'use_market_timing', True),
                 )
                 actual_date    = sel['trade_date']
                 operation_mode = sel['operation_mode']
@@ -486,7 +510,7 @@ class BacktestV2:
                     logger.info(f"  [{actual_date}] 大盘择时：{sentiment_data.get('decision_reason','空仓')}，跳过")
                     return [], []
 
-                if stock_pool.empty or position_multiplier == 0:
+                if stock_pool.empty or (self.use_market_timing and position_multiplier == 0):
                     logger.info(f"  [{actual_date}] 短线选股结果为空或仓位乘数=0，跳过")
                     return [], []
 
@@ -501,8 +525,9 @@ class BacktestV2:
                         axis=1
                     )
                     score_col = 'experiment_score'
-                effective_top_n = int(round(self.top_n * position_multiplier)) if position_multiplier > 0 else 0
-                effective_top_n = max(1, effective_top_n) if position_multiplier > 0 else 0
+                effective_multiplier = position_multiplier if self.use_market_timing else 1.0
+                effective_top_n = int(round(self.top_n * effective_multiplier)) if effective_multiplier > 0 else 0
+                effective_top_n = max(1, effective_top_n) if effective_multiplier > 0 else 0
                 if effective_top_n == 0:
                     logger.info(f"  [{actual_date}] 仓位乘数为0，跳过")
                     return [], []
@@ -603,6 +628,9 @@ class BacktestV2:
                 )
                 return result, ic_pool
 
+            except stock_main.PointInTimeDataError:
+                # 缺少历史证据不能降级为空候选，否则会生成失真的成功报表。
+                raise
             except Exception as e:
                 if attempt < retries:
                     wait = 0 if self._is_offline else 10 * (attempt + 1)  # 离线模式不等待
@@ -647,12 +675,12 @@ class BacktestV2:
           + 跳空高开（T+1开盘已超目标价）：直接以开盘价止盈
 
         涨跌停规则：
-          - 买入日开盘涨停（pct_chg >= 9.8）：无法买入，跳过
-          - 持有期触止损：用盘中最低价判断，非跌停按止损价成交
-          - 持有期触止盈：用盘中最高价判断；若当日涨停封板无法卖出，
-            顺延到次日开盘卖出（更贴近实盘）
-          - 持有期满：收盘卖出；若当日涨停，同样顺延次日开盘
-          - 回测末尾仍在持仓：取可用的最后一日收盘价强制平仓
+          - 买入日开盘达到涨停价：无法买入，跳过
+          - 持有期触止损：先按前一日已知止损判断；跳空穿越时按开盘价成交
+          - 封死跌停：保留退出意图，首个可成交日按开盘价退出
+          - 持有期触止盈：用盘中最高价判断；已有持仓的卖单可向涨停买盘成交
+          - 持有期满：按收盘价退出；只有封死跌停才延后到可成交开盘
+          - 回测末尾仍封死跌停：抛出未成交异常并中止，不虚构平仓价格
 
         返回 None 表示此笔交易无效（无法买入）。
         """
@@ -667,14 +695,23 @@ class BacktestV2:
 
         row = row.iloc[0]
         buy_open = float(row['open'])
-        buy_pct   = float(row['pct_chg'])
-
-        # 买入日开盘已涨停，无法买入
-        if buy_pct >= LIMIT_UP_THRESHOLD:
-            logger.debug(f"    {ts_code} {buy_date} 开盘涨停，跳过")
+        if buy_open <= 0:
             return None
 
-        if buy_open <= 0:
+        # 开盘准入只能使用开盘时已知的价格。优先使用精确涨停价；旧历史数据
+        # 没有涨停价时用前收盘和常规阈值估算，二者都缺失则保留交易而不倒推收盘结果。
+        up_limit = float(row.get('up_limit', 0) or 0)
+        pre_close = float(row.get('pre_close', 0) or 0)
+        if up_limit > 0:
+            open_at_limit_up = buy_open >= up_limit - 0.001
+        elif pre_close > 0:
+            open_gap_pct = (buy_open / pre_close - 1) * 100
+            open_at_limit_up = open_gap_pct >= LIMIT_UP_THRESHOLD
+        else:
+            open_at_limit_up = False
+
+        if open_at_limit_up:
+            logger.debug(f"    {ts_code} {buy_date} 开盘涨停，跳过")
             return None
 
         # ── 路线B：次日开盘确认过滤 ──
@@ -751,8 +788,11 @@ class BacktestV2:
         base_trailing_pct = self.trailing_stop_pct
         signal_row = signal_row if signal_row is not None else pd.Series(dtype='float64')
 
-        # 用于涨停顺延：标记是否待次日开盘卖出
-        pending_sell_open: Optional[str] = None   # 顺延卖出的日期
+        # 所有未成交退出共用同一状态，直到首个有行情且非封死跌停的开盘。
+        pending_exit_reason: Optional[str] = None
+        pending_exit_date: Optional[str] = None
+        last_observed_date: Optional[str] = None
+        last_observed_price: Optional[float] = None
 
         # 连续弱收盘计数（close_pos < 0.25，即收盘价在当日区间下1/4以内）
         consecutive_weak_closes = 0
@@ -760,24 +800,6 @@ class BacktestV2:
         consecutive_no_data = 0
 
         for day_idx, check_date in enumerate(hold_dates, start=1):
-
-            # ── 涨停顺延：上一日触止盈/持满但涨停，今日开盘卖出 ──
-            if pending_sell_open == check_date:
-                day_df = price_cache.get(check_date)
-                if day_df is not None and not day_df.empty and 'ts_code' in day_df.columns:
-                    row_p = day_df[day_df['ts_code'] == ts_code]
-                    if not row_p.empty:
-                        open_sell = float(row_p.iloc[0]['open'])
-                        profit_pct = (open_sell - buy_price) / buy_price * 100
-                        return self._build_result(
-                            ts_code, buy_date, buy_price, check_date, open_sell,
-                            profit_pct, day_idx, 'take_profit_next_open', track_type
-                        )
-                # 数据缺失时退化：用买入价平仓（保守）
-                return self._build_result(
-                    ts_code, buy_date, buy_price, check_date, buy_price,
-                    0.0, day_idx, 'take_profit_next_open', track_type
-                )
 
             day_df = price_cache.get(check_date)
             if day_df is None or day_df.empty or 'ts_code' not in day_df.columns:
@@ -791,17 +813,9 @@ class BacktestV2:
 
             row_d = row_d.iloc[0]
 
-            # ── 停牌保护：连续≥2个交易日无数据（停牌），复牌当日立即出场 ──
-            # 防止停牌复牌后大幅低开造成灾难性亏损（如百傲化学 -31%）
-            if consecutive_no_data >= 2:
-                resume_close = float(row_d['close'])
-                profit_pct = (resume_close - buy_price) / buy_price * 100
-                consecutive_no_data = 0
-                return self._build_result(
-                    ts_code, buy_date, buy_price, check_date, resume_close,
-                    profit_pct, day_idx, 'suspended_exit', track_type
-                )
+            missing_days_before_resume = consecutive_no_data
             consecutive_no_data = 0
+            day_open  = float(row_d['open'])
             day_high  = float(row_d['high'])
             day_low   = float(row_d['low'])
             day_close = float(row_d['close'])
@@ -809,6 +823,68 @@ class BacktestV2:
             is_limit_up   = day_pct >= LIMIT_UP_THRESHOLD
             is_limit_down = day_pct <= LIMIT_DOWN_THRESHOLD
             is_last_day   = (day_idx == len(hold_dates))
+            down_limit = float(row_d.get('down_limit', 0) or 0)
+            if down_limit > 0:
+                is_limit_down = day_close <= down_limit + 0.001
+            # 日线只能在全天无价格波动且价格位于跌停位时证明“封死”。
+            locked_limit_down = (
+                is_limit_down
+                and max(day_open, day_high, day_low, day_close)
+                - min(day_open, day_high, day_low, day_close) <= 0.001
+            )
+            if day_close > 0:
+                last_observed_date = check_date
+                last_observed_price = day_close
+
+            # 已产生的退出意图必须先验证成交可行性，不能因路径不同绕过跌停检查。
+            if pending_exit_reason is not None:
+                if locked_limit_down or day_open <= 0:
+                    continue
+                profit_pct = (day_open - buy_price) / buy_price * 100
+                delayed_reason = pending_exit_reason
+                if delayed_reason != 'take_profit_next_open':
+                    delayed_reason = f'{delayed_reason}_after_limit_down'
+                return self._build_result(
+                    ts_code, buy_date, buy_price, check_date, day_open,
+                    profit_pct, day_idx, delayed_reason, track_type
+                )
+
+            # ── 停牌保护：连续≥2个交易日无数据（停牌），复牌当日立即出场 ──
+            # 若复牌仍封死跌停，只记录退出意图并继续等待可成交行情。
+            if missing_days_before_resume >= 2:
+                if locked_limit_down or day_open <= 0:
+                    pending_exit_reason = 'suspended_exit'
+                    pending_exit_date = check_date
+                    continue
+                profit_pct = (day_close - buy_price) / buy_price * 100
+                return self._build_result(
+                    ts_code, buy_date, buy_price, check_date, day_close,
+                    profit_pct, day_idx, 'suspended_exit', track_type
+                )
+
+            # 盘中判断只能使用前一交易日收盘后已经确定的止损价。
+            effective_stop = max(stop_price, trailing_stop)
+            exit_reason = 'trailing_stop' if trailing_stop > stop_price else 'stop_loss'
+            if day_open <= effective_stop:
+                if locked_limit_down:
+                    pending_exit_reason = exit_reason
+                    pending_exit_date = check_date
+                    continue
+                profit_pct = (day_open - buy_price) / buy_price * 100
+                return self._build_result(
+                    ts_code, buy_date, buy_price, check_date, day_open,
+                    profit_pct, day_idx, exit_reason, track_type
+                )
+            if day_low <= effective_stop:
+                if locked_limit_down:
+                    pending_exit_reason = exit_reason
+                    pending_exit_date = check_date
+                    continue
+                profit_pct = (effective_stop - buy_price) / buy_price * 100
+                return self._build_result(
+                    ts_code, buy_date, buy_price, check_date, effective_stop,
+                    profit_pct, day_idx, exit_reason, track_type
+                )
 
             # 当日收盘位置：0=收于最低，1=收于最高
             day_range_val = day_high - day_low
@@ -833,6 +909,15 @@ class BacktestV2:
                 trailing_pct = active_trailing_pct / 100
                 new_trailing = day_close * (1 - trailing_pct)
                 trailing_stop = max(trailing_stop, new_trailing)
+
+            # 盘中限价止盈发生在收盘型退出之前。涨停限制买入，不限制已有持仓卖出。
+            if day_high >= profit_price:
+                actual_sell = profit_price
+                profit_pct = (actual_sell - buy_price) / buy_price * 100
+                return self._build_result(
+                    ts_code, buy_date, buy_price, check_date, actual_sell,
+                    profit_pct, day_idx, 'take_profit', track_type
+                )
 
             # ── 时间动量止损：持仓N天仍未盈利则认错离场 ──
             # 逻辑：波段策略买入后应该很快启动，持仓20天还在亏损说明选错了方向
@@ -887,57 +972,21 @@ class BacktestV2:
                     )
                 # 盈利则继续循环（进入延长期，靠移动止损或弱收盘出场）
 
-            # 有效止损价：固定止损和移动止损取较高值
-            effective_stop = max(stop_price, trailing_stop)
-
-            # ── 止损优先检查（用盘中最低价）──
-            # 涨停日不可能触及止损，无需判断
-            if not is_limit_up and day_low <= effective_stop:
-                if is_limit_down:
-                    # 跌停板无法按止损价成交，按跌停价（盘中最低=跌停价）记录
-                    actual_sell = day_low
-                else:
-                    actual_sell = effective_stop
-                profit_pct = (actual_sell - buy_price) / buy_price * 100
-                exit_reason = 'trailing_stop' if trailing_stop > stop_price else 'stop_loss'
-                return self._build_result(
-                    ts_code, buy_date, buy_price, check_date, actual_sell,
-                    profit_pct, day_idx, exit_reason, track_type
-                )
-
-            # ── 止盈检查（用盘中最高价）──
-            if day_high >= profit_price:
-                if is_limit_up:
-                    # 涨停封板，限价单无法成交，顺延到次日开盘卖出
-                    if day_idx < len(hold_dates):
-                        pending_sell_open = hold_dates[day_idx]  # 下一个持有日
-                        continue
-                    else:
-                        # 已是最后一个持有日且涨停，直接用涨停价（保守）
-                        profit_pct = (day_close - buy_price) / buy_price * 100
-                        return self._build_result(
-                            ts_code, buy_date, buy_price, check_date, day_close,
-                            profit_pct, day_idx, 'take_profit', track_type
-                        )
-                else:
-                    actual_sell = profit_price  # 限价单按止盈价成交
-                    profit_pct = (actual_sell - buy_price) / buy_price * 100
-                    return self._build_result(
-                        ts_code, buy_date, buy_price, check_date, actual_sell,
-                        profit_pct, day_idx, 'take_profit', track_type
-                    )
-
             # ── 最后一天：收盘卖出 ──
             if is_last_day:
                 if is_limit_up:
-                    # 持满但涨停，顺延逻辑：超出 hold_dates 范围，用涨停收盘价平仓
+                    # 持满且涨停时，已有持仓可以卖出，按当日收盘价退出
                     profit_pct = (day_close - buy_price) / buy_price * 100
                     return self._build_result(
                         ts_code, buy_date, buy_price, check_date, day_close,
                         profit_pct, day_idx, 'hold_complete', track_type
                     )
+                elif locked_limit_down:
+                    pending_exit_reason = 'hold_complete'
+                    pending_exit_date = check_date
+                    continue
                 elif is_limit_down:
-                    actual_sell = day_low   # 跌停按跌停价（保守）
+                    actual_sell = day_close
                 else:
                     actual_sell = day_close
                 profit_pct = (actual_sell - buy_price) / buy_price * 100
@@ -945,6 +994,16 @@ class BacktestV2:
                     ts_code, buy_date, buy_price, check_date, actual_sell,
                     profit_pct, day_idx, 'hold_complete', track_type
                 )
+
+        if pending_exit_reason is not None:
+            # 已买入却无法退出时必须中止，避免将未实现亏损混入已平仓统计。
+            raise UnfilledExitError(
+                ts_code=ts_code,
+                pending_exit_reason=pending_exit_reason,
+                pending_since=pending_exit_date or 'N/A',
+                last_date=last_observed_date,
+                last_price=last_observed_price,
+            )
 
         # ── 3. 回测末尾仍持仓：用最后一个有数据的日期收盘价强制平仓 ──
         # 遍历已缓存的持有日，找最近一个有数据的日收盘价
@@ -959,10 +1018,9 @@ class BacktestV2:
             if fd_row.empty:
                 continue
             fd_close = float(fd_row.iloc[0]['close'])
-            fd_pct   = float(fd_row.iloc[0]['pct_chg'])
             if fd_close > 0:
                 last_close_date  = fd
-                last_close_price = fd_row.iloc[0]['low'] if fd_pct <= LIMIT_DOWN_THRESHOLD else fd_close
+                last_close_price = fd_close
                 last_idx = fallback_idx
 
         if last_close_date is not None:
@@ -995,6 +1053,7 @@ class BacktestV2:
             'hold_days':       hold_days,
             'exit_reason':     exit_reason,
             'track_type':      track_type,   # 分轨标记：catchup/pullback/both
+            'is_closed':       True,
         }
 
     def _compute_signal_window_stats(
@@ -1241,6 +1300,7 @@ class BacktestV2:
                     trade['signal_target_price'] = item.get('target_price', 0)
                     trade['signal_stop_price']   = item.get('stop_loss_price', 0)
                     trade['portfolio_slot'] = item.get('portfolio_slot', 0)
+                    trade['max_positions'] = int(getattr(self, 'max_positions', self.top_n))
                     for col in self.candidate_factor_columns:
                         if col in item:
                             trade[col] = item.get(col)
@@ -1343,16 +1403,18 @@ class BacktestV2:
             return {}
 
         total   = len(trades_df)
-        wins    = int((trades_df['profit_pct'] > 0).sum())
-        losses  = int((trades_df['profit_pct'] < 0).sum())
+        net_returns = pd.to_numeric(trades_df['profit_after_fee'], errors='coerce')
+        gross_returns = pd.to_numeric(trades_df['profit_pct'], errors='coerce')
+        wins    = int((net_returns > 0).sum())
+        losses  = int((net_returns < 0).sum())
         flat    = total - wins - losses
 
-        avg_win  = float(trades_df[trades_df['profit_pct'] > 0]['profit_pct'].mean()) if wins  > 0 else 0.0
-        avg_loss = float(trades_df[trades_df['profit_pct'] < 0]['profit_pct'].mean()) if losses > 0 else 0.0
+        avg_win  = float(net_returns[net_returns > 0].mean()) if wins  > 0 else 0.0
+        avg_loss = float(net_returns[net_returns < 0].mean()) if losses > 0 else 0.0
         profit_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else float('inf')
 
         # 最大连续亏损（笔数）—— 按平仓日时序排序后统计
-        sorted_profits = trades_df.sort_values('sell_date')['profit_pct'].tolist()
+        sorted_profits = trades_df.assign(_net_return=net_returns).sort_values('sell_date')['_net_return'].tolist()
         max_consec_loss = 0
         cur_loss = 0
         for p in sorted_profits:
@@ -1430,14 +1492,17 @@ class BacktestV2:
             'loss_trades':          losses,
             'flat_trades':          flat,
             'win_rate':             round(wins / total * 100, 2),
+            'gross_win_trades':     int((gross_returns > 0).sum()),
+            'gross_loss_trades':    int((gross_returns < 0).sum()),
+            'gross_win_rate':       round(float((gross_returns > 0).mean() * 100), 2),
             # 收益
             'avg_profit_pct':       round(float(trades_df['profit_pct'].mean()), 2),
             'avg_profit_after_fee': round(float(trades_df['profit_after_fee'].mean()), 2),
             'avg_win_pct':          round(avg_win,  2),
             'avg_loss_pct':         round(avg_loss, 2),
             'profit_loss_ratio':    round(profit_loss_ratio, 2),
-            'max_single_profit':    round(float(trades_df['profit_pct'].max()), 2),
-            'max_single_loss':      round(float(trades_df['profit_pct'].min()), 2),
+            'max_single_profit':    round(float(net_returns.max()), 2),
+            'max_single_loss':      round(float(net_returns.min()), 2),
             # 风险
             'max_drawdown_pct':     round(max_drawdown, 2),
             'max_consecutive_loss': max_consec_loss,
@@ -1644,12 +1709,13 @@ class BacktestLongterm(BacktestV2):
                     trade_date=trade_date,
                     enable_news=False,   # 回测不拉新闻
                     longterm_profile=self.longterm_profile,
+                    apply_market_gates=getattr(self, 'use_market_timing', True),
                 )
                 actual_date = sel['trade_date']
                 regime      = sel.get('regime', 'BULL_TREND')
 
                 # 波段只在持续牛市/牛市回调开仓；熊市反弹不适合持有1-8周。
-                if regime not in ('BULL_TREND', 'BULL_PULLBACK'):
+                if getattr(self, 'use_market_timing', True) and regime not in ('BULL_TREND', 'BULL_PULLBACK'):
                     logger.info(f"  [{actual_date}] 波段：{regime} 不开仓跳过（仅BULL_TREND/BULL_PULLBACK执行）")
                     return [], []   # 与父类签名一致：(selected_items, ic_pool)
 
@@ -1697,6 +1763,9 @@ class BacktestLongterm(BacktestV2):
                 )
                 return result, candidate_pool
 
+            except stock_main.PointInTimeDataError:
+                # 历史数据缺失必须中止波段回测，重试无法补出时点证据。
+                raise
             except Exception as e:
                 if attempt < retries:
                     wait = 0 if self._is_offline else 10 * (attempt + 1)  # 离线模式不等待

@@ -11,6 +11,8 @@ def test_absolute_training_sample_uses_only_features_and_absolute_target() -> No
     for index in range(10):
         row = {column: float(index) for column in FEATURES}
         row[TARGET] = float(index)
+        row["trade_date"] = f"202001{index + 1:02d}"
+        row["label_exit_date_5d"] = f"202002{index + 1:02d}"
         row["ret_5d_excess"] = -999.0
         rows.append(row)
     result = sample_member_year(pd.DataFrame(rows), 2020, 20260808)

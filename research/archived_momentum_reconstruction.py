@@ -61,7 +61,7 @@ def archive_momentum_eligibility(panel: pd.DataFrame, min_volume_ratio: float) -
         & ma20.gt(ma60)
     )
     if "tradeable" in panel.columns:
-        eligible &= panel["tradeable"].fillna(False).astype(bool)
+        eligible &= market_research._signal_day_tradeable(panel)
     return eligible.fillna(False).astype(bool)
 
 

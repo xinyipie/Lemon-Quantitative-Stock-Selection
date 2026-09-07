@@ -54,8 +54,12 @@ def predict_walkforward_utility(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict
     metadata = {}
     downside_diagnostics = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows(frame, train_years).dropna(subset=[DOWNSIDE_TARGET])
-        target = frame[frame["year"] == predict_year].dropna(subset=FEATURES + [DOWNSIDE_TARGET]).copy()
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        ).dropna(subset=[DOWNSIDE_TARGET])
+        target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
 
         return_model = new_model()
         downside_model = new_model()

@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_walkforward_technical_hgb_excess_target import (
     ALL_YEARS,
     EXCESS_TARGET,
@@ -30,7 +32,13 @@ SEEDS = (20260808, 20260809, 20260810)
 RESEARCH_ID = "clean_walkforward_excess_bagged3_20260808"
 
 
-def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...], seed: int) -> pd.DataFrame:
+def sample_training_rows(
+    frame: pd.DataFrame,
+    years: tuple[int, ...],
+    seed: int,
+    *,
+    prediction_start_date: str | None = None,
+) -> pd.DataFrame:
     """每个集成成员按固定种子独立抽取同等规模年度样本。"""
 
     parts = []
@@ -39,7 +47,11 @@ def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...], seed: int)
         if len(part) > 150_000:
             part = part.sample(n=150_000, random_state=seed + year)
         parts.append(part)
-    return pd.concat(parts, ignore_index=True)
+    return purge_overlapping_label_tail(
+        pd.concat(parts, ignore_index=True),
+        horizon=5,
+        prediction_start_date=prediction_start_date,
+    )
 
 
 def average_predictions(predictions: list[np.ndarray]) -> np.ndarray:
@@ -58,7 +70,12 @@ def predict_walkforward(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         member_predictions = []
         member_rows = []
         for seed in SEEDS:
-            train = sample_training_rows(frame, train_years, seed)
+            train = sample_training_rows(
+                frame,
+                train_years,
+                seed,
+                prediction_start_date=f"{predict_year}0101",
+            )
             model = new_model().set_params(random_state=seed)
             model.fit(train[FEATURES], train[EXCESS_TARGET].clip(-15.0, 15.0))
             member_predictions.append(model.predict(target[FEATURES]))

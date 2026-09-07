@@ -49,7 +49,12 @@ def predict_walkforward(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         member_predictions = []
         member_rows = []
         for seed in SEEDS:
-            train = sample_training_rows(frame, train_years, seed)
+            train = sample_training_rows(
+                frame,
+                train_years,
+                seed,
+                prediction_start_date=f"{predict_year}0101",
+            )
             model = new_model().set_params(random_state=seed)
             model.fit(train[FEATURES], train[EXCESS_TARGET].clip(-15.0, 15.0))
             member_predictions.append(model.predict(target[FEATURES]))

@@ -65,7 +65,8 @@ def _latest_rows(df: pd.DataFrame, end_date: str) -> pd.DataFrame:
     data = data[data["trade_date"] <= end_date].sort_values(["ts_code", "trade_date"])
     if data.empty:
         return data
-    return data.groupby("ts_code", as_index=False).tail(1)
+    latest = data.groupby("ts_code", as_index=False).tail(1)
+    return latest[latest["trade_date"] == end_date].copy()
 
 
 def _benchmark_return(index_daily: pd.DataFrame | None, end_date: str, days: int, code: str = "000300.SH") -> float:
@@ -100,6 +101,8 @@ def _stock_metrics(daily: pd.DataFrame, stock_basic: pd.DataFrame, end_date: str
         if len(closes) < 2:
             continue
         latest = g.iloc[-1]
+        if str(latest["trade_date"]) != end_date:
+            continue
         latest_close = closes[-1]
         recent_closes = closes[-min(20, len(closes)) :]
         ma20 = sum(recent_closes) / len(recent_closes)
@@ -129,6 +132,14 @@ def _stock_metrics(daily: pd.DataFrame, stock_basic: pd.DataFrame, end_date: str
             }
         )
     return pd.DataFrame(rows)
+
+
+def load_stock_basic_snapshot(cache_dir: str | Path, end_date: str) -> pd.DataFrame:
+    """读取指定截面的精确证券主数据，拒绝把当前行业倒灌到历史。"""
+    path = Path(cache_dir) / "stock_basic_history" / f"{_normalize_date(end_date)}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"缺少 {_normalize_date(end_date)} stock_basic 精确快照：{path}")
+    return pd.read_parquet(path)
 
 
 def _classify_sector(row: pd.Series) -> str:
@@ -162,6 +173,7 @@ def calculate_sector_heat(
     if stocks.empty:
         return pd.DataFrame(), stocks
 
+    quality_reasons = []
     latest_basic = _latest_rows(daily_basic, end_date) if daily_basic is not None else pd.DataFrame()
     if not latest_basic.empty:
         stocks = stocks.merge(
@@ -170,6 +182,7 @@ def calculate_sector_heat(
             how="left",
         )
     else:
+        quality_reasons.append("daily_basic_missing")
         stocks["turnover_rate"] = 0.0
         stocks["volume_ratio"] = 1.0
         stocks["total_mv"] = pd.NA
@@ -178,6 +191,7 @@ def calculate_sector_heat(
     if not latest_flow.empty:
         stocks = stocks.merge(latest_flow[["ts_code", "net_mf_amount"]], on="ts_code", how="left")
     else:
+        quality_reasons.append("moneyflow_missing")
         stocks["net_mf_amount"] = 0.0
 
     for col in ["ret_5d", "ret_10d", "ret_20d", "pct_chg", "turnover_rate", "volume_ratio", "net_mf_amount"]:
@@ -189,6 +203,8 @@ def calculate_sector_heat(
     bench5 = _benchmark_return(index_daily, end_date, 5)
     bench10 = _benchmark_return(index_daily, end_date, 10)
     bench20 = _benchmark_return(index_daily, end_date, 20)
+    if index_daily is None or index_daily.empty:
+        quality_reasons.append("benchmark_missing")
 
     grouped = stocks.groupby("industry")
     heat = grouped.agg(
@@ -225,6 +241,13 @@ def calculate_sector_heat(
     heat["heat_score"] = heat["heat_score"].clip(0, 100).round(1)
     heat["stage"] = heat.apply(_classify_sector, axis=1)
     heat["summary"] = heat.apply(_sector_summary, axis=1)
+    quality = "degraded" if quality_reasons else "ok"
+    reasons_text = ",".join(quality_reasons)
+    heat["data_quality"] = quality
+    heat["data_quality_reasons"] = reasons_text
+    heat["data_date"] = end_date
+    stocks["data_quality"] = quality
+    stocks["data_quality_reasons"] = reasons_text
     heat = heat.sort_values(["heat_score", "rel_ret_10d"], ascending=[False, False]).reset_index(drop=True)
 
     sector_cols = heat[["industry", "heat_score", "stage", "avg_ret_10d", "rel_ret_10d"]].rename(
@@ -411,7 +434,12 @@ def _latest_trade_date(db_path: str | Path, end_date: str | None = None) -> str:
         conn.close()
 
 
-def load_history_frames(db_path: str | Path, end_date: str, lookback_days: int = 90) -> dict[str, pd.DataFrame]:
+def load_history_frames(
+    db_path: str | Path,
+    end_date: str,
+    lookback_days: int = 90,
+    cache_dir: str | Path = "data/cache",
+) -> dict[str, pd.DataFrame]:
     conn = sqlite3.connect(db_path)
     try:
         dates = [
@@ -440,7 +468,7 @@ def load_history_frames(db_path: str | Path, end_date: str, lookback_days: int =
                 conn,
                 params=(start_date, end_date),
             ),
-            "stock_basic": pd.read_sql_query("select ts_code, name, industry, list_status from stock_basic", conn),
+            "stock_basic": load_stock_basic_snapshot(cache_dir, end_date),
             "daily_basic": pd.read_sql_query(
                 """
                 select trade_date, ts_code, turnover_rate, volume_ratio, total_mv
@@ -484,6 +512,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-sectors", type=int, default=8, help="Number of sectors to rank for stock candidates.")
     parser.add_argument("--top-stocks", type=int, default=3, help="Top stock candidates per sector.")
     parser.add_argument("--min-stocks", type=int, default=8, help="Minimum stock count per sector.")
+    parser.add_argument("--cache-dir", default="data/cache", help="含 stock_basic_history 的本地缓存目录。")
     return parser.parse_args()
 
 
@@ -491,7 +520,7 @@ def main() -> None:
     args = parse_args()
     db_path = Path(args.db)
     end_date = _latest_trade_date(db_path, args.end)
-    frames = load_history_frames(db_path, end_date)
+    frames = load_history_frames(db_path, end_date, cache_dir=args.cache_dir)
     heat, stocks = calculate_sector_heat(
         frames["daily"],
         frames["stock_basic"],

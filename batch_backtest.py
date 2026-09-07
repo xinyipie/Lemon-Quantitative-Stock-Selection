@@ -97,7 +97,50 @@ def _get_offline_pro():
 _offline_pro = None   # 模块级单例，避免重复初始化
 
 
-def run_one_backtest(mode: str, start: str, end: str, label: str) -> Optional[str]:
+def build_engine_kwargs(mode: str, validation_kind: str = 'official') -> dict:
+    """生成清楚区分正式策略与纯因子实验的引擎参数。"""
+    if validation_kind not in {'official', 'pure-factor'}:
+        raise ValueError(f"未知验证口径：{validation_kind}")
+    official = validation_kind == 'official'
+    if mode == 'short':
+        import config
+        profile = config.get_official_short_profile()
+        return {
+            'hold_days': 8,
+            'top_n': 3,
+            'fallback_stop_pct': -7.0,
+            'fallback_profit_pct': 15.0,
+            'trailing_stop_pct': 7.0,
+            'use_market_timing': official,
+            'min_open_ratio': 0.995 if official else 0.0,
+            'factor_profile': profile['factor_profile'] if official else 'original',
+            'style_gate': profile['style_gate'] if official else 'none',
+            'consensus_profile': profile['consensus_profile'] if official else 'none',
+        }
+    import config
+    return {
+        'max_hold_days': 60,
+        'top_n': 3,
+        'max_positions': 15,
+        'fallback_stop_pct': -12.0,
+        'fallback_profit_pct': 50.0,
+        'trailing_stop_pct': 10.0,
+        'trailing_activate_pct': 25.0,
+        'time_stop_days': 20,
+        'time_stop_threshold': -3.0,
+        'use_market_timing': official,
+        'min_open_ratio': 0.995 if official else 0.0,
+        'longterm_profile': config.get_official_longterm_profile(),
+    }
+
+
+def run_one_backtest(
+    mode: str,
+    start: str,
+    end: str,
+    label: str,
+    validation_kind: str = 'official',
+) -> Optional[str]:
     """
     在当前进程内直接调用 BacktestV2 / BacktestLongterm（离线模式），
     返回生成的 trades CSV 路径，失败返回 None。
@@ -112,35 +155,11 @@ def run_one_backtest(mode: str, start: str, end: str, label: str) -> Optional[st
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     try:
+        engine_kwargs = build_engine_kwargs(mode, validation_kind=validation_kind)
         if mode == 'short':
-            engine = bv2.BacktestV2(
-                pro                  = pro,
-                start_date           = start,
-                end_date             = end,
-                hold_days            = 5,
-                top_n                = 3,
-                fallback_stop_pct    = -7.0,
-                fallback_profit_pct  = 15.0,
-                trailing_stop_pct    = 7.0,
-                use_market_timing    = False,   # 纯验证选股质量，不叠加大盘择时
-                min_open_ratio       = 0.0,     # 允许低开买入，不过滤任何信号
-            )
+            engine = bv2.BacktestV2(pro=pro, start_date=start, end_date=end, **engine_kwargs)
         else:  # longterm
-            engine = bv2.BacktestLongterm(
-                pro                  = pro,
-                start_date           = start,
-                end_date             = end,
-                max_hold_days        = 60,
-                top_n                = 3,
-                fallback_stop_pct    = -12.0,
-                fallback_profit_pct  = 50.0,
-                trailing_stop_pct    = 10.0,
-                trailing_activate_pct= 25.0,
-                time_stop_days       = 20,
-                time_stop_threshold  = -3.0,
-                use_market_timing    = False,   # 纯验证选股质量
-                min_open_ratio       = 0.0,     # 允许低开买入
-            )
+            engine = bv2.BacktestLongterm(pro=pro, start_date=start, end_date=end, **engine_kwargs)
 
         trades_df, metrics, equity_df = engine.run()
 
@@ -199,7 +218,18 @@ def _get_trade_dates_local() -> List[str]:
     return [os.path.splitext(os.path.basename(f))[0] for f in files]
 
 
-def compute_ic_summary(trades_csv: str, horizons: List[int] = (10, 20)) -> dict:
+def pick_ic_score_column(df: pd.DataFrame, mode: str) -> str:
+    """按策略模式选择入场时可知且非常数的评分列。"""
+    score_col = 'short_score' if mode == 'short' else 'longterm_score'
+    if score_col not in df.columns:
+        raise ValueError(f"{mode} 回测缺少评分列 {score_col}")
+    values = pd.to_numeric(df[score_col], errors='coerce').dropna()
+    if values.nunique() <= 1:
+        raise ValueError(f"{mode} 回测评分列 {score_col} 为常数，IC不可用")
+    return score_col
+
+
+def compute_ic_summary(trades_csv: str, horizons: List[int] = (10, 20), mode: str = 'longterm') -> dict:
     """
     给定一个 trades CSV，计算各持有期的 IC 及相关指标，返回汇总字典。
     """
@@ -208,16 +238,12 @@ def compute_ic_summary(trades_csv: str, horizons: List[int] = (10, 20)) -> dict:
         return {'n_trades': 0}
 
     # 确定评分列
-    score_col = 'longterm_score' if 'longterm_score' in df.columns else None
-    if score_col is None:
-        # 无评分列时用 rank 占位（IC 值无意义，但其余指标仍有效）
-        score_col = '_dummy'
-        df[score_col] = range(len(df))
+    score_col = pick_ic_score_column(df, mode=mode)
 
     all_dates = _get_trade_dates_local()
     daily_cache: dict = {}
 
-    result = {'n_trades': len(df), 'has_score': score_col != '_dummy'}
+    result = {'n_trades': len(df), 'has_score': True, 'score_column': score_col}
 
     for n in horizons:
         fwd_col = f'fwd_{n}d'
@@ -297,6 +323,23 @@ def compute_ic_summary(trades_csv: str, horizons: List[int] = (10, 20)) -> dict:
     return result
 
 
+def safe_compute_ic_summary(trades_csv: str, horizons: List[int], mode: str) -> dict:
+    """单个区间评分不可用时记录原因，避免中止整批任务。"""
+    try:
+        return compute_ic_summary(trades_csv, horizons=horizons, mode=mode)
+    except ValueError as exc:
+        try:
+            n_trades = len(pd.read_csv(trades_csv, usecols=['buy_date']))
+        except Exception:
+            n_trades = 0
+        logger.warning(f"IC不可用：{trades_csv}：{exc}")
+        return {
+            'n_trades': n_trades,
+            'has_score': False,
+            'ic_unavailable_reason': str(exc),
+        }
+
+
 # ==================== 汇总打印 ====================
 
 def print_summary_table(rows: List[dict]):
@@ -355,6 +398,8 @@ def main():
                         help='跳过回测，直接对 backtest_results/ 下已有 CSV 做 IC 分析')
     parser.add_argument('--forward', type=int, nargs='+', default=[10, 20],
                         metavar='N', help='IC 前瞻天数（默认 10 20）')
+    parser.add_argument('--validation-kind', choices=['official', 'pure-factor'], default='official',
+                        help='official=正式策略全参数；pure-factor=关闭市场与开盘门控的因子实验')
     args = parser.parse_args()
 
     modes = ['short', 'longterm'] if args.mode == 'both' else [args.mode]
@@ -380,12 +425,12 @@ def main():
                 end   = period['end']
                 logger.info(f"\n[{done}/{total}] === {mode} | {label} ({start}~{end}) ===")
 
-                trades_csv = run_one_backtest(mode, start, end, label)
+                trades_csv = run_one_backtest(mode, start, end, label, validation_kind=args.validation_kind)
                 row = {'mode': mode, 'label': label, 'start': start, 'end': end,
                        'trades_csv': trades_csv or ''}
 
                 if trades_csv:
-                    ic_data = compute_ic_summary(trades_csv, horizons=args.forward)
+                    ic_data = safe_compute_ic_summary(trades_csv, horizons=args.forward, mode=mode)
                     row.update(ic_data)
 
                 rows.append(row)
@@ -409,7 +454,10 @@ def main():
             label = fname.replace('trades_', '').replace('.csv', '')
 
             logger.info(f"  分析 {fname} ...")
-            ic_data = compute_ic_summary(csv_path, horizons=args.forward)
+            if mode == 'unknown':
+                logger.warning(f"跳过无法识别策略模式的文件：{fname}")
+                continue
+            ic_data = safe_compute_ic_summary(csv_path, horizons=args.forward, mode=mode)
             row = {'mode': mode, 'label': label, 'trades_csv': csv_path}
             row.update(ic_data)
             rows.append(row)

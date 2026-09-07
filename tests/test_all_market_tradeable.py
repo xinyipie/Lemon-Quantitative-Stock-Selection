@@ -17,6 +17,7 @@ def _base_rows():
         {
             "name": ["样本甲", "样本乙"],
             "history_count": [120, 120],
+            "close": [10.0, 10.0],
             "entry_open": [10.0, 10.0],
             "entry_gap_pct": [1.0, 1.0],
             "turnover_rate": [3.0, 3.0],
@@ -36,6 +37,7 @@ def test_signal_day_tradeability_rejects_only_known_untradeable_conditions():
         {
             "name": ["ST样本", "退市样本", "历史不足", "无次日开盘", "次日涨停", "换手缺失"],
             "history_count": [120, 120, 59, 120, 120, 120],
+            "close": [10.0] * 6,
             "entry_open": [10.0, 10.0, 10.0, 0.0, 10.0, 10.0],
             "entry_gap_pct": [1.0, 1.0, 1.0, 1.0, 9.5, 1.0],
             "turnover_rate": [3.0, 3.0, 3.0, 3.0, 3.0, np.nan],
@@ -43,4 +45,4 @@ def test_signal_day_tradeability_rejects_only_known_untradeable_conditions():
         }
     )
 
-    assert _signal_day_tradeable(frame).tolist() == [False] * 6
+    assert _signal_day_tradeable(frame).tolist() == [False, False, False, True, True, False]

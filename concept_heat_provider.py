@@ -17,10 +17,17 @@ import warnings
 import pandas as pd
 
 
-def fetch_real_concept_heat(top_n: int = 10, ths_probe_size: int = 16, ak_module: Any | None = None) -> list[dict]:
+def fetch_real_concept_heat(
+    top_n: int = 10,
+    ths_probe_size: int = 16,
+    ak_module: Any | None = None,
+    as_of_date: str | None = None,
+    max_age_days: int = 3,
+) -> list[dict]:
     """获取真实概念热度列表。
 
-    返回字段统一为：concept/change/heat/source/reason。函数内部吞掉接口异常，
+    返回字段统一为：concept/change/heat/source/reason。东方财富 heat 是当批概念间的
+    横截面相对热度，不代表绝对市场温度。函数内部吞掉接口异常，
     保证一键更新不会因为某个外部接口不可用而中断。
     """
     try:
@@ -32,7 +39,13 @@ def fetch_real_concept_heat(top_n: int = 10, ths_probe_size: int = 16, ak_module
     if items:
         return items[:top_n]
 
-    return _fetch_ths_recent_concepts(ak=ak, top_n=top_n, probe_size=ths_probe_size)
+    return _fetch_ths_recent_concepts(
+        ak=ak,
+        top_n=top_n,
+        probe_size=ths_probe_size,
+        as_of_date=as_of_date,
+        max_age_days=max_age_days,
+    )
 
 
 def _import_akshare():
@@ -104,7 +117,13 @@ def _normalize_eastmoney_frame(df: pd.DataFrame) -> list[dict]:
     return rows
 
 
-def _fetch_ths_recent_concepts(ak: Any, top_n: int, probe_size: int) -> list[dict]:
+def _fetch_ths_recent_concepts(
+    ak: Any,
+    top_n: int,
+    probe_size: int,
+    as_of_date: str | None = None,
+    max_age_days: int = 3,
+) -> list[dict]:
     summary_func = getattr(ak, "stock_board_concept_summary_ths", None)
     info_func = getattr(ak, "stock_board_concept_info_ths", None)
     if summary_func is None or info_func is None:
@@ -121,6 +140,22 @@ def _fetch_ths_recent_concepts(ak: Any, top_n: int, probe_size: int) -> list[dic
     reason_col = _pick_column(summary, exact=("驱动事件", "reason"), contains=("驱动", "事件"))
     date_col = _pick_column(summary, exact=("日期", "date"), contains=("日期",))
     if concept_col is None:
+        return []
+
+    if date_col is None:
+        return []
+    event_dates = pd.to_datetime(summary[date_col], errors="coerce")
+    # 调用方提供评估日时严格按评估日截断；兼容独立诊断调用时，以数据自身最新日作为观察日。
+    cutoff = (
+        pd.Timestamp(as_of_date).normalize()
+        if as_of_date
+        else event_dates.max().normalize()
+    )
+    if pd.isna(cutoff):
+        return []
+    start = cutoff - pd.Timedelta(days=max(int(max_age_days), 0))
+    summary = summary.loc[event_dates.between(start, cutoff)].copy()
+    if summary.empty:
         return []
 
     items = []

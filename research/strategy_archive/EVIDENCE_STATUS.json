@@ -1,0 +1,11 @@
+{
+  "research_id": "strategy_archive",
+  "evidence_tier": "archived_reproduction_only",
+  "strict_oos_eligible": false,
+  "deployment_ready": false,
+  "evidence_blockers": [
+    "archived_snapshot",
+    "not_current_strategy_evidence"
+  ],
+  "policy": "归档仅用于历史复现；不得覆盖当前策略，也不得作为新的样本外或上线证据。"
+}

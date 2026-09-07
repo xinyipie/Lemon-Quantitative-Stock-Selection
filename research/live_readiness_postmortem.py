@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from research.research_evidence_registry import qualification_for_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,8 @@ def _readiness(metrics: dict, trades: pd.DataFrame) -> tuple[str, list[str]]:
     for ok, reason in checks:
         if not ok:
             reasons.append(reason)
+    evidence = qualification_for_script("live_readiness_postmortem.py")
+    reasons.extend(f"evidence:{item}" for item in evidence["evidence_blockers"])
     return ("ready" if not reasons else "research_only"), reasons
 
 

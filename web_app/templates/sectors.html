@@ -8,12 +8,12 @@
     <p>行业口径热度追踪，用来判断市场主线、过热风险和板块内候选观察名单。</p>
   </div>
   <div class="radar-header-actions">
-    <form class="command-search" action="/sectors" method="get">
+    <form class="command-search" action="{{ app_path(request, '/sectors') }}" method="get">
       <label class="sr-only" for="radar-date">雷达数据日期</label>
       <input id="radar-date" type="date" name="end" value="{{ filters.end|fmt_date_input }}">
       <button type="submit">查看</button>
     </form>
-    <form class="radar-refresh-form" action="/sectors/update" method="post" data-background-update-form>
+    <form class="radar-refresh-form" action="{{ app_path(request, '/sectors/update') }}" method="post" data-background-update-form>
       <button type="submit" data-update-button data-update-mode="radar" data-update-label="更新行情并刷新雷达" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running and update_status.mode == "radar" %}正在更新{% else %}更新行情并刷新雷达{% endif %}
       </button>
@@ -21,7 +21,7 @@
   </div>
 </header>
 
-<section class="radar-refresh-strip panel" data-update-status-url="/update/status">
+<section class="radar-refresh-strip panel" data-update-status-url="{{ app_path(request, '/update/status') }}">
   <div class="radar-refresh-main">
     <strong>刷新任务状态 <small>数据对齐情况见下方数据时钟</small></strong>
     <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行市场雷达刷新；点击后会先补核心行情，再刷新雷达。" }}</span>
@@ -62,7 +62,7 @@
   </div>
   <details class="radar-history-filter">
     <summary>历史复盘</summary>
-    <form class="command-search compact" action="/sectors" method="get">
+    <form class="command-search compact" action="{{ app_path(request, '/sectors') }}" method="get">
       <label class="sr-only" for="radar-history-date">历史复盘日期</label>
       <input id="radar-history-date" type="date" name="end" value="{{ filters.end|fmt_date_input }}">
       <button type="submit">查看历史</button>
@@ -359,7 +359,7 @@
           <div class="ai-focus-list stock-list">
           {% for item in ai_news_brief.stock_focus %}
             <article class="ai-stock-card direction-{{ item.impact_direction or '中性' }}" data-impact-direction="{{ item.impact_direction or '中性' }}"{% if (item.impact_direction or '中性') != '利多' %} hidden{% endif %}>
-              <div class="ai-card-title"><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong><small>{{ item.ts_code }} · {{ item.industry }}</small></a><span class="ai-stance">{{ item.stance }}</span></div>
+              <div class="ai-card-title"><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name }}</strong><small>{{ item.ts_code }} · {{ item.industry }}</small></a><span class="ai-stance">{{ item.stance }}</span></div>
               <div class="ai-source-tags"><span class="ai-direction-tag {{ item.impact_direction or '中性' }}">{{ item.impact_direction or '中性' }}</span><span class="ai-source-tag {{ item.focus_type }}">{{ item.focus_type }}</span><span class="ai-relation">{{ item.relation_label }}</span></div>
               <p>{{ item.reason }}</p>
               {% if item.news_logic %}<div class="ai-news-logic">消息逻辑：{{ item.news_logic }}</div>{% endif %}
@@ -411,7 +411,7 @@ document.addEventListener("DOMContentLoaded", function () {
     <div class="panel-head">
       <div>
         <h2>关键事件</h2>
-        <p>风险优先，先看今日催化、风险阻断和来源缺口；旧消息只进入背景，不作为盘中新信号。</p>
+        <p>风险优先，先看{% if page_time.is_historical %}该历史日{% else %}今日{% endif %}催化、风险阻断和来源缺口；旧消息只进入背景，不作为盘中新信号。</p>
       </div>
     </div>
     {% set catalyst_rows = trade_groups.catalysts or event_groups.positive or [] %}
@@ -433,7 +433,7 @@ document.addEventListener("DOMContentLoaded", function () {
     {% endfor %}
     <div class="event-filter-tabs event-reader-tabs">
       <a href="#event-all">全部事件 <b>{{ readable_events|length }}</b></a>
-      <a href="#event-catalysts">今日新增催化 <b>{{ catalyst_rows|length }}</b></a>
+      <a href="#event-catalysts">{% if page_time.is_historical %}该历史日{% else %}今日{% endif %}新增催化 <b>{{ catalyst_rows|length }}</b></a>
       <a href="#event-risk">风险 <b>{{ risk_rows|length }}</b></a>
       <a href="#event-background">背景 <b>{{ background_rows|length }}</b></a>
       {% if source_gap_rows %}<a href="#event-source-gap">待核验 <b>{{ source_gap_rows|length }}</b></a>{% endif %}
@@ -495,7 +495,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
       <aside class="event-reader-sidebar" aria-label="关键事件摘要">
         <div class="event-reader-stat-grid">
-          <a href="#event-catalysts"><strong>{{ catalyst_rows|length }}</strong><span>今日催化</span></a>
+          <a href="#event-catalysts"><strong>{{ catalyst_rows|length }}</strong><span>{% if page_time.is_historical %}历史日催化{% else %}今日催化{% endif %}</span></a>
           <a href="#event-risk"><strong>{{ risk_rows|length }}</strong><span>风险阻断</span></a>
           <a href="#event-background"><strong>{{ background_rows|length }}</strong><span>背景消息</span></a>
           {% if source_gap_rows %}<a href="#event-source-gap"><strong>{{ source_gap_rows|length }}</strong><span>来源待核验</span></a>{% else %}<span><strong>0</strong><span>来源待核验</span></span>{% endif %}
@@ -507,7 +507,7 @@ document.addEventListener("DOMContentLoaded", function () {
               <a href="{{ event.source_url or '#event-all' }}" {% if event.source_url %}target="_blank" rel="noopener"{% endif %}>{{ event.title }}</a>
             {% endfor %}
           {% else %}
-            <span>暂无可作为今日催化的消息。</span>
+            <span>暂无可作为{% if page_time.is_historical %}该历史日{% else %}今日{% endif %}催化的消息。</span>
           {% endif %}
         </div>
         <div class="event-quick-section danger" id="event-risk">
@@ -620,7 +620,7 @@ document.addEventListener("DOMContentLoaded", function () {
         {% for stock in brief.stock_watchlist[:8] %}
         <article class="stock-evidence-card-v3 {{ 'positive' if stock.research_action == '可重点跟踪' else 'caution' if stock.research_action == '等回踩确认' else 'neutral' }}" id="stock-{{ stock.ts_code }}">
           <div class="stock-evidence-card-head">
-            <a class="stock-evidence-identity" href="/stock/{{ stock.ts_code }}">
+            <a class="stock-evidence-identity" href="{{ app_url_for(request, 'stock_detail', code=stock.ts_code).path }}">
               <strong>{{ stock.name or stock.ts_code }}</strong>
               <span>{{ stock.ts_code }} · {{ stock.industry }}</span>
             </a>
@@ -748,7 +748,7 @@ document.addEventListener("DOMContentLoaded", function () {
     {% if strategy_overlap["items"] %}
       <div class="strategy-overlap-list">
         {% for item in strategy_overlap["items"] %}
-        <a class="strategy-overlap-item" href="/stock/{{ item.ts_code }}">
+        <a class="strategy-overlap-item" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
           <div>
             <strong>{{ item.name }}</strong>
             <span>{{ item.ts_code }} · {{ item.industry }}</span>
@@ -771,7 +771,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <strong>孤儿信号</strong>
             <small>策略有分数，但暂时没有健康主线或正向消息支撑。</small>
             {% for item in strategy_overlap.orphan_items[:3] %}
-              <a class="strategy-overlap-item muted-card" href="/stock/{{ item.ts_code }}">
+              <a class="strategy-overlap-item muted-card" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
                 <div><strong>{{ item.name }}</strong><span>{{ item.ts_code }} · {{ item.industry }}</span></div>
                 <div><b>{{ item.score_text }}</b><small>{{ item.action }}</small></div>
                 <p>{{ item.reason }}</p>
@@ -784,7 +784,7 @@ document.addEventListener("DOMContentLoaded", function () {
             <strong>冲突信号</strong>
             <small>策略有分数，但落在风险板块或负向消息行业，只适合复盘。</small>
             {% for item in strategy_overlap.conflict_items[:3] %}
-              <a class="strategy-overlap-item risk-card" href="/stock/{{ item.ts_code }}">
+              <a class="strategy-overlap-item risk-card" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
                 <div><strong>{{ item.name }}</strong><span>{{ item.ts_code }} · {{ item.industry }}</span></div>
                 <div><b>{{ item.score_text }}</b><small>{{ item.action }}</small></div>
                 <p>{{ item.reason }}</p>
@@ -1043,7 +1043,7 @@ document.addEventListener("DOMContentLoaded", function () {
           {% set stock = evidence_by_code.get(item.ts_code) %}
           <tr>
             <td>{{ item.candidate_rank }}</td>
-            <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong><br><span class="muted">{{ item.ts_code }}</span></a></td>
+            <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name }}</strong><br><span class="muted">{{ item.ts_code }}</span></a></td>
             <td><strong>{{ item.candidate_score_text }}</strong></td>
             <td><span class="{{ 'market-up' if item.ret_5d >= 0 else 'market-down' }}">5日 {{ item.ret_5d_text }}</span><br><span class="{{ 'market-up' if item.ret_10d >= 0 else 'market-down' }}">10日 {{ item.ret_10d_text }}</span></td>
             <td class="{{ 'market-up' if item.stock_vs_sector_10d >= 0 else 'market-down' }}">

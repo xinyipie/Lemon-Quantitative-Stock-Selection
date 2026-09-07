@@ -31,7 +31,11 @@ def calibrated_walkforward_predictions(frame: pd.DataFrame) -> tuple[pd.DataFram
     predictions = []
     metadata = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows(frame, train_years)
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
         model = new_model()
         model.fit(train[FEATURES], train[TARGET].clip(-15.0, 15.0))

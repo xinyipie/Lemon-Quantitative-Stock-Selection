@@ -71,7 +71,7 @@ class NewsSourceProviderTest(unittest.TestCase):
         self.assertIn("caixin", records[0]["providers"])
         self.assertEqual(records[1]["title"], "算力硬件板块持续领涨")
 
-    def test_fetch_market_news_prefers_trading_value_over_latest_noise(self):
+    def test_fetch_market_news_sorts_by_recency_and_preserves_trading_value(self):
         def provider():
             return pd.DataFrame(
                 [
@@ -101,10 +101,11 @@ class NewsSourceProviderTest(unittest.TestCase):
 
         records = fetch_market_news(providers=[("eastmoney", provider)], limit=3)
 
-        self.assertEqual(records[0]["title"], "国家发改委推进设备更新项目清单下达")
-        self.assertGreater(records[0]["news_value_score"], records[-1]["news_value_score"])
-        self.assertIn("value_reason_text", records[0])
-        self.assertNotEqual(records[0]["title"], "端午假期食品抽检结果发布")
+        self.assertEqual(records[0]["title"], "端午假期食品抽检结果发布")
+        equipment = next(item for item in records if "设备更新" in item["title"])
+        noise = next(item for item in records if "食品抽检" in item["title"])
+        self.assertGreater(equipment["news_value_score"], noise["news_value_score"])
+        self.assertTrue(equipment["value_reason_text"])
 
 
 if __name__ == "__main__":

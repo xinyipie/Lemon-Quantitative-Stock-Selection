@@ -60,7 +60,11 @@ def predict_walkforward_dual(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     predictions = []
     metadata = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows(frame, train_years).copy()
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        ).copy()
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
         return_model = new_model()
         risk_model = new_risk_model()

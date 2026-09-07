@@ -98,6 +98,8 @@ def simulate_portfolio(
     holding_days: int = 8,
 ) -> pd.DataFrame:
     """最多每日一笔、固定槽位、逐日盯市，不把重叠交易当独立资金。"""
+    if "executed" in trades.columns:
+        trades = trades.loc[trades["executed"].fillna(False).astype(bool)].copy()
     if trades.empty:
         return pd.DataFrame(columns=["trade_date", "nav", "cash", "positions"])
     all_dates = sorted(path.stem for path in (cache_dir / "daily").glob("*.parquet"))
@@ -115,7 +117,8 @@ def simulate_portfolio(
         last_exit_position = max(last_exit_position, date_position[future_dates[-1]])
 
     first_entry = min(entries)
-    simulation_dates = all_dates[date_position[first_entry] : last_exit_position + 1]
+    # 计划退出日停牌时必须继续持有，直到后续首次出现有效行情。
+    simulation_dates = all_dates[date_position[first_entry] :]
     cash = 1.0
     positions: list[dict[str, object]] = []
     rows: list[dict[str, object]] = []
@@ -153,13 +156,16 @@ def simulate_portfolio(
 
         remaining: list[dict[str, object]] = []
         for position in positions:
-            if str(position["exit_date"]) == date:
+            code = str(position["ts_code"])
+            if str(position["exit_date"]) <= date and code in daily.index:
                 cash += float(position["value"])
             else:
                 remaining.append(position)
         positions = remaining
         nav = cash + sum(float(position["value"]) for position in positions)
         rows.append({"trade_date": date, "nav": nav, "cash": cash, "positions": len(positions)})
+        if date >= max(entries) and not positions:
+            break
     return pd.DataFrame(rows)
 
 

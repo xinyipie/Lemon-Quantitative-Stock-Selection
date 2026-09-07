@@ -5,7 +5,7 @@
 <article class="dragon-card">
   <div class="dragon-card-top">
     <div>
-      <a href="/stock/{{ item.ts_code }}"><strong>{{ item.name }}</strong></a>
+      <a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name }}</strong></a>
       <span>{{ item.ts_code }} · {{ item.industry }}</span>
     </div>
     <b>{{ "%.1f"|format(item.score) }}</b>
@@ -32,11 +32,11 @@
     <p>按当天涨停池生成观察清单，验证口径为 T+1 开盘到 T+3 收盘；只做研究辅助，不生成交易执行指令。</p>
   </div>
   <div class="radar-header-actions">
-    <form class="command-search" action="/dragon" method="get">
+    <form class="command-search" action="{{ app_path(request, '/dragon') }}" method="get">
       <input name="end" value="{{ filters.end }}" placeholder="历史日期，如 20260624">
       <button type="submit">查看</button>
     </form>
-    <form class="radar-refresh-form" action="/dragon/update" method="post" data-background-update-form>
+    <form class="radar-refresh-form" action="{{ app_path(request, '/dragon/update') }}" method="post" data-background-update-form>
       <button type="submit" data-update-button data-update-mode="dragon" data-update-label="更新行情并刷新龙头池" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running and update_status.mode == "dragon" %}正在更新{% else %}更新行情并刷新龙头池{% endif %}
       </button>
@@ -44,7 +44,7 @@
   </div>
 </header>
 
-<section class="radar-refresh-strip panel" data-update-status-url="/update/status">
+<section class="radar-refresh-strip panel" data-update-status-url="{{ app_path(request, '/update/status') }}">
   <div class="radar-refresh-main">
     <strong>龙头池刷新状态</strong>
     <span data-update-message>{{ update_status.message if update_status and update_status.message else "尚未运行龙头池刷新；点击后会先补核心行情，再刷新龙头池。" }}</span>
@@ -59,8 +59,8 @@
       <span class="tag soft-tag">数据日 {{ observation.trade_date|fmt_date if observation.trade_date else "-" }}</span>
       <span class="tag {{ 'success-tag' if observation.summary.source_quality == 'real' else 'soft-tag' }}">来源 {{ observation.summary.source_quality }}</span>
     </div>
-    <strong>{{ observation.summary.headline }}</strong>
-    <p>{{ observation.summary.note }}</p>
+    <strong>{% if page_time.is_historical %}{{ observation.summary.headline|replace('今日', '该历史日')|replace('明日', '下一交易日') }}{% else %}{{ observation.summary.headline }}{% endif %}</strong>
+    <p>{{ observation.summary.note|replace('今日', '该历史日')|replace('明日', '下一交易日') if page_time.is_historical else observation.summary.note }}</p>
   </div>
   <div class="metric-grid dragon-metrics">
     <div class="metric"><span>优先关注</span><strong>{{ observation.summary.priority_count }}</strong><small>验证最强的二板/三板结构</small></div>
@@ -76,8 +76,8 @@
       <span class="tag soft-tag">盘后情绪</span>
       <span class="tag success-tag">{{ observation.emotion_snapshot.emotion_phase }}</span>
     </div>
-    <strong>{{ observation.emotion_snapshot.summary_text }}</strong>
-    <p>主线状态：{{ observation.emotion_snapshot.mainline_state }} · 风险状态：{{ observation.emotion_snapshot.risk_state }} · 明日偏向：{{ observation.emotion_snapshot.next_day_bias }}</p>
+    <strong>{% if page_time.is_historical %}{{ observation.emotion_snapshot.summary_text|replace('明日偏向', '下一交易日倾向（历史）') }}{% else %}{{ observation.emotion_snapshot.summary_text }}{% endif %}</strong>
+    <p>主线状态：{{ observation.emotion_snapshot.mainline_state }} · 风险状态：{{ observation.emotion_snapshot.risk_state }} · {% if page_time.is_historical %}下一交易日倾向（历史）{% else %}明日偏向{% endif %}：{{ observation.emotion_snapshot.next_day_bias }}</p>
   </div>
   <div class="metric-grid dragon-metrics">
     <div class="metric"><span>3日验证样本</span><strong>{{ observation.study.page_sample_count }}</strong><small>页面展示回测样本数</small></div>
@@ -169,6 +169,7 @@
 
 <section class="panel dragon-study">
   <h2>研究验证</h2>
+  <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
   <div class="metric-grid dragon-metrics">
     <div class="metric"><span>历史基准</span><strong>{{ observation.study.baseline_next_limit }}</strong><small>全涨停样本次日涨停率</small></div>
     <div class="metric"><span>低换手前20%</span><strong>{{ observation.study.low_turnover_next_limit }}</strong><small>跨年度稳定提升</small></div>

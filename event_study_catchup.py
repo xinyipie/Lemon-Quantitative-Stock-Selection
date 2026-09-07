@@ -13,6 +13,7 @@ import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 
 CACHE_DIR = 'data/cache'
 DAILY_DIR = os.path.join(CACHE_DIR, 'daily')
@@ -26,12 +27,35 @@ START_DATE         = '20230101'
 END_DATE           = '20251231'
 
 
-def load_stock_basic():
-    """加载行业映射"""
-    path = os.path.join(CACHE_DIR, 'stock_basic.parquet')
+def limit_up_threshold(ts_code: str, name: str = '') -> float:
+    """返回研究区间内各板块普通股/ST 的涨停识别阈值。"""
+    code = str(ts_code).split('.')[0]
+    if 'ST' in str(name).upper():
+        return 4.8
+    if code.startswith(('300', '688')):
+        return 19.5
+    if code.startswith(('4', '8')):
+        return 29.5
+    return 9.5
+
+
+def is_limit_up(ts_code: str, name: str, pct_chg: float) -> bool:
+    return float(pct_chg) >= limit_up_threshold(ts_code, name)
+
+
+def load_stock_basic(date: str | None = None, *, as_frame: bool = False):
+    """历史研究必须加载对应交易日的精确证券主数据快照。"""
+    if date:
+        path = os.path.join(CACHE_DIR, 'stock_basic_history', f'{date}.parquet')
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"缺少 {date} stock_basic 精确快照：{path}")
+    else:
+        path = os.path.join(CACHE_DIR, 'stock_basic.parquet')
     sb = pd.read_parquet(path)
     if 'industry' not in sb.columns:
         raise ValueError("stock_basic 无 industry 列")
+    if as_frame:
+        return sb
     # ts_code 可能在列里也可能在index里
     if 'ts_code' in sb.columns:
         return sb.set_index('ts_code')['industry'].to_dict()
@@ -47,15 +71,15 @@ def get_sorted_dates():
 
 
 def load_daily(date):
-    """加载某日daily数据，返回DataFrame或None"""
+    """加载某日 daily 数据；损坏文件必须显式中止研究。"""
     path = os.path.join(DAILY_DIR, f'{date}.parquet')
     if not os.path.exists(path):
         return None
     try:
         df = pd.read_parquet(path)
         return df
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"读取日线缓存失败：{path}") from exc
 
 
 def get_price_map(df, col):
@@ -72,13 +96,10 @@ def main():
     print(f"       滞涨定义：{LAG_MIN_CHANGE}%~{LAG_MAX_CHANGE}%")
     print("=" * 60)
 
-    # 加载行业映射
-    print("\n[1] 加载行业映射...", end=' ')
-    ind_map = load_stock_basic()
-    print(f"{len(ind_map)} 只股票")
-
     # 获取所有交易日
     dates = get_sorted_dates()
+    if len(dates) < 3:
+        raise ValueError("研究区间至少需要 3 个完整交易日")
     print(f"[2] 交易日：{dates[0]} ~ {dates[-1]}，共 {len(dates)} 天")
 
     # ── 遍历每个交易日，收集补涨事件 ──
@@ -88,6 +109,11 @@ def main():
     for i, date in enumerate(dates[:-2]):  # 需要T+1、T+2
         t1_date = dates[i + 1]
         t2_date = dates[i + 2]
+
+        # 精确历史主数据决定当日行业和当日名称/ST 状态。
+        basic_t = load_stock_basic(date, as_frame=True)
+        ind_map = basic_t.set_index('ts_code')['industry'].to_dict()
+        name_map = basic_t.set_index('ts_code')['name'].to_dict() if 'name' in basic_t.columns else {}
 
         # 加载T日数据
         df_t = load_daily(date)
@@ -105,7 +131,10 @@ def main():
         df_t = df_t[df_t['close'] > 0]
 
         # 找有≥N只涨停的板块
-        limit_up_df = df_t[df_t['pct_chg'] >= LIMIT_UP_THRESHOLD]
+        limit_up_mask = df_t.apply(
+            lambda row: is_limit_up(row['ts_code'], name_map.get(row['ts_code'], ''), row['pct_chg']), axis=1
+        )
+        limit_up_df = df_t[limit_up_mask]
         sector_leader_cnt = limit_up_df.groupby('industry').size()
         active_sectors = sector_limit_counts = sector_leader_cnt[
             sector_leader_cnt >= LEADER_MIN_COUNT
@@ -177,7 +206,7 @@ def main():
                 'ret_t1_total':   round(ret_t1_total, 2),
                 'ret_2d':         round(ret_2d, 2) if ret_2d is not None else None,
                 'ret_t2_open':    round(ret_t2_open, 2) if ret_t2_open is not None else None,
-                't1_limit_up':    t1_pct >= 9.5,   # T+1是否涨停（补涨成功的极端情况）
+                't1_limit_up':    is_limit_up(code, name_map.get(code, ''), t1_pct),
                 'year':           date[:4],
                 'month':          date[:6],
             })
@@ -301,23 +330,24 @@ def main():
     print(f"  买入开盘持2天均值：{avg_2d:+.2f}%  胜率：{win_2d:.1f}%")
     print()
     if avg_2d > 0.5 and win_2d > 45:
-        print("  ✅ 补涨效应存在，扣跳开后仍有正收益 → 继续优化选股")
+        print("  描述性样本均值为正；未加入对照、费用和成交验证，不能据此认定可交易超额收益")
     elif avg_2d > 0 and win_2d > 42:
-        print("  ⚠️  补涨效应微弱，边际有效 → 需要精选信号，否则手续费会吃光收益")
+        print("  描述性样本均值较弱；扣费、基准和聚类不确定性尚未验证")
     else:
-        print("  ❌ 补涨效应不显著或为负 → 建议换策略方向")
+        print("  描述性样本均值不支持该假设；本脚本不提供因果显著性结论")
 
     # 保存 JSON
     output = {
         'run_time':     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'params': {
-            'limit_up_threshold': LIMIT_UP_THRESHOLD,
+            'limit_up_threshold': 'board_and_name_specific',
             'leader_min_count':   LEADER_MIN_COUNT,
             'lag_max_change':     LAG_MAX_CHANGE,
             'lag_min_change':     LAG_MIN_CHANGE,
             'date_range':         f'{START_DATE}~{END_DATE}',
         },
         'total_events': len(events),
+        'evidence_scope': '描述性事件统计；未扣费用、未设市场对照、未验证开盘成交率',
         'results':      all_results,
     }
     with open('event_study_result.json', 'w', encoding='utf-8') as f:

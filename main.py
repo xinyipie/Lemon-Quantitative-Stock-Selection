@@ -23,6 +23,7 @@ from longterm_live_pipeline import build_live_watchlists
 from signal_store import DEFAULT_DB_PATH, SignalRecord, SignalStore
 from strategy_profiles import apply_live_short_postprocess, build_live_observation_candidates
 from web_app.services.dragon_service import build_dragon_observation, enrich_short_pool_with_dragon_sentiment
+from local_data_proxy import PointInTimeDataError
 
 # ==================== 日志初始化 ====================
 def init_logger():
@@ -83,12 +84,12 @@ def init_tushare():
                 "Tushare Token 未配置！\n"
                 "请在 config.py 中设置 TUSHARE_TOKEN，或设置环境变量 TUSHARE_TOKEN"
             )
+        configured_url = config.TUSHARE_CONFIG.get("http_url") or os.environ.get("TUSHARE_HTTP_URL", "")
+        tushare_http_url = config.require_secure_tushare_url(configured_url)
         pro = ts.pro_api(token=token, timeout=config.TUSHARE_CONFIG["timeout"])
-        tushare_http_url = config.TUSHARE_CONFIG.get("http_url") or os.environ.get("TUSHARE_HTTP_URL", "")
-        if tushare_http_url:
-            pro._DataApi__http_url = tushare_http_url
-            _patch_tushare_http_errors(pro)
-            logger.info("Tushare接口使用自定义中转站")
+        pro._DataApi__http_url = tushare_http_url
+        _patch_tushare_http_errors(pro)
+        logger.info("Tushare接口使用自定义HTTPS地址")
         logger.info("✅ Tushare接口初始化成功")
         return pro
     except Exception as e:
@@ -1025,8 +1026,8 @@ def check_market_risk(trade_date: str, market_df: pd.DataFrame = None) -> Tuple[
         df_sh  = _fetch_index('000001.SH')
         df_hs3 = _fetch_index('000300.SH')
 
-        if df_sh.empty:
-            return 'normal', "大盘数据获取失败，谨慎操作"
+        if df_sh.empty or df_hs3.empty:
+            return 'data_unavailable', "大盘指数数据不完整，关闭市场准入"
 
         # 检查跌停家数（复用已有全市场数据）
         if market_df is not None and not market_df.empty and 'pct_chg' in market_df.columns:
@@ -1065,6 +1066,8 @@ def check_market_risk(trade_date: str, market_df: pd.DataFrame = None) -> Tuple[
 
         dev_sh,  below_sh,  slope_sh,  cum5_sh  = _analyze_index(df_sh)
         dev_hs3, below_hs3, slope_hs3, cum5_hs3 = _analyze_index(df_hs3)
+        sh_caution  = (below_sh  >= 2 and slope_sh  < -0.5 and cum5_sh  < -2.0)
+        hs3_caution = (below_hs3 >= 2 and slope_hs3 < -0.5 and cum5_hs3 < -2.0)
 
         # ── 新增：IBD分配日计数（作为辅助过滤信号）──
         # 理论依据：O'Neil CANSLIM —— 大盘25日内出现≥5个分配日（放量下跌日）预示顶部
@@ -1115,9 +1118,6 @@ def check_market_risk(trade_date: str, market_df: pd.DataFrame = None) -> Tuple[
         # ── 3. 警戒区：短期回调（任一指数出现回调信号）──
         # 任一指数满足：MA20下方≥2日 + 斜率<-0.5% + 5日累跌<-2%
         # 不停止选股，但提高准入门槛（select_stock_pool中score-10惩罚）
-        sh_caution  = (below_sh  >= 2 and slope_sh  < -0.5 and cum5_sh  < -2.0)
-        hs3_caution = (below_hs3 >= 2 and slope_hs3 < -0.5 and cum5_hs3 < -2.0)
-
         if sh_caution or hs3_caution:
             caution_idx = "上证" if sh_caution else "沪深300"
             caution_cum = cum5_sh if sh_caution else cum5_hs3
@@ -1131,7 +1131,7 @@ def check_market_risk(trade_date: str, market_df: pd.DataFrame = None) -> Tuple[
 
     except Exception as e:
         logger.warning(f"大盘风控检查失败：{e}")
-        return 'normal', "大盘数据获取失败，谨慎操作"
+        return 'data_unavailable', "大盘数据获取失败，关闭市场准入"
 
 
 def get_market_regime(trade_date: str) -> Tuple[str, Dict]:
@@ -1180,7 +1180,20 @@ def get_market_regime(trade_date: str) -> Tuple[str, Dict]:
         'score_threshold': 45,
         'max_hold_days': 8,
         'atr_multiplier': 1.5,
+        'data_quality': 'ok',
     }
+
+    def unavailable(reason: str) -> Tuple[str, Dict]:
+        failed = dict(regime_data)
+        failed.update({
+            'regime': 'DATA_UNAVAILABLE',
+            'is_long_term_bull': False,
+            'is_short_term_up': False,
+            'position_multiplier': 0.0,
+            'data_quality': 'unavailable',
+            'data_quality_reason': reason,
+        })
+        return 'DATA_UNAVAILABLE', failed
     try:
         # 拉取CSI300近120个交易日（覆盖MA60 + 斜率计算所需历史）
         start_dt = (datetime.strptime(trade_date, '%Y%m%d') - timedelta(days=120)).strftime('%Y%m%d')
@@ -1191,8 +1204,8 @@ def get_market_regime(trade_date: str) -> Tuple[str, Dict]:
             fields='trade_date,close'
         )
         if df.empty or len(df) < 25:
-            logger.warning("⚠️ 市场状态机：CSI300数据不足，默认 BULL_TREND")
-            return 'BULL_TREND', regime_data
+            logger.warning("⚠️ 市场状态机：CSI300数据不足，关闭市场准入")
+            return unavailable('CSI300数据不足')
 
         df = df.sort_values('trade_date').reset_index(drop=True)
         df['ma20'] = df['close'].rolling(20).mean()
@@ -1205,8 +1218,8 @@ def get_market_regime(trade_date: str) -> Tuple[str, Dict]:
         ma60_now  = float(latest['ma60']) if not pd.isna(latest['ma60']) else None
 
         if ma20_now is None or ma60_now is None:
-            logger.warning("⚠️ 市场状态机：均线数据不足，默认 BULL_TREND")
-            return 'BULL_TREND', regime_data
+            logger.warning("⚠️ 市场状态机：均线数据不足，关闭市场准入")
+            return unavailable('均线数据不足')
 
         # ── 长期方向：MA20 > MA60 + MA60斜率（April 18基准，已验证稳定）──
         # 理论依据：Weinstein四阶段 + Faber(2007) 趋势择时
@@ -1328,8 +1341,8 @@ def get_market_regime(trade_date: str) -> Tuple[str, Dict]:
         return regime, regime_data
 
     except Exception as e:
-        logger.warning(f"市场状态机判断失败：{e}，默认 BULL_TREND")
-        return 'BULL_TREND', regime_data
+        logger.warning(f"市场状态机判断失败：{e}，关闭市场准入")
+        return unavailable(f'{type(e).__name__}: {e}')
 
 
 def check_regime_override(
@@ -1872,7 +1885,8 @@ def filter_restricted_stocks(codes: List[str], trade_date: str) -> List[str]:
 def get_all_stocks(min_change: float = None, max_change: float = None,
                    min_turnover: float = None, max_turnover: float = None,
                    min_volume_ratio: float = 1.5,
-                   trade_date: str = None) -> Tuple[pd.DataFrame, str, int]:
+                   trade_date: str = None,
+                   strict_point_in_time: Optional[bool] = None) -> Tuple[pd.DataFrame, str, int]:
     """
     全市场选股。参数默认取 config，可由调用方覆盖（长线用更宽的过滤范围）。
     daily_basic volume_ratio 无效时自动回退到前一交易日，data_date 标注来源。
@@ -1882,6 +1896,7 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
         trade_date: 指定交易日期（YYYYMMDD），None则使用最新交易日
         min_volume_ratio: 最低量比门槛（短线默认1.5，波段选股传0跳过此过滤）
     """
+    global _sb_industry_cache
     if min_change is None:
         min_change = config.MIN_CHANGE
     if max_change is None:
@@ -1895,14 +1910,24 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
     logger.info(f"📊 基于{latest_trade_date}开始选股（涨幅{min_change}%~{max_change}%）")
 
     try:
-        # 1. 获取A股基础信息，过滤 ST/退市
-        stock_basic = pro.stock_basic(
-            exchange='', list_status='L',
-            fields='ts_code,symbol,name,industry,list_date'
-        )
+        # 1. 获取A股基础信息。离线历史截面必须按上市/退市日期还原股票范围。
+        is_offline = type(pro).__name__ == 'LocalDataProxy'
+        stock_basic_args = {
+            'exchange': '',
+            'list_status': 'L',
+            'fields': 'ts_code,symbol,name,industry,list_date,delist_date,list_status',
+        }
+        if is_offline and not _is_local_data_live_mode():
+            stock_basic_args['as_of_date'] = latest_trade_date
+            stock_basic_args['strict_point_in_time'] = strict_point_in_time
+        stock_basic = pro.stock_basic(**stock_basic_args)
         if stock_basic.empty or 'name' not in stock_basic.columns:
             logger.error("❌ stock_basic返回空数据或缺少字段")
             return pd.DataFrame(), latest_trade_date, 0, pd.DataFrame()
+
+        # 后续行业计算复用同一历史快照，禁止再次从当前静态表覆盖历史行业映射。
+        if is_offline and 'industry' in stock_basic.columns:
+            _sb_industry_cache = stock_basic.set_index('ts_code')['industry'].dropna().to_dict()
 
         # 修复：过滤特殊股票
         stock_basic = stock_basic[
@@ -1916,7 +1941,6 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
 
         all_ts_codes = stock_basic['ts_code'].tolist()
         batch_size = 500
-        is_offline = type(pro).__name__ == 'LocalDataProxy'
         logger.info(f"📦 共{len(all_ts_codes)}只股票，分批获取行情")
 
         # 2. 批量获取行情（daily 接口不含换手率/量比，只取价格和成交数据）
@@ -2031,7 +2055,15 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
             df_price['volume_ratio'] = 1.0
 
         # stock_basic 只保留必要列
-        stock_basic = stock_basic[['ts_code', 'symbol', 'name', 'industry', 'list_date']]
+        stock_columns = ['ts_code', 'symbol', 'name', 'industry', 'list_date']
+        audit_columns = [
+            'membership_point_in_time_reliable',
+            'name_industry_point_in_time_reliable',
+            'point_in_time_as_of_date',
+            'point_in_time_source',
+        ]
+        stock_columns.extend(column for column in audit_columns if column in stock_basic.columns)
+        stock_basic = stock_basic[stock_columns]
 
         # 4. 合并，去重，reset_index（确保 index 唯一）
         df = pd.merge(stock_basic, df_price, on='ts_code', how='inner')
@@ -2087,15 +2119,20 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
         # main_net_inflow NaN 填 0 仅用于展示
         df['main_net_inflow'] = df['main_net_inflow'].fillna(0.0)
 
-        df = df[[
+        output_columns = [
             "code", "name", "industry", "close", "change", "turnover",
             "volume_ratio", "main_net_inflow", "is_limit_up", "amount",
             "pe_ttm", "pb", "ps_ttm", "dv_ratio", "total_mv", "circ_mv"
-        ]].reset_index(drop=True)
+        ]
+        output_columns.extend(column for column in audit_columns if column in df.columns)
+        df = df[output_columns].reset_index(drop=True)
         logger.info(f"✅ 基础选股完成：{len(df)}只")
         # 返回全市场 pct_chg 数据（供 check_market_risk / get_market_sentiment 复用，避免重复拉取）
         return df, latest_trade_date, limit_up_count, market_pct_df_raw
 
+    except PointInTimeDataError:
+        logger.error("❌ 历史 stock_basic 未通过时点可靠性校验", exc_info=True)
+        raise
     except Exception as e:
         logger.error(f"❌ 全市场选股失败：{e}", exc_info=True)
         return pd.DataFrame(), latest_trade_date, 0, pd.DataFrame()
@@ -2307,6 +2344,23 @@ def _filter_announced_rows(
     return df.loc[known_by_cutoff].copy()
 
 
+def _latest_announced_financial_versions(df: pd.DataFrame) -> pd.DataFrame:
+    """同一报告期只保留截止日内最后公告的版本，再按报告期降序。"""
+    if df is None or df.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    required = {'ts_code', 'end_date', 'ann_date'}
+    if not required.issubset(df.columns):
+        raise ValueError(f"财务数据缺少版本字段：{sorted(required - set(df.columns))}")
+    data = df.copy()
+    data['end_date'] = data['end_date'].astype(str).str.replace('-', '', regex=False).str[:8]
+    data['ann_date'] = data['ann_date'].astype(str).str.replace('-', '', regex=False).str[:8]
+    return (
+        data.sort_values(['ts_code', 'end_date', 'ann_date'], ascending=[True, False, False])
+        .drop_duplicates(['ts_code', 'end_date'], keep='first')
+        .reset_index(drop=True)
+    )
+
+
 def get_net_profit_growth_batch(
     codes: List[str],
     trade_date: str = '',
@@ -2332,7 +2386,8 @@ def get_net_profit_growth_batch(
         batch_size = 50
         all_dfs = []
         cache_loaded = False
-        fina_cache_path = cache_path or os.path.join('data', 'cache', 'fina_indicator.parquet')
+        # 仅显式 cache_path 才直接读文件；离线代理必须从其自身 cache_dir 读取。
+        fina_cache_path = os.fspath(cache_path) if cache_path is not None else None
 
         if fina_cache_path and os.path.exists(fina_cache_path):
             try:
@@ -2386,7 +2441,7 @@ def get_net_profit_growth_batch(
             'fina_indicator(netprofit_yoy)',
         )
 
-        df_all = df_all.sort_values('end_date', ascending=False)
+        df_all = _latest_announced_financial_versions(df_all)
 
         for ts_code in ts_codes:
             code = revert_code(ts_code)
@@ -2480,7 +2535,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
                 'fina_indicator',
             )
             # 每只股票取已公告中最新一期（end_date最大）
-            df_fina = df_fina.sort_values('end_date', ascending=False).drop_duplicates('ts_code').reset_index(drop=True)
+            df_fina = _latest_announced_financial_versions(df_fina).drop_duplicates('ts_code').reset_index(drop=True)
         else:
             df_fina = pd.DataFrame()
 
@@ -2523,7 +2578,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
                 trade_date,
                 'income',
             )
-            df_income = df_income.sort_values('end_date', ascending=False)
+            df_income = _latest_announced_financial_versions(df_income)
         else:
             df_income = pd.DataFrame()
 
@@ -3862,6 +3917,7 @@ def select_longterm_pool(
     macro_data: Dict = None,
     macro_mode: str = None,
     regime_data: Dict = None,
+    apply_market_gates: bool = True,
 ) -> pd.DataFrame:
     """
     波段选股 v4.1（中长线，持仓无固定时限，以技术信号为准）。
@@ -3888,11 +3944,10 @@ def select_longterm_pool(
     硬过滤条件（任意一条不满足即淘汰）：
       - 状态机：仅在 BULL_TREND / BULL_PULLBACK 时执行
       - 趋势确认：MA20 > MA60（短期均线站上长期均线）
-      - MA60斜率：> 0（长期上升趋势，非熊市反弹）
       - 60日RS排名：> 全池第40百分位（动量因子硬门槛）
-      - 行业RS：> -5%（不选持续跑输大盘的行业）
-      - 距60日高点回调：5% ~ 35%（太浅=没洗盘，太深=趋势受损）
-      - 止损空间：MA60需在当前价下方 5% 以内（止损有支撑）
+      - 行业RS：> -8%（不选持续显著跑输大盘的行业）
+      - 距60日高点回调：3% ~ 35%（太浅=没洗盘，太深=趋势受损）
+      - 价格相对MA60不过度偏离：不高于MA60约30%
 
     退出信号（输出字段，由调用方/回测引擎使用）：
       - stop_loss_price = MA60 × 0.98（跌破MA60止损）
@@ -3903,7 +3958,7 @@ def select_longterm_pool(
         return pd.DataFrame()
 
     # 波段策略只在持续牛市状态开仓（不含 Override——Override是单日应急机制，不适合60天波段仓）
-    if regime not in ('BULL_TREND', 'BULL_PULLBACK'):
+    if apply_market_gates and regime not in ('BULL_TREND', 'BULL_PULLBACK'):
         logger.info(f"📊 波段选股跳过（当前机制：{regime}，仅持续牛市执行）")
         return pd.DataFrame()
 
@@ -3940,7 +3995,10 @@ def select_longterm_pool(
     use_v17_late_cycle_guard = (longterm_profile == 'longterm_quality_lifecycle_v17_late_cycle_guard')
     use_v18_market_sync = (longterm_profile == 'longterm_quality_lifecycle_v18_market_sync')
 
-    if use_v12_base_reset_pool or use_v13_observation_pool or use_v14_large_quiet_pool or use_v15_confirmed_bull_pool:
+    if apply_market_gates and (
+        use_v12_base_reset_pool or use_v13_observation_pool
+        or use_v14_large_quiet_pool or use_v15_confirmed_bull_pool
+    ):
         price_vs_ma100 = macro_data.get("price_vs_ma100")
         ma100_slope_pct = macro_data.get("ma100_slope_pct")
         ma20_slope_pct = macro_data.get("ma20_slope_pct")
@@ -3973,7 +4031,7 @@ def select_longterm_pool(
     # 注意：正在回调的股票 ma20_slope 为负数是正常的（短线向下但长线向上），
     # 因此 P40 过滤门槛不使用绝对值，而是相对全池排名，且使用 P20 宽松门槛
     v16_defensive_market = False
-    if use_v16_lifecycle_pool:
+    if use_v16_lifecycle_pool and apply_market_gates:
         price_vs_ma100_v16 = float(macro_data.get("price_vs_ma100", 0.0) or 0.0)
         ma100_slope_pct_v16 = float(macro_data.get("ma100_slope_pct", 0.0) or 0.0)
         ma20_slope_pct_v16 = float(macro_data.get("ma20_slope_pct", 0.0) or 0.0)
@@ -5387,6 +5445,7 @@ def run_daily_selection(
     include_longterm: bool = True,
     short_filter_profile: str = 'baseline',
     longterm_profile: str = '',
+    apply_market_gates: bool = True,
 ) -> Dict:
     """
     完整的单日选股流程，实盘和回测共用同一套逻辑。
@@ -5468,7 +5527,19 @@ def run_daily_selection(
     # 临时将状态上调为 BEAR_BOUNCE_OVERRIDE 或 BULL_PULLBACK_OVERRIDE，
     # 允许极轻仓参与，避免踏空政策驱动的急速反转。
     # market_pct_df 已在步骤1获取，无需重复拉取。
-    if regime == 'BEAR_TREND':
+    if regime == 'DATA_UNAVAILABLE' and apply_market_gates:
+        logger.error("市场状态数据不可用，关闭选股准入")
+        result['operation_mode'] = 'stop'
+        result['position_advice'] = '空仓（市场数据不可用）'
+        result['sentiment_data'] = {
+            'operation_mode': 'stop',
+            'position_advice': result['position_advice'],
+            'decision_reason': regime_data.get('data_quality_reason', '市场数据不可用'),
+            'data_quality': 'unavailable',
+        }
+        return result
+
+    if regime == 'BEAR_TREND' and apply_market_gates:
         logger.info("📊 BEAR_TREND检测到，运行快速翻转Override...")
         regime, override_info = check_regime_override(actual_date, regime, market_pct_df)
         # Override触发时，用Override参数覆盖状态机参数
@@ -5494,7 +5565,7 @@ def run_daily_selection(
     result['atr_multiplier']      = regime_data['atr_multiplier']
 
     # BEAR_TREND（且Override未触发）：直接空仓，跳过所有后续选股流程
-    if regime == 'BEAR_TREND':
+    if regime == 'BEAR_TREND' and apply_market_gates:
         logger.warning(
             "🔴 BEAR_TREND（长期熊市+短期下跌，Override未触发）→ 强制空仓，跳过选股"
             f"（CSI300价格vsMA60={regime_data['price_vs_ma60_pct']:+.1f}%，"
@@ -5584,14 +5655,17 @@ def run_daily_selection(
     if enable_news:
         # 6.5a 方案D：概念板块热度（akshare免费，失败静默）
         logger.info("📊 获取概念板块热度（方案D）...")
-        hot_concepts = fetch_real_concept_heat(top_n=config.NEWS_ANALYSIS_CONFIG.get("concept_top_n", 10))
+        hot_concepts = fetch_real_concept_heat(
+            top_n=config.NEWS_ANALYSIS_CONFIG.get("concept_top_n", 10),
+            as_of_date=actual_date,
+        )
         if not hot_concepts:
             hot_concepts = news_analyzer.get_hot_concepts()
         concept_industry_boosts = news_analyzer.build_concept_industry_boosts(hot_concepts)
 
         # 6.5b 方案A：AI解读新闻→板块映射
         logger.info("📰 获取政策新闻...")
-        policy_news = news_analyzer.get_policy_news()
+        policy_news = news_analyzer.get_policy_news(as_of=actual_date)
     else:
         hot_concepts = []
         concept_industry_boosts = {}
@@ -5605,11 +5679,11 @@ def run_daily_selection(
 
     # AI消息判断只作为独立观察层保存，严禁进入量化分数、排名、入池和市场模式。
     ai_sector_observations = news_analyzer.build_sector_boosts(ai_news_result)
-    ai_news_observation = news_analyzer.analyze_news_sentiment(policy_news, ai_news_result)
+    ai_news_observation = news_analyzer.analyze_news_sentiment(policy_news, ai_news_result, as_of=actual_date)
 
     # 量化链路只使用非AI规则口径；概念热度仍由 select_stock_pool 的规则因子独立处理。
     sector_news_boosts = {}
-    news_sentiment = news_analyzer.analyze_news_sentiment(policy_news, [])
+    news_sentiment = news_analyzer.analyze_news_sentiment(policy_news, [], as_of=actual_date)
 
     # 打印消息面摘要
     if ai_sector_observations:
@@ -5644,7 +5718,7 @@ def run_daily_selection(
     result['sentiment_data']  = sentiment_data
 
     # ── 9. 根据操作模式选股 ──
-    if operation_mode == 'stop':
+    if operation_mode == 'stop' and apply_market_gates:
         logger.warning("⚠️ 停止选股，空仓观望")
         return result
 
@@ -5780,7 +5854,9 @@ def run_daily_selection(
     # v4.0改动：从 operation_mode=='full' 改为 regime in BULL 系列
     # v5.1修复：去除 BULL_PULLBACK_OVERRIDE —— 该状态是熊市单日紧急Override，
     #           波段策略持仓长达60天，不应在仅有单日信号的熊市中开仓。
-    longterm_regime_allowed = include_longterm and regime in ('BULL_TREND', 'BULL_PULLBACK')
+    longterm_regime_allowed = include_longterm and (
+        not apply_market_gates or regime in ('BULL_TREND', 'BULL_PULLBACK')
+    )
     if longterm_regime_allowed:
         logger.info(f"📊 执行波段选股v4.0（机制：{regime}）...")
 
@@ -5845,10 +5921,11 @@ def run_daily_selection(
             hot_sectors=hot_sectors,
             industry_rs=industry_rs,
             profit_growth_dict=profit_growth_dict,
-            regime=regime,
+            regime=regime if apply_market_gates else 'BULL_TREND',
             score_threshold=getattr(config, 'LONGTERM_SCORE_THRESHOLD', {}).get(regime, 70),
             longterm_profile=longterm_profile,
             macro_data=macro_data,
+            apply_market_gates=apply_market_gates,
         )
         result['longterm_pool'] = longterm_pool
     elif include_longterm:

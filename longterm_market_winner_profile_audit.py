@@ -234,7 +234,9 @@ def classify_market_samples(
         return data
     data = data.dropna(subset=[ret_col]).copy()
     if excess_col not in data.columns:
-        data[excess_col] = data[ret_col]
+        data[excess_col] = pd.NA
+        data["sample_group"] = "基准缺失"
+        return data
     winner = (data[ret_col] >= winner_ret) & (data[excess_col] >= winner_excess)
     loser = (data[ret_col] <= loser_ret) | (data[excess_col] <= loser_excess)
     data["sample_group"] = "中间"

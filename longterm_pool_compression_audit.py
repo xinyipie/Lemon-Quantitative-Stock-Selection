@@ -123,16 +123,14 @@ def add_compression_features(df: pd.DataFrame, lookback_days: int = 20) -> pd.Da
     if data.empty:
         return data
     data = data.sort_values(["select_date", "ts_code"]).copy()
-    dates = sorted(data["select_date"].dropna().astype(str).unique().tolist())
-    date_index = {date: idx for idx, date in enumerate(dates)}
-    data["_scan_index"] = data["select_date"].map(date_index)
+    data["_select_dt"] = pd.to_datetime(data["select_date"], format="%Y%m%d", errors="coerce")
 
     recent_counts = []
-    for _, row in data[["ts_code", "_scan_index"]].iterrows():
+    for _, row in data[["ts_code", "_select_dt"]].iterrows():
         code = row["ts_code"]
-        idx = int(row["_scan_index"])
-        start = idx - int(lookback_days)
-        history = data[(data["ts_code"] == code) & (data["_scan_index"] >= start) & (data["_scan_index"] <= idx)]
+        current_dt = row["_select_dt"]
+        start_dt = current_dt - pd.Timedelta(days=max(int(lookback_days) - 1, 0))
+        history = data[(data["ts_code"] == code) & (data["_select_dt"] >= start_dt) & (data["_select_dt"] <= current_dt)]
         recent_counts.append(int(history["select_date"].nunique()))
     data["recent_appearances"] = recent_counts
 
@@ -151,7 +149,7 @@ def add_compression_features(df: pd.DataFrame, lookback_days: int = 20) -> pd.Da
         + repeat_score * 0.20
         - value_penalty
     ).round(2)
-    return data.drop(columns=["_scan_index"])
+    return data.drop(columns=["_select_dt"])
 
 
 def compress_pool(

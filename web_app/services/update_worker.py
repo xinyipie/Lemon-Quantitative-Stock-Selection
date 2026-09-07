@@ -18,8 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     command = json.loads(args[0])
     status_path = Path(args[1])
     log_path = Path(args[2]) if len(args) == 3 else None
-    run_update_job(command, status_path=status_path, log_path=log_path)
-    return 0
+    return run_update_job(command, status_path=status_path, log_path=log_path)
 
 
 if __name__ == "__main__":

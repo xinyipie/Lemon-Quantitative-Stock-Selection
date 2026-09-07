@@ -40,7 +40,6 @@ def candidate_mask(frame: pd.DataFrame, config: RuleConfig = BASE_CONFIG) -> pd.
         & pd.to_numeric(frame["pct_chg"], errors="coerce").between(-1.0, 6.0)
         & pd.to_numeric(frame["turnover_rate"], errors="coerce").between(1.0, 15.0)
         & pd.to_numeric(frame["volume_ratio"], errors="coerce").between(0.8, 2.5)
-        & pd.to_numeric(frame["entry_gap_pct"], errors="coerce").between(-2.5, 4.0)
         & pd.to_numeric(frame["ret_20"], errors="coerce").between(config.ret20_min, 80.0)
         & pd.to_numeric(frame["ret_60"], errors="coerce").between(40.0, 160.0)
         & pd.to_numeric(frame["drawdown_20"], errors="coerce").between(-8.0, 3.0)
@@ -67,7 +66,7 @@ def score_candidates(frame: pd.DataFrame) -> pd.DataFrame:
 
     work = frame.copy()
     volume_quality = -(pd.to_numeric(work["volume_ratio"], errors="coerce") - 1.3).abs()
-    gap_quality = -pd.to_numeric(work["entry_gap_pct"], errors="coerce").abs()
+    day_move_quality = -pd.to_numeric(work["pct_chg"], errors="coerce").abs()
     work["momentum_score"] = (
         _rank(work, work["ret_20"]) * 0.25
         + _rank(work, work["industry_rs_20"]) * 0.25
@@ -75,7 +74,7 @@ def score_candidates(frame: pd.DataFrame) -> pd.DataFrame:
         + _rank(work, work["flow_ratio_5d"]) * 0.15
         + _rank(work, volume_quality) * 0.10
         + _rank(work, work["volatility_20"], higher_better=False) * 0.05
-        + _rank(work, gap_quality) * 0.05
+        + _rank(work, day_move_quality) * 0.05
     )
     return work
 

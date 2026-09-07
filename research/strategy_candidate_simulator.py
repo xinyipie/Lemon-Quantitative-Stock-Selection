@@ -416,13 +416,12 @@ def _classify_candidate(item: dict, baseline_name: str) -> str:
 
     overall_edge = item["overall"].get("edge_vs_baseline")
     validate_edge = item["phases"].get("validate_2025H2", {}).get("edge_vs_baseline")
-    holdout_edge = item["phases"].get("holdout_2024H1", {}).get("edge_vs_baseline")
     sample_count = item["overall"]["sample_count"]
     if sample_count < 10:
         return "too_sparse"
     if overall_edge is None:
         return "needs_more_data"
-    if validate_edge is not None and validate_edge >= 0 and (holdout_edge is None or holdout_edge >= -1) and overall_edge > 0:
+    if validate_edge is not None and validate_edge >= 0 and overall_edge > 0:
         return "promising_for_validation"
     if overall_edge < -1:
         return "worse_than_baseline"
@@ -440,9 +439,9 @@ def _edge(metrics: dict, baseline: dict | None) -> float | None:
 def _phase_for_date(value: int | str) -> str:
     date = int(value)
     if 20240101 <= date <= 20240630:
-        return "holdout_2024H1"
+        return "retrospective_2024H1"
     if 20240701 <= date <= 20250630:
-        return "train_2024H2_2025H1"
+        return "development_2024H2_2025H1"
     if 20250701 <= date <= 20251231:
         return "validate_2025H2"
     if date >= 20260101:
@@ -542,7 +541,7 @@ def _format_candidate_section(title: str, section: dict) -> list[str]:
             "|---|---|---:|---:|---:|---:|",
         ]
     )
-    phase_order = ["holdout_2024H1", "train_2024H2_2025H1", "validate_2025H2", "reference_2026", "other"]
+    phase_order = ["retrospective_2024H1", "development_2024H2_2025H1", "validate_2025H2", "reference_2026", "other"]
     for name, item in section["candidates"].items():
         for phase in phase_order:
             metrics = item["phases"].get(phase)

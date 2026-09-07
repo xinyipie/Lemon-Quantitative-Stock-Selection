@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from research.clean_financial_relative_confidence import enforce_same_stock_cooldown
+from research.research_integrity import purge_overlapping_label_tail
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,7 @@ RAW_COLUMNS = [
     "ret_5", "ret_10", "ret_20", "ret_60", "ma_5", "ma_20", "ma_60",
     "prior_high_20", "drawdown_20", "rsi_14", "volatility_20", "turnover_rate",
     "volume_ratio", "industry_rs_20", "entry_open", "entry_gap_pct", "ret_3d", "ret_5d",
+    "label_exit_date_3d", "label_exit_date_5d", "label_exit_date_8d",
 ]
 
 FEATURES = [
@@ -84,7 +86,12 @@ def tradable_universe(frame: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.DataFrame:
+def sample_training_rows(
+    frame: pd.DataFrame,
+    years: tuple[int, ...],
+    *,
+    prediction_start_date: str | None = None,
+) -> pd.DataFrame:
     """按年份等上限抽样，避免后期上市公司数量主导模型。"""
 
     parts = []
@@ -93,7 +100,12 @@ def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.Data
         if len(part) > 150000:
             part = part.sample(n=150000, random_state=RANDOM_STATE + year)
         parts.append(part)
-    return pd.concat(parts, ignore_index=True)
+    sampled = pd.concat(parts, ignore_index=True)
+    return purge_overlapping_label_tail(
+        sampled,
+        horizon=5,
+        prediction_start_date=prediction_start_date,
+    )
 
 
 def new_model() -> HistGradientBoostingRegressor:
@@ -115,7 +127,11 @@ def predict_walkforward(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     predictions = []
     model_meta = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows(frame, train_years)
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
         model = new_model()
         model.fit(train[FEATURES], train[TARGET].clip(-15.0, 15.0))

@@ -4,9 +4,17 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import ipaddress
+import os
 import pickle
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
+
+from filelock import FileLock, Timeout as FileLockTimeout
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -17,7 +25,12 @@ from history_store import DEFAULT_HISTORY_DB_PATH
 from market_radar.store import get_latest_market_radar_snapshot, save_market_radar_snapshot
 from signal_store import DEFAULT_DB_PATH as DEFAULT_SIGNAL_DB_PATH
 from web_app.services.history_service import get_db_status, get_stock_detail
-from web_app.services.explanation_service import get_daily_brief, get_or_create_signal_explanation
+from web_app.services.explanation_service import (
+    ExplanationCacheBusyError,
+    get_daily_brief,
+    get_or_create_signal_explanation,
+    get_signal_explanation,
+)
 from web_app.services.sector_service import (
     build_concept_news_radar,
     build_market_radar_decision,
@@ -27,11 +40,13 @@ from web_app.services.sector_service import (
 from web_app.services.update_service import decorate_update_status_with_freshness, read_update_status, start_web_update
 from web_app.services.report_service import build_report_archive_context, build_report_detail_context
 from web_app.services.ui_service import (
+    build_page_time_context,
     display_source_label,
     format_date_input,
     format_optional,
     normalize_date_input,
     paginate_items,
+    validate_date_range,
 )
 from web_app.services.dragon_service import build_dragon_observation
 from web_app.services.signal_service import (
@@ -66,6 +81,85 @@ BASE_DIR = Path(__file__).resolve().parent
 app = FastAPI(title="A股策略研究看板", version="0.1.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _app_path(request: Request, path: str) -> str:
+    """拼接 ASGI 挂载前缀，使直连和网关下的链接都指向当前应用。"""
+    root_path = str(request.scope.get("root_path") or "").rstrip("/")
+    suffix = "/" + str(path or "").lstrip("/")
+    return f"{root_path}{suffix}" or "/"
+
+
+templates.env.globals["app_path"] = _app_path
+
+
+def _app_url_for(request: Request, name: str, **path_params):
+    """从子应用解析路由名称，再加挂载前缀，避免被网关同名路由遮蔽。"""
+    path = app.url_path_for(name, **path_params)
+    return request.url.replace(path=_app_path(request, str(path)), query="")
+
+
+templates.env.globals["app_url_for"] = _app_url_for
+
+
+def _static_asset_version(path: str) -> str:
+    """按静态文件内容生成版本号，发布后自动绕过旧浏览器缓存。"""
+    asset = (BASE_DIR / "static" / Path(path).name).resolve()
+    return hashlib.sha256(asset.read_bytes()).hexdigest()[:12]
+
+
+templates.env.globals["static_asset_version"] = _static_asset_version
+
+
+def _request_has_web_token(request: Request, token: str) -> bool:
+    """同时接受 API 常用的 Bearer 和浏览器原生支持的 Basic。"""
+    scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        return hmac.compare_digest(credential.strip().encode("utf-8"), token.encode("utf-8"))
+    if scheme.lower() != "basic":
+        return False
+    try:
+        decoded = base64.b64decode(credential.strip(), validate=True)
+    except ValueError:
+        return False
+    username, separator, password = decoded.partition(b":")
+    supplied = password if separator and password else username
+    return hmac.compare_digest(supplied, token.encode("utf-8"))
+
+
+def _is_loopback_client(request: Request) -> bool:
+    host = str(request.client.host if request.client else "")
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+def _is_same_origin(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    parsed = urlsplit(origin)
+    return parsed.scheme == request.url.scheme and parsed.netloc.lower() == request.url.netloc.lower()
+
+
+@app.middleware("http")
+async def enforce_web_access(request: Request, call_next):
+    """显式令牌保护全部请求；默认只读，开发环境可单独允许本机写入。"""
+    token = os.environ.get("STOCK_WEB_TOKEN", "").strip()
+    if token and not _request_has_web_token(request, token):
+        return JSONResponse(
+            {"detail": "需要登录后才能访问当前服务"},
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="stock-dashboard"'},
+        )
+    if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+        allow_local_write = os.environ.get("STOCK_WEB_ALLOW_LOCAL_WRITE", "").strip() == "1"
+        if not token and (not allow_local_write or not _is_loopback_client(request)):
+            return JSONResponse({"detail": "当前服务为只读模式，未启用写操作"}, status_code=403)
+        if not _is_same_origin(request):
+            return JSONResponse({"detail": "拒绝来自其他站点的写操作"}, status_code=403)
+    return await call_next(request)
 
 
 def _fmt_date(value):
@@ -104,11 +198,20 @@ def _update_start_response(request: Request, status: dict | None, redirect_url: 
 
 @app.get("/reports")
 def report_archive(request: Request, q: str = "", start: str = "", end: str = ""):
-    context = build_report_archive_context(DEFAULT_SIGNAL_DB_PATH, q, start, end)
+    date_error = validate_date_range(start, end)
+    if date_error:
+        context = {
+            "items": [],
+            "query": q,
+            "start": normalize_date_input(start),
+            "end": normalize_date_input(end),
+        }
+    else:
+        context = build_report_archive_context(DEFAULT_SIGNAL_DB_PATH, q, start, end)
     return templates.TemplateResponse(
         request,
         "reports.html",
-        {"request": request, "active_nav": "reports", **context},
+        {"request": request, "active_nav": "reports", "date_error": date_error, **context},
     )
 
 
@@ -292,7 +395,7 @@ def db_status(request: Request):
         {
             "request": request,
             "status": status,
-            "update_status": read_update_status(),
+            "update_status": _read_decorated_update_status(),
             "active_nav": "db",
         },
     )
@@ -388,25 +491,33 @@ def load_sector_page_cache(path: Path, key: tuple) -> dict | None:
 
 
 def save_sector_page_cache(path: Path, key: tuple, payload: dict) -> None:
-    """原子写入雷达页面缓存，不让中断写入污染下次启动。"""
+    """跨进程串行完成读改写，避免并发请求覆盖彼此的缓存键。"""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    entries = {}
     try:
-        existing = pickle.loads(target.read_bytes())
-        if isinstance(existing, dict) and existing.get("version") == _SECTOR_PAGE_CACHE_VERSION:
-            entries = dict(existing.get("entries") or {})
-    except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
-        pass
-    entries[tuple(key)] = payload
-    data = {
-        "version": _SECTOR_PAGE_CACHE_VERSION,
-        "created_at": time.time(),
-        "entries": entries,
-    }
-    temporary.write_bytes(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
-    temporary.replace(target)
+        with FileLock(str(target) + ".lock", timeout=2):
+            entries = {}
+            try:
+                existing = pickle.loads(target.read_bytes())
+                if isinstance(existing, dict) and existing.get("version") == _SECTOR_PAGE_CACHE_VERSION:
+                    entries = dict(existing.get("entries") or {})
+            except (OSError, EOFError, pickle.PickleError, ValueError, TypeError):
+                pass
+            entries[tuple(key)] = payload
+            data = {
+                "version": _SECTOR_PAGE_CACHE_VERSION,
+                "created_at": time.time(),
+                "entries": entries,
+            }
+            temporary = target.with_name(f"{target.name}.{os.getpid()}.{time.time_ns()}.tmp")
+            try:
+                temporary.write_bytes(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL))
+                temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
+    except FileLockTimeout:
+        # 页面数据已经在内存中可用，持久化锁繁忙时跳过本次落盘即可。
+        return
 
 
 def _sector_page_cache_key(end: str = "") -> tuple:
@@ -448,6 +559,7 @@ def _build_sector_page_payload(end: str = "") -> dict:
         "strategy_overlap": strategy_overlap,
         "latest_radar_snapshot": latest_radar_snapshot,
         "freshness": freshness,
+        "page_time": build_page_time_context(target_date),
         "ai_news_brief": ai_news_brief,
     }
 
@@ -475,21 +587,23 @@ def update_market_radar(request: Request, end: str = ""):
 
 
 @app.get("/stock")
-def stock_redirect(code: str = ""):
+def stock_redirect(request: Request, code: str = ""):
     if not code:
-        return RedirectResponse(url="/", status_code=303)
-    return RedirectResponse(url=f"/stock/{code}", status_code=303)
+        return RedirectResponse(url=_app_path(request, "/"), status_code=303)
+    return RedirectResponse(url=_app_path(request, f"/stock/{code}"), status_code=303)
 
 
 @app.get("/stock/{code}")
 def stock_detail(request: Request, code: str):
     detail = get_stock_detail(code, history_db=DEFAULT_HISTORY_DB_PATH, signal_db=DEFAULT_SIGNAL_DB_PATH)
-    stock_signals = get_stock_signals(
-        detail["stock"]["ts_code"],
-        signal_db=DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        limit=20,
-    )
+    stock_signals = []
+    if detail.get("asset_type") == "stock":
+        stock_signals = get_stock_signals(
+            detail["stock"]["ts_code"],
+            signal_db=DEFAULT_SIGNAL_DB_PATH,
+            history_db=DEFAULT_HISTORY_DB_PATH,
+            limit=20,
+        )
     strategy_summary = summarize_stock_strategy_history(stock_signals)
     return templates.TemplateResponse(
         request,
@@ -620,6 +734,7 @@ def signals(
     latest_signal_date = latest_signal_run["trade_date"] if latest_signal_run else None
     normalized_start = normalize_date_input(start)
     normalized_end = normalize_date_input(end)
+    date_error = validate_date_range(start, end)
     allowed_strategies = {"all", "steady", "balance", "repair"}
     active_strategy = strategy if strategy in allowed_strategies else "all"
     effective_start = normalized_start or (
@@ -634,18 +749,20 @@ def signals(
         "short_live_observe_best_balance",
         "short_defensive_quality_reentry_v16",
     ]
-    all_strategy_signals = get_recent_signals(
-        DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        limit=900,
-        source=history_sources,
-        profile=history_profiles,
-        mode="short",
-        query=q or None,
-        start=effective_start or None,
-        end=normalized_end or None,
-        industry=industry or None,
-    )
+    all_strategy_signals = []
+    if not date_error:
+        all_strategy_signals = get_recent_signals(
+            DEFAULT_SIGNAL_DB_PATH,
+            history_db=DEFAULT_HISTORY_DB_PATH,
+            limit=900,
+            source=history_sources,
+            profile=history_profiles,
+            mode="short",
+            query=q or None,
+            start=effective_start or None,
+            end=normalized_end or None,
+            industry=industry or None,
+        )
     strategy_summary_signals = get_recent_signals(
         DEFAULT_SIGNAL_DB_PATH,
         history_db=None,
@@ -660,19 +777,7 @@ def signals(
         if active_strategy == "all"
         else [item for item in all_strategy_signals if item.get("strategy_key") == active_strategy]
     )
-    official_kpi_signals = get_recent_signals(
-        DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        limit=300,
-        source=review_sources,
-        profile=review_profiles,
-        mode="short",
-        query=q or None,
-        start=(normalized_start or build_default_signal_start(latest_signal_date, days=default_window_days)),
-        end=normalized_end or None,
-        industry=industry or None,
-    )
-    short_stats = summarize_short_signal_performance(official_kpi_signals, limit=300)
+    short_stats = summarize_short_signal_performance(all_signals, limit=len(all_signals))
     result_context = _build_short_result_context(all_signals, view=view)
     recent_signals, page_info = paginate_items(result_context["items"], page, page_size=30)
     return templates.TemplateResponse(
@@ -689,6 +794,8 @@ def signals(
             "result_view": result_context["view"],
             "result_counts": result_context["counts"],
             "latest_signal_run": latest_signal_run,
+            "page_time": build_page_time_context(latest_signal_date),
+            "date_error": date_error,
             "strong_recommendation": strong_recommendation,
             "observation_candidates": observation_candidates,
             "live_push_history": live_push_history,
@@ -718,6 +825,7 @@ def dragon_leaders(request: Request, end: str = ""):
         {
             "request": request,
             "observation": observation,
+            "page_time": build_page_time_context(observation.get("trade_date")),
             "filters": {"end": end},
             "update_status": read_update_status(),
             "active_nav": "dragon",
@@ -733,13 +841,19 @@ def update_dragon_leaders(request: Request):
 
 @app.get("/explain/signal/{trade_date}/{ts_code}")
 def signal_explanation(request: Request, trade_date: str, ts_code: str):
-    explanation = get_or_create_signal_explanation(
-        trade_date,
-        ts_code,
-        signal_db=DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        force=False,
-    )
+    try:
+        explanation = get_signal_explanation(
+            trade_date,
+            ts_code,
+            signal_db=DEFAULT_SIGNAL_DB_PATH,
+            history_db=DEFAULT_HISTORY_DB_PATH,
+        )
+    except ExplanationCacheBusyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="解释缓存正忙，请稍后重试",
+            headers={"Retry-After": "2"},
+        ) from exc
     return templates.TemplateResponse(
         request,
         "signal_explanation.html",
@@ -748,15 +862,25 @@ def signal_explanation(request: Request, trade_date: str, ts_code: str):
 
 
 @app.post("/explain/signal/{trade_date}/{ts_code}/refresh")
-def refresh_signal_explanation(trade_date: str, ts_code: str):
-    get_or_create_signal_explanation(
-        trade_date,
-        ts_code,
-        signal_db=DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        force=True,
+def refresh_signal_explanation(request: Request, trade_date: str, ts_code: str):
+    try:
+        get_or_create_signal_explanation(
+            trade_date,
+            ts_code,
+            signal_db=DEFAULT_SIGNAL_DB_PATH,
+            history_db=DEFAULT_HISTORY_DB_PATH,
+            force=True,
+        )
+    except ExplanationCacheBusyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="解释缓存正忙，请稍后重试",
+            headers={"Retry-After": "2"},
+        ) from exc
+    return RedirectResponse(
+        url=_app_path(request, f"/explain/signal/{trade_date}/{ts_code}"),
+        status_code=303,
     )
-    return RedirectResponse(url=f"/explain/signal/{trade_date}/{ts_code}", status_code=303)
 
 
 def _build_longterm_result_context(samples: list[dict]) -> dict:
@@ -827,6 +951,7 @@ def _build_longterm_result_context(samples: list[dict]) -> dict:
     worst = min(completed, key=lambda item: float(item.get("ret_80d") or 0), default=None)
     count = len(completed)
     return {
+        "all": samples,
         "completed": completed,
         "current": current,
         "completed_count": count,
@@ -842,6 +967,23 @@ def _build_longterm_result_context(samples: list[dict]) -> dict:
     }
 
 
+def _select_longterm_result_view(result_context: dict, view: str) -> list[dict]:
+    """长线风险页只展示已完成80日且最大回撤达到阈值的样本。"""
+    if view == "current":
+        return result_context["current"]
+    if view == "outperform":
+        return [item for item in result_context["completed"] if float(item.get("excess_ret_80d") or 0) > 0]
+    if view == "risk":
+        return [
+            item
+            for item in result_context["completed"]
+            if item.get("mae_80d") is not None and float(item["mae_80d"]) <= -15
+        ]
+    if view == "all":
+        return result_context["all"]
+    return result_context["completed"]
+
+
 @app.get("/longterm")
 def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed"):
     pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
@@ -851,26 +993,20 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
     audit_summary = get_longterm_audit_summary(DEFAULT_SIGNAL_DB_PATH, limit=12)
     normalized_start = normalize_date_input(start)
     normalized_end = normalize_date_input(end)
+    date_error = validate_date_range(start, end)
     sample_limit = 1000 if (normalized_start or normalized_end) else 100
-    all_audit_samples = get_longterm_audit_samples(
-        DEFAULT_SIGNAL_DB_PATH,
-        history_db=DEFAULT_HISTORY_DB_PATH,
-        limit=sample_limit,
-        start=normalized_start or None,
-        end=normalized_end or None,
-    )
+    all_audit_samples = []
+    if not date_error:
+        all_audit_samples = get_longterm_audit_samples(
+            DEFAULT_SIGNAL_DB_PATH,
+            history_db=DEFAULT_HISTORY_DB_PATH,
+            limit=sample_limit,
+            start=normalized_start or None,
+            end=normalized_end or None,
+        )
     result_context = _build_longterm_result_context(all_audit_samples)
     selected_view = view if view in {"completed", "current", "outperform", "risk", "all"} else "completed"
-    if selected_view == "current":
-        visible_samples = result_context["current"]
-    elif selected_view == "outperform":
-        visible_samples = [item for item in result_context["completed"] if float(item.get("excess_ret_80d") or 0) > 0]
-    elif selected_view == "risk":
-        visible_samples = [item for item in all_audit_samples if item.get("watch_risk_tone") in {"warn", "bad"}]
-    elif selected_view == "all":
-        visible_samples = all_audit_samples
-    else:
-        visible_samples = result_context["completed"]
+    visible_samples = _select_longterm_result_view(result_context, selected_view)
     sample_filters = {"start": normalized_start, "end": normalized_end, "sample_limit": sample_limit, "view": selected_view}
     sample_filter_summary = summarize_longterm_audit_sample_filter(visible_samples, sample_filters)
     audit_samples, page_info = paginate_items(visible_samples, page, page_size=30)
@@ -891,7 +1027,9 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "page_info": page_info,
             "run_funnel": run_funnel,
             "pool_status": pool_status,
+            "page_time": build_page_time_context(runs[0].get("trade_date") if runs else None),
             "filters": sample_filters,
+            "date_error": date_error,
             "sample_filter_summary": sample_filter_summary,
             "result_context": result_context,
             "current_audit_samples": result_context["current"][:6],

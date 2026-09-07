@@ -1,11 +1,29 @@
 import unittest
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from market_radar.ai_news_brief import _invoke_ai_stage, _validate_result_v2
 from market_radar.evidence_pack import build_evidence_pack
 
 
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+class FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        frozen = cls(2026, 8, 13, 12, 0, 0, tzinfo=BEIJING_TZ)
+        return frozen.astimezone(tz) if tz is not None else frozen.replace(tzinfo=None)
+
+
 class MarketRadarDualEntryTest(unittest.TestCase):
+    def setUp(self):
+        clock = patch("market_radar.freshness.datetime", FrozenDateTime)
+        clock.start()
+        self.addCleanup(clock.stop)
+
     def test_market_radar_routes_batch_to_flash_and_summary_to_pro(self):
         calls = []
 

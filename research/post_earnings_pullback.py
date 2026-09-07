@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+from research.no_future_signal_pipeline import signal_eligible_mask
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,8 +48,7 @@ def build_candidates(panel: pd.DataFrame, financial_events: pd.DataFrame, topn: 
     for column in numeric_columns:
         work[column] = pd.to_numeric(work[column], errors="coerce")
     mask = (
-        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
-        & (work["history_count"] >= 120)
+        signal_eligible_mask(work, min_history=120)
         & work["days_since_announcement"].between(3, 30)
         & work["roe"].between(8.0, 60.0)
         & work["netprofit_yoy"].between(15.0, 300.0)
@@ -56,7 +56,6 @@ def build_candidates(panel: pd.DataFrame, financial_events: pd.DataFrame, topn: 
         & work["pct_chg"].between(-4.0, 2.0)
         & work["turnover_rate"].between(0.5, 12.0)
         & work["volume_ratio"].between(0.4, 1.5)
-        & work["entry_gap_pct"].between(-3.0, 3.0)
         & work["ret_60"].between(0.0, 60.0)
         & work["ret_20"].between(0.0, 30.0)
         & work["ret_5"].between(-8.0, 1.0)
@@ -140,7 +139,9 @@ def evaluate(path: Path, validation_allowed: bool) -> tuple[bool, pd.DataFrame]:
 def run() -> None:
     prereg_hash = hashlib.sha256(PREREG.read_bytes()).hexdigest()
     print(f"prereg_sha256={prereg_hash}")
-    financial_events = prepare_financial_events(pd.read_parquet(FINANCIAL_CACHE))
+    financial_events = prepare_financial_events(
+        pd.read_parquet(FINANCIAL_CACHE), require_versioned_history=True
+    )
     dates = _available_dates(CACHE, "20160101", "20260807")
     regimes = _build_regimes(CACHE, dates)
     stock_info = _load_stock_info(CACHE)

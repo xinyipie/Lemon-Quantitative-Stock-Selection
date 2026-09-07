@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any
 
 
@@ -46,6 +47,41 @@ def paginate_items(items: list[dict] | None, page: int | str, page_size: int = 5
 def normalize_date_input(value: str | None) -> str:
     """把网页日期输入统一为数据库使用的 YYYYMMDD。"""
     return str(value or "").strip().replace("-", "").replace("/", "")[:8]
+
+
+def validate_date_range(start: str | None, end: str | None) -> str:
+    """校验页面日期区间，避免倒置区间被误报为普通空结果。"""
+    normalized_start = normalize_date_input(start)
+    normalized_end = normalize_date_input(end)
+    for label, value in (("开始", normalized_start), ("结束", normalized_end)):
+        if not value:
+            continue
+        try:
+            datetime.strptime(value, "%Y%m%d")
+        except ValueError:
+            return f"{label}日期格式无效"
+    if normalized_start and normalized_end and normalized_start > normalized_end:
+        return "开始日期不能晚于结束日期"
+    return ""
+
+
+def build_page_time_context(
+    as_of_date: str | None,
+    now: datetime | None = None,
+    stale_after_days: int = 3,
+) -> dict:
+    """判断页面数据是否只能作为历史截面解读。"""
+    normalized = normalize_date_input(as_of_date)
+    try:
+        as_of = datetime.strptime(normalized, "%Y%m%d")
+    except ValueError:
+        return {"as_of_date": normalized or None, "is_historical": True}
+    age_days = ((now or datetime.now()).date() - as_of.date()).days
+    return {
+        "as_of_date": normalized,
+        "age_days": age_days,
+        "is_historical": age_days > stale_after_days,
+    }
 
 
 def format_date_input(value: str | None) -> str:

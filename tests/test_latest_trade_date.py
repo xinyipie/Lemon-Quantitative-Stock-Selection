@@ -38,7 +38,7 @@ class LatestTradeDateTest(unittest.TestCase):
         fake_ts = FakeTs()
         with patch.object(main, "ts", fake_ts), patch.dict(
             main.config.TUSHARE_CONFIG,
-            {"token": "valid-token", "timeout": 30, "http_url": "http://relay.local/"},
+            {"token": "valid-token", "timeout": 30, "http_url": "https://relay.local/"},
         ):
             pro = main.init_tushare()
 

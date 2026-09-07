@@ -37,6 +37,7 @@ SCORE_QUANTILES = (0.40, 0.50, 0.60)
 COOLDOWNS = (4, 5, 6)
 USE_COLUMNS = [
     "ts_code", "name", "industry", "trade_date", "entry_open", "entry_gap_pct", "ret_5d",
+    "label_exit_date_5d",
     *FEATURE_COLUMNS,
 ]
 
@@ -48,7 +49,11 @@ def build_predictions(frame: pd.DataFrame) -> dict[int, tuple[pd.DataFrame, pd.D
         training = frame.loc[years.le(target_year - 2)]
         calibration = frame.loc[years.eq(target_year - 1)].copy()
         target = frame.loc[years.eq(target_year)].copy()
-        estimator = fit_target_model(training, 5)
+        estimator = fit_target_model(
+            training,
+            5,
+            prediction_start_date=f"{target_year - 1}0101",
+        )
         calibration["prediction"] = estimator.predict(calibration[FEATURE_COLUMNS])
         target["prediction"] = estimator.predict(target[FEATURE_COLUMNS])
         result[target_year] = (daily_top_with_margin(calibration), daily_top_with_margin(target))

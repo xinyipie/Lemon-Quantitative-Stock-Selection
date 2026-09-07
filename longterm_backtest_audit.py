@@ -27,7 +27,7 @@ def _trade_dates(df: pd.DataFrame) -> List[str]:
     return sorted(d for d in dates if d and d != "nan")
 
 
-def audit_trades(df: pd.DataFrame, top_n: int = 3) -> Dict:
+def audit_trades(df: pd.DataFrame, top_n: int | None = None) -> Dict:
     if df.empty:
         return {
             "total_trades": 0,
@@ -40,6 +40,13 @@ def audit_trades(df: pd.DataFrame, top_n: int = 3) -> Dict:
     work = df.copy()
     work["buy_date"] = work["buy_date"].astype(str)
     work["sell_date"] = work["sell_date"].astype(str)
+    if top_n is None:
+        if "max_positions" not in work.columns:
+            raise ValueError("缺少 max_positions；已使用槽位不能证明组合总容量")
+        capacities = pd.to_numeric(work["max_positions"], errors="coerce").dropna().unique()
+        if len(capacities) != 1 or int(capacities[0]) <= 0:
+            raise ValueError("max_positions 必须是唯一正整数")
+        top_n = int(capacities[0])
     weight_pct = 100.0 / max(top_n, 1)
 
     max_open = 0
@@ -77,6 +84,7 @@ def audit_trades(df: pd.DataFrame, top_n: int = 3) -> Dict:
         "total_trades": int(len(work)),
         "date_span": f"{work['buy_date'].min()} ~ {work['sell_date'].max()}",
         "top_n": int(top_n),
+        "max_positions": int(top_n),
         "slot_weight_pct": round(weight_pct, 2),
         "max_open_positions": int(max_open),
         "max_slot_exposure_pct": round(max_exposure, 2),
@@ -129,7 +137,7 @@ def main() -> None:
     parser.add_argument("--trades", required=True, help="trades_*.csv 路径")
     parser.add_argument("--output", required=True, help="输出 Markdown 路径")
     parser.add_argument("--title", default="波段回测审计", help="报告标题")
-    parser.add_argument("--topn", type=int, default=3, help="回测 TopN，用于估算槽位仓位")
+    parser.add_argument("--topn", type=int, default=None, help="显式最大槽位数；省略时从 portfolio_slot 推断")
     args = parser.parse_args()
 
     df = load_trades(args.trades)

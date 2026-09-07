@@ -1,8 +1,10 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -10,7 +12,26 @@ from market_context_snapshot import write_market_context_snapshot
 from web_app.services.sector_service import build_concept_news_radar
 
 
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+class FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        frozen = cls(2026, 6, 18, 12, 0, 0, tzinfo=BEIJING_TZ)
+        return frozen.astimezone(tz) if tz is not None else frozen.replace(tzinfo=None)
+
+
 class MarketContextSnapshotTest(unittest.TestCase):
+    def setUp(self):
+        clocks = [
+            patch("market_context_snapshot.datetime", FrozenDateTime),
+            patch("market_radar.freshness.datetime", FrozenDateTime),
+        ]
+        for clock in clocks:
+            clock.start()
+            self.addCleanup(clock.stop)
+
     def test_snapshot_prefers_real_concept_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir)
@@ -37,7 +58,7 @@ class MarketContextSnapshotTest(unittest.TestCase):
         self.assertEqual(saved[0]["concept"], "AI PC")
         legacy_concepts.assert_not_called()
 
-    def test_snapshot_reuses_existing_concept_cache(self):
+    def test_snapshot_refreshes_existing_concept_cache_from_live_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir)
             (cache_dir / "hot_concepts_20260618.json").write_text(
@@ -45,7 +66,10 @@ class MarketContextSnapshotTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("market_context_snapshot.fetch_real_concept_heat") as real_concepts, patch(
+            live_concepts = [{"concept": "Live Theme", "change": 2.4, "heat": 68.0}]
+            with patch(
+                "market_context_snapshot.fetch_real_concept_heat", return_value=live_concepts
+            ) as real_concepts, patch(
                 "market_context_snapshot.news_analyzer.get_policy_news", return_value=pd.DataFrame()
             ), patch(
                 "market_context_snapshot.fetch_market_news", return_value=[]
@@ -59,8 +83,8 @@ class MarketContextSnapshotTest(unittest.TestCase):
             saved = json.loads((cache_dir / "hot_concepts_20260618.json").read_text(encoding="utf-8"))
 
         self.assertEqual(result["concept_count"], 1)
-        self.assertEqual(saved[0]["concept"], "Cached Theme")
-        real_concepts.assert_not_called()
+        self.assertEqual(saved[0]["concept"], "Live Theme")
+        real_concepts.assert_called_once()
 
     def test_snapshot_writes_ai_theme_filter_cache_once(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,13 +125,22 @@ class MarketContextSnapshotTest(unittest.TestCase):
         self.assertEqual(saved["items"][0]["level"], "strong")
         self.assertEqual(len(ai_calls), 1)
 
-    def test_snapshot_reuses_existing_theme_filter_cache(self):
+    def test_snapshot_refreshes_existing_theme_filter_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir)
             (cache_dir / "theme_filter_20260618.json").write_text(
                 '{"date": "20260618", "items": [{"theme": "Cached AI", "level": "watch"}]}',
                 encoding="utf-8",
             )
+
+            ai_calls = []
+
+            def fake_ai(prompt: str, system: str = "") -> str:
+                ai_calls.append(prompt)
+                return json.dumps(
+                    [{"theme": "AI PC", "level": "strong", "horizon": "short", "verdict": "更新"}],
+                    ensure_ascii=False,
+                )
 
             with patch(
                 "market_context_snapshot.fetch_real_concept_heat",
@@ -118,15 +151,21 @@ class MarketContextSnapshotTest(unittest.TestCase):
                 result = write_market_context_snapshot(
                     cache_dir=cache_dir,
                     snapshot_date="20260618",
-                    call_ai_api_fn=lambda prompt, system="": self.fail("theme cache should avoid AI calls"),
+                    call_ai_api_fn=fake_ai,
                 )
 
+            saved = json.loads((cache_dir / "theme_filter_20260618.json").read_text(encoding="utf-8"))
+
         self.assertEqual(result["theme_count"], 1)
+        self.assertEqual(saved["items"][0]["theme"], "AI PC")
+        self.assertEqual(len(ai_calls), 1)
 
     def test_snapshot_writes_concept_and_news_cache_for_sector_radar(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = Path(tmpdir)
-            news_df = pd.DataFrame([{"title": "AI算力政策继续支持"}])
+            news_df = pd.DataFrame(
+                [{"title": "AI算力政策继续支持", "time": "2026-06-18 09:00:00"}]
+            )
 
             def fake_ai(prompt: str, system: str = "") -> str:
                 return json.dumps(
@@ -154,11 +193,11 @@ class MarketContextSnapshotTest(unittest.TestCase):
                 hot_concepts.return_value = [{"concept": "AI算力", "change": 3.2, "heat": 88.5}]
                 result = write_market_context_snapshot(
                     cache_dir=cache_dir,
-                    snapshot_date="20260616",
+                    snapshot_date="20260618",
                     call_ai_api_fn=fake_ai,
                 )
 
-            radar = build_concept_news_radar(signal_db=cache_dir / "missing.db", cache_dir=cache_dir, today="20260616")
+            radar = build_concept_news_radar(signal_db=cache_dir / "missing.db", cache_dir=cache_dir, today="20260618")
 
         self.assertTrue(result["concept_count"] >= 1)
         self.assertTrue(result["news_item_count"] >= 1)
@@ -229,7 +268,7 @@ class MarketContextSnapshotTest(unittest.TestCase):
                     "providers": ["test"],
                     "sources": ["测试源"],
                     "source_count": 1,
-                    "publish_time": f"2026-06-18 {i % 24:02d}:00:00",
+                    "publish_time": "2026-06-18 09:00:00",
                     "url": f"https://example.com/news/{i}",
                     "content_excerpt": "用于测试价值排序新闻输入。",
                     "news_value_score": 100 - i,
@@ -255,7 +294,12 @@ class MarketContextSnapshotTest(unittest.TestCase):
 
             payload = json.loads((cache_dir / "news_sector_20260618.json").read_text(encoding="utf-8"))
 
-        fetch_news.assert_called_once_with(days=5, limit=100)
+        fetch_news.assert_called_once_with(
+            days=2,
+            limit=100,
+            provider_attempts=2,
+            include_unverified=True,
+        )
         self.assertEqual(len(payload["titles"]), 35)
         self.assertEqual(len(payload["ai_titles"]), 30)
         self.assertEqual(payload["raw_news_total"], 35)
@@ -272,7 +316,7 @@ class MarketContextSnapshotTest(unittest.TestCase):
                     "title": "AI infrastructure project approved",
                     "source": "test source",
                     "provider": "test",
-                    "publish_time": "2026-07-14 09:00:00",
+                    "publish_time": "2026-06-18 09:00:00",
                     "url": "https://example.com/news/ai",
                     "content_excerpt": "The project entered construction.",
                     "news_value_score": 76.0,
@@ -285,9 +329,9 @@ class MarketContextSnapshotTest(unittest.TestCase):
             ), patch("market_context_snapshot.fetch_market_news", return_value=raw_news), patch.dict(
                 "market_context_snapshot.config.AI_CONFIG", {"api_key": ""}
             ):
-                write_market_context_snapshot(cache_dir=cache_dir, snapshot_date="20260714")
+                write_market_context_snapshot(cache_dir=cache_dir, snapshot_date="20260618")
 
-            payload = json.loads((cache_dir / "news_sector_20260714.json").read_text(encoding="utf-8"))
+            payload = json.loads((cache_dir / "news_sector_20260618.json").read_text(encoding="utf-8"))
 
         self.assertEqual(payload["raw_news_total"], 1)
         self.assertEqual(payload["raw_news"][0]["title"], "AI infrastructure project approved")

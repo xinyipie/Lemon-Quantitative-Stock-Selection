@@ -81,7 +81,7 @@ def evaluate_rule(candidates: pd.DataFrame, rule_name: str) -> pd.DataFrame:
         raise ValueError(f"Unknown rule: {rule_name}")
 
     score = _num(df, "score")
-    original_score = _num(df, "original_score", _num(df, "score_base", 0.0))
+    original_score = _num(df, "original_score", _num(df, "score_base"))
     pattern = _num(df, "factor_pattern")
     drawdown_score = _num(df, "factor_drawdown")
     sector = _num(df, "factor_sector")
@@ -110,10 +110,11 @@ def evaluate_rule(candidates: pd.DataFrame, rule_name: str) -> pd.DataFrame:
     return df
 
 
-def _num(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
+def _num(df: pd.DataFrame, col: str, default=None) -> pd.Series:
     if col not in df.columns:
         return pd.Series(default, index=df.index, dtype="float64")
-    return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    values = pd.to_numeric(df[col], errors="coerce")
+    return values.fillna(default) if default is not None else values
 
 
 def summarize_rule_hits(candidates: pd.DataFrame, trades: pd.DataFrame) -> dict[str, float | int]:
@@ -121,6 +122,10 @@ def summarize_rule_hits(candidates: pd.DataFrame, trades: pd.DataFrame) -> dict[
     trades = normalize_frame(trades)
     if "_rule_hit" not in candidates.columns:
         raise ValueError("Candidates must contain _rule_hit. Call evaluate_rule first.")
+    if candidates.duplicated(["select_date", "ts_code"]).any():
+        raise ValueError("候选键重复：select_date/ts_code 必须唯一")
+    if "profit_after_fee" not in trades.columns:
+        raise ValueError("交易数据缺少 profit_after_fee，无法计算净收益")
 
     candidate_hits = candidates[candidates["_rule_hit"]]
     top3_hits = candidate_hits[candidate_hits.get("candidate_top3", False)]

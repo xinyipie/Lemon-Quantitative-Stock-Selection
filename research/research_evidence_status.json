@@ -1,0 +1,565 @@
+{
+  "all_market_opportunity_archetypes.py": {
+    "research_id": "all_market_opportunity_archetypes",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "broad_engine_factor_miner.py": {
+    "research_id": "broad_engine_factor_miner",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "broad_engine_rule_union_search.py": {
+    "research_id": "broad_engine_rule_union_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "clean_bagged_lcb_market_head_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_head_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_bagged_lcb_market_head_hard_gate_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_head_hard_gate_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_bagged_lcb_market_head_rolling3y_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_head_rolling3y_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_bagged_lcb_market_hgb_classifier_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_hgb_classifier_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_bagged_lcb_market_rolling3y_cost_gate_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_rolling3y_cost_gate_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_bagged_lcb_market_tail_risk_classifier_2019_2024.py": {
+    "research_id": "clean_bagged_lcb_market_tail_risk_classifier_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_financial_aligned5_sealed_2025.py": {
+    "research_id": "clean_financial_aligned5_sealed_2025",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "clean_risk_adjusted_bagged_lcb_market_2019_2024.py": {
+    "research_id": "clean_risk_adjusted_bagged_lcb_market_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_sector_diverse_bagged_lcb_market_2019_2024.py": {
+    "research_id": "clean_sector_diverse_bagged_lcb_market_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_shsz_bagged_cross_section_rank_2019_2024.py": {
+    "research_id": "clean_shsz_bagged_cross_section_rank_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_shsz_bagged_lcb_high_conf_tail_veto_2019_2024.py": {
+    "research_id": "clean_shsz_bagged_lcb_high_conf_tail_veto_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_shsz_bagged_top_decile_classifier_2019_2024.py": {
+    "research_id": "clean_shsz_bagged_top_decile_classifier_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_shsz_conditional_rank_existing_exit_2019_2024.py": {
+    "research_id": "clean_shsz_conditional_rank_existing_exit_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_shsz_conditional_risk_rank_2019_2024.py": {
+    "research_id": "clean_shsz_conditional_risk_rank_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_walkforward_absolute_bagged_lcb_2019_2024.py": {
+    "research_id": "clean_walkforward_absolute_bagged_lcb_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_walkforward_excess_bagged_lcb_3d_2019_2024.py": {
+    "research_id": "clean_walkforward_excess_bagged_lcb_3d_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "clean_walkforward_technical_hgb_holdout_calibrated.py": {
+    "research_id": "clean_walkforward_technical_hgb_holdout_calibrated",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "calibration_holdout_not_final_oos"
+    ]
+  },
+  "consensus_rule_search.py": {
+    "research_id": "consensus_rule_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution",
+      "same_sample_optimization"
+    ]
+  },
+  "defensive_quality_reentry_v16_2019_2026.py": {
+    "research_id": "defensive_quality_reentry_v16_2019_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "defensive_quality_reentry_v17_stress_2019_2026.py": {
+    "research_id": "defensive_quality_reentry_v17_stress_2019_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "delayed_confirmation_gate_search.py": {
+    "research_id": "delayed_confirmation_gate_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "dragon_fast_money_experiment.py": {
+    "research_id": "dragon_fast_money_experiment",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution"
+    ]
+  },
+  "dragon_page_backtest.py": {
+    "research_id": "dragon_page_backtest",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution"
+    ]
+  },
+  "dragon_reliability_backtest.py": {
+    "research_id": "dragon_reliability_backtest",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution"
+    ]
+  },
+  "engine_multibucket_strategy_search.py": {
+    "research_id": "engine_multibucket_strategy_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "entry_timing_bucket_research.py": {
+    "research_id": "entry_timing_bucket_research",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "expansion_layer_rule_search.py": {
+    "research_id": "expansion_layer_rule_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution",
+      "same_sample_optimization"
+    ]
+  },
+  "full_market_event_research.py": {
+    "research_id": "full_market_event_research",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "overlapping_horizon_not_account_curve"
+    ]
+  },
+  "high_momentum_continuation_v13_2019_2026.py": {
+    "research_id": "high_momentum_continuation_v13_2019_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "live_base_filter_optimizer.py": {
+    "research_id": "live_base_filter_optimizer",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "live_readiness_optimizer.py": {
+    "research_id": "live_readiness_optimizer",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "live_readiness_postmortem.py": {
+    "research_id": "live_readiness_postmortem",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "moneyflow_breakout_online_opportunity_v10_2019_2024.py": {
+    "research_id": "moneyflow_breakout_online_opportunity_v10_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "moneyflow_breakout_ridge_v9_2019_2024.py": {
+    "research_id": "moneyflow_breakout_ridge_v9_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "opportunity_archetype_ranking_research.py": {
+    "research_id": "opportunity_archetype_ranking_research",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "pattern_breadth_rule_search.py": {
+    "research_id": "pattern_breadth_rule_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution",
+      "same_sample_optimization"
+    ]
+  },
+  "quality_momentum_direct_top2_2019_2024.py": {
+    "research_id": "quality_momentum_direct_top2_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_dual_window_consensus_v15_2019_2026.py": {
+    "research_id": "quality_momentum_dual_window_consensus_v15_2019_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "quality_momentum_moneyflow_v12_observation_2026.py": {
+    "research_id": "quality_momentum_moneyflow_v12_observation_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "quality_momentum_reentry_horizon_v8_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_horizon_v8_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_loss_averse_v7_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_loss_averse_v7_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_margin_v3_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_margin_v3_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_margin_v3_holdout_2025.py": {
+    "research_id": "quality_momentum_reentry_margin_v3_holdout_2025",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "quality_momentum_reentry_online_gate_v5_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_online_gate_v5_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_rank_only_v4_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_rank_only_v4_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_sealed_2025.py": {
+    "research_id": "quality_momentum_reentry_sealed_2025",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "quality_momentum_reentry_top1_v2_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_top1_v2_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_reentry_turnover_guard_v6_2019_2024.py": {
+    "research_id": "quality_momentum_reentry_turnover_guard_v6_2019_2024",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "quality_momentum_rolling3y_v14_2019_2026.py": {
+    "research_id": "quality_momentum_rolling3y_v14_2019_2026",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "consumed_holdout"
+    ]
+  },
+  "short_signal_factor_miner.py": {
+    "research_id": "short_signal_factor_miner",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "sparse_year_addon_search.py": {
+    "research_id": "sparse_year_addon_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "strategy_candidate_simulator.py": {
+    "research_id": "strategy_candidate_simulator",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution",
+      "retrospective_period_not_forward_holdout"
+    ]
+  },
+  "strong_adjacent_engine_search.py": {
+    "research_id": "strong_adjacent_engine_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "t3_confirmation_quality_search.py": {
+    "research_id": "t3_confirmation_quality_search",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "two_stage_walkforward_research.py": {
+    "research_id": "two_stage_walkforward_research",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "overlapping_horizon_not_account_curve"
+    ]
+  },
+  "v41_v42_snapshot_experiment.py": {
+    "research_id": "v41_v42_snapshot_experiment",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "gross_return_or_incomplete_execution",
+      "same_sample_optimization"
+    ]
+  },
+  "v45_engine_exit_optimizer.py": {
+    "research_id": "v45_engine_exit_optimizer",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "same_sample_optimization"
+    ]
+  },
+  "validate_walkforward_excess_bagged_lcb.py": {
+    "research_id": "validate_walkforward_excess_bagged_lcb",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "historical_validation_period_reused_for_development"
+    ]
+  },
+  "walkforward_linear_ranker.py": {
+    "research_id": "walkforward_linear_ranker",
+    "evidence_tier": "exploratory",
+    "strict_oos_eligible": false,
+    "deployment_ready": false,
+    "evidence_blockers": [
+      "overlapping_horizon_not_account_curve"
+    ]
+  }
+}

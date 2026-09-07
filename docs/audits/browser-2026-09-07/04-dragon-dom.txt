@@ -1,0 +1,380 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - generic: Dragon Leader Lab
+  - heading "热门龙头观察池" [level=1]
+  - paragraph: 按当天涨停池生成观察清单，验证口径为 T+1 开盘到 T+3 收盘；只做研究辅助，不生成交易执行指令。
+  - button "更新行情并刷新龙头池"
+  - strong: 龙头池刷新状态
+  - generic: 同步完成。
+  - generic: 完成 2026-07-01 11:18:25
+  - generic: 数据日 2026-06-30
+  - generic: 来源 real
+  - strong: 龙头观察：已有优先关注样本
+  - paragraph: 真实涨停池含首封、开板、封单等字段；页面只做研究观察，不生成交易执行指令。
+  - generic: 优先关注
+  - strong: "3"
+  - generic: 验证最强的二板/三板结构
+  - generic: 谨慎观察
+  - strong: "5"
+  - generic: 题材与换手有亮点
+  - generic: 研究样本
+  - strong: "8"
+  - generic: 辅助观察市场温度
+  - generic: 已隐藏风险
+  - strong: "141"
+  - generic: 不在页面列出个股
+  - generic: 盘后情绪
+  - generic: 退潮
+  - strong: 塑料处于强主线状态，情绪阶段为退潮，明日偏向：降低短线出手。
+  - paragraph: 主线状态：强主线 · 风险状态：退潮 · 明日偏向：降低短线出手
+  - generic: 3日验证样本
+  - strong: "178"
+  - generic: 页面展示回测样本数
+  - generic: 展示均值
+  - strong: +3.41%
+  - generic: T+1 开盘到 T+3 收盘
+  - generic: 优先关注均值
+  - strong: +10.18%
+  - generic: 样本仍需继续扩充
+  - generic: 优先关注胜率
+  - strong: 83.33%
+  - generic: 历史研究，不代表承诺
+  - heading "优先关注" [level=2]
+  - paragraph: 历史验证较强的二板确认/三板打开高度结构，页面只做观察提示。
+  - generic: 3日均值 +10.18% / 胜率 83.33%
+  - article:
+    - link "华亚智能":
+      - /url: /stock/stock/003043.SZ
+      - strong: 华亚智能
+    - generic: 003043.SZ · 半导体
+    - generic: "120.4"
+    - generic: 二板确认
+    - generic: 题材有热度
+    - generic: 封板较早
+    - generic: 连板
+    - generic: 优先关注
+    - paragraph: 二板确认且题材有合力，优先观察次日承接是否继续强。
+    - term: 题材
+    - definition: 半导体
+    - term: 题材分
+    - definition: "65.0"
+    - term: 换手
+    - definition: 8.25%
+    - term: 首封
+    - definition: "094945"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "2"
+  - article:
+    - link "长源东谷":
+      - /url: /stock/stock/603950.SH
+      - strong: 长源东谷
+    - generic: 603950.SH · 汽车零部
+    - generic: "110.8"
+    - generic: 二板确认
+    - generic: 低换手
+    - generic: 题材有热度
+    - generic: 封板较早
+    - generic: 连板
+    - generic: 优先关注
+    - paragraph: 二板确认且题材有合力，优先观察次日承接是否继续强。
+    - term: 题材
+    - definition: 汽车零部
+    - term: 题材分
+    - definition: "57.0"
+    - term: 换手
+    - definition: 1.47%
+    - term: 首封
+    - definition: "093147"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "2"
+  - article:
+    - link "魅视科技":
+      - /url: /stock/stock/001229.SZ
+      - strong: 魅视科技
+    - generic: 001229.SZ · 计算机设
+    - generic: "98.4"
+    - generic: 二板确认
+    - generic: 题材有热度
+    - generic: 封板较早
+    - generic: 连板
+    - generic: 优先关注
+    - paragraph: 二板确认且题材有合力，优先观察次日承接是否继续强。
+    - term: 题材
+    - definition: 计算机设
+    - term: 题材分
+    - definition: "45.0"
+    - term: 换手
+    - definition: 4.73%
+    - term: 首封
+    - definition: "093442"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "2"
+  - heading "谨慎观察" [level=2]
+  - paragraph: 题材、换手或资金结构有亮点，但历史收益不如优先关注稳定。
+  - generic: 等待分歧承接确认
+  - article:
+    - link "格科微":
+      - /url: /stock/stock/688728.SH
+      - strong: 格科微
+    - generic: 688728.SH · 半导体
+    - generic: "107.2"
+    - generic: 首板高质量
+    - generic: 低换手
+    - generic: 题材有热度
+    - generic: 封板较早
+    - paragraph: 题材热度和换手较均衡，适合观察分歧后的承接。
+    - term: 题材
+    - definition: 半导体
+    - term: 题材分
+    - definition: "65.0"
+    - term: 换手
+    - definition: 3.47%
+    - term: 首封
+    - definition: "094029"
+    - term: 开板
+    - definition: "1"
+    - term: 连板
+    - definition: "1"
+  - article:
+    - link "兴欣新材":
+      - /url: /stock/stock/001358.SZ
+      - strong: 兴欣新材
+    - generic: 001358.SZ · 化学制品
+    - generic: "99.8"
+    - generic: 换手龙苗
+    - generic: 题材有热度
+    - paragraph: 题材热度和换手较均衡，适合观察分歧后的承接。
+    - term: 题材
+    - definition: 化学制品
+    - term: 题材分
+    - definition: "65.0"
+    - term: 换手
+    - definition: 6.08%
+    - term: 首封
+    - definition: "104924"
+    - term: 开板
+    - definition: "2"
+    - term: 连板
+    - definition: "1"
+  - article:
+    - link "宇环数控":
+      - /url: /stock/stock/002903.SZ
+      - strong: 宇环数控
+    - generic: 002903.SZ · 通用设备
+    - generic: "99.1"
+    - generic: 换手龙苗
+    - generic: 题材有热度
+    - generic: 封板较早
+    - paragraph: 题材热度和换手较均衡，适合观察分歧后的承接。
+    - term: 题材
+    - definition: 通用设备
+    - term: 题材分
+    - definition: "57.0"
+    - term: 换手
+    - definition: 7.10%
+    - term: 首封
+    - definition: "095621"
+    - term: 开板
+    - definition: "1"
+    - term: 连板
+    - definition: "1"
+  - generic "查看更多候选（2）"
+  - heading "研究样本" [level=2]
+  - paragraph: 保留市场温度和题材扩散线索，不作为页面主推。
+  - generic: 辅助观察
+  - article:
+    - link "国风新材":
+      - /url: /stock/stock/000859.SZ
+      - strong: 国风新材
+    - generic: 000859.SZ · 塑料
+    - generic: "110.5"
+    - generic: 首板高质量
+    - generic: 低换手
+    - generic: 题材有热度
+    - generic: 封板较早
+    - paragraph: 只作研究样本，等待题材或梯队进一步确认。
+    - term: 题材
+    - definition: 塑料
+    - term: 题材分
+    - definition: "66.0"
+    - term: 换手
+    - definition: 3.48%
+    - term: 首封
+    - definition: "093551"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "1"
+  - article:
+    - link "祥源新材":
+      - /url: /stock/stock/300980.SZ
+      - strong: 祥源新材
+    - generic: 300980.SZ · 塑料
+    - generic: "108.3"
+    - generic: 首板试错
+    - generic: 题材有热度
+    - generic: 封板较早
+    - paragraph: 只作研究样本，等待题材或梯队进一步确认。
+    - term: 题材
+    - definition: 塑料
+    - term: 题材分
+    - definition: "66.0"
+    - term: 换手
+    - definition: 8.12%
+    - term: 首封
+    - definition: "095306"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "1"
+  - article:
+    - link "翱捷科技-U":
+      - /url: /stock/stock/688220.SH
+      - strong: 翱捷科技-U
+    - generic: 688220.SH · 半导体
+    - generic: "105.7"
+    - generic: 首板试错
+    - generic: 题材有热度
+    - paragraph: 只作研究样本，等待题材或梯队进一步确认。
+    - term: 题材
+    - definition: 半导体
+    - term: 题材分
+    - definition: "65.0"
+    - term: 换手
+    - definition: 6.85%
+    - term: 首封
+    - definition: "110603"
+    - term: 开板
+    - definition: "0"
+    - term: 连板
+    - definition: "1"
+  - generic "查看更多候选（5）"
+  - heading "主线题材雷达" [level=2]
+  - paragraph: 先判断市场合力在哪里，再看龙头和低位扩散。
+  - generic: "63"
+  - article:
+    - strong: 塑料
+    - generic: 塑料 · 分歧中
+    - generic: "66.0"
+    - term: 涨停
+    - definition: "4"
+    - term: 强势
+    - definition: "2"
+    - term: 二板
+    - definition: "1"
+    - term: 高位
+    - definition: "1"
+    - paragraph: 代表样本： 兴业股份（空间确认）、 兴业股份（分歧回封）、 国风新材（首板高质量）
+    - generic: 3只脆弱/开板样本，追高需降权
+  - article:
+    - strong: 化学制品
+    - generic: 化学制品 · 主线确认
+    - generic: "65.0"
+    - term: 涨停
+    - definition: "10"
+    - term: 强势
+    - definition: "6"
+    - term: 二板
+    - definition: "2"
+    - term: 高位
+    - definition: "0"
+    - paragraph: 代表样本： 多氟多（分歧回封）、 昊华科技（分歧回封）、 常青科技（首板高质量）
+    - generic: 10只脆弱/开板样本，追高需降权
+  - article:
+    - strong: 半导体
+    - generic: 半导体 · 主线确认
+    - generic: "65.0"
+    - term: 涨停
+    - definition: "21"
+    - term: 强势
+    - definition: "35"
+    - term: 二板
+    - definition: "3"
+    - term: 高位
+    - definition: "0"
+    - paragraph: 代表样本： 华亚智能（二板确认）、 有研硅（分歧回封）、 金海通（分歧回封）
+    - generic: 48只脆弱/开板样本，追高需降权
+  - article:
+    - strong: 汽车零部
+    - generic: 汽车零部 · 主线确认
+    - generic: "57.0"
+    - term: 涨停
+    - definition: "9"
+    - term: 强势
+    - definition: "4"
+    - term: 二板
+    - definition: "1"
+    - term: 高位
+    - definition: "0"
+    - paragraph: 代表样本： 长源东谷（二板确认）、 长华集团（首板试错）、 迪生力（首板试错）
+    - generic: 9只脆弱/开板样本，追高需降权
+  - article:
+    - strong: 通用设备
+    - generic: 通用设备 · 主线确认
+    - generic: "57.0"
+    - term: 涨停
+    - definition: "12"
+    - term: 强势
+    - definition: "10"
+    - term: 二板
+    - definition: "1"
+    - term: 高位
+    - definition: "0"
+    - paragraph: 代表样本： 惠康科技（分歧回封）、 鲁信创投（首板高质量）、 海天精工（首板试错）
+    - generic: 15只脆弱/开板样本，追高需降权
+  - article:
+    - strong: 家居用品
+    - generic: 家居用品 · 发酵观察
+    - generic: "47.0"
+    - term: 涨停
+    - definition: "3"
+    - term: 强势
+    - definition: "2"
+    - term: 二板
+    - definition: "0"
+    - term: 高位
+    - definition: "0"
+    - paragraph: 代表样本： 菲林格尔（首板高质量）、 德尔未来（换手龙苗）、 哈尔斯（首板试错）
+    - generic: 2只脆弱/开板样本，追高需降权
+  - heading "研究验证" [level=2]
+  - generic: 历史基准
+  - strong: 21.3%
+  - generic: 全涨停样本次日涨停率
+  - generic: 低换手前20%
+  - strong: 29.4%
+  - generic: 跨年度稳定提升
+  - generic: 低换手断头率
+  - strong: 14.1%
+  - generic: 3日断头风险
+  - generic: 优先Top1均值
+  - strong: +10.77%
+  - generic: 2026样本研究结果

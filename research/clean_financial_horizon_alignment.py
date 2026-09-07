@@ -31,6 +31,7 @@ from research.no_future_signal_pipeline import (  # noqa: E402
     apply_next_open_execution,
     assert_no_future_features,
 )
+from research.research_integrity import purge_overlapping_label_tail  # noqa: E402
 
 
 PREREG = ROOT / "reports" / "research" / "prereg_clean_financial_horizon_alignment_20260808.json"
@@ -41,11 +42,22 @@ REPORT_OUT = ROOT / "reports" / "research" / "clean_financial_horizon_alignment_
 CONFIGURATIONS = ((3, 3), (5, 5), (8, 8), (5, 8))
 USE_COLUMNS = [
     "ts_code", "name", "industry", "trade_date", "entry_open", "entry_gap_pct",
-    "ret_3d", "ret_5d", "ret_8d", *FEATURE_COLUMNS,
+    "ret_3d", "ret_5d", "ret_8d", "label_exit_date_3d", "label_exit_date_5d",
+    "label_exit_date_8d", *FEATURE_COLUMNS,
 ]
 
 
-def fit_target_model(training: pd.DataFrame, target_days: int) -> HistGradientBoostingRegressor:
+def fit_target_model(
+    training: pd.DataFrame,
+    target_days: int,
+    *,
+    prediction_start_date: str,
+) -> HistGradientBoostingRegressor:
+    training = purge_overlapping_label_tail(
+        training,
+        horizon=target_days,
+        prediction_start_date=prediction_start_date,
+    )
     assert_no_future_features(FEATURE_COLUMNS)
     target_column = f"ret_{target_days}d"
     target = pd.to_numeric(training[target_column], errors="coerce") - 0.25
@@ -74,7 +86,11 @@ def build_predictions(frame: pd.DataFrame) -> dict[tuple[int, int], tuple[pd.Dat
             training = frame.loc[years.le(target_year - 2)]
             calibration = frame.loc[years.eq(target_year - 1)]
             target = frame.loc[years.eq(target_year)]
-            estimator = fit_target_model(training, model_days)
+            estimator = fit_target_model(
+                training,
+                model_days,
+                prediction_start_date=f"{target_year - 1}0101",
+            )
             result[(model_days, target_year)] = (
                 _predict_top(estimator, calibration),
                 _predict_top(estimator, target),

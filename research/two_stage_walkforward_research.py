@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = ROOT / "reports" / "research" / "all_market_multi_engine_nofuture_trades_20260807.csv"
@@ -24,7 +26,6 @@ RAW_FEATURES = [
     "turnover_rate",
     "volume_ratio",
     "industry_rs_20",
-    "entry_gap_pct",
 ]
 FEATURE_COLUMNS = [f"rank_{name}" for name in RAW_FEATURES] + [
     "engine_pullback",
@@ -191,7 +192,6 @@ def _prepare(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     frame = pd.read_csv(path, encoding="utf-8-sig", low_memory=False)
     frame["trade_date"] = frame["trade_date"].astype(str).str.replace("-", "", regex=False).str[:8]
     frame["year"] = frame["trade_date"].str[:4].astype(int)
-    frame = frame[frame.get("tradeable", True).astype(str).str.lower().isin(["true", "1"])].copy()
     frame = frame.drop_duplicates(["trade_date", "ts_code", "engine"])
     frame = add_cross_sectional_features(frame)
     frame["relative_target"] = pd.to_numeric(frame["ret_5d"], errors="coerce") - frame.groupby("trade_date")["ret_5d"].transform("mean")
@@ -213,7 +213,11 @@ def _topn(frame: pd.DataFrame, topn: int) -> pd.DataFrame:
 
 
 def _daily_portfolio(selected: pd.DataFrame, cost: float) -> pd.DataFrame:
-    daily = selected.groupby("trade_date", as_index=False).agg(gross_ret=("ret_5d", "mean"), trades=("ts_code", "size"))
+    daily = selected.groupby("trade_date", as_index=False).agg(
+        gross_ret=("ret_5d", "mean"),
+        trades=("ts_code", "size"),
+        label_exit_date_5d=("label_exit_date_5d", "max"),
+    )
     daily["net_ret"] = daily["gross_ret"] - cost
     daily["year"] = daily["trade_date"].str[:4].astype(int)
     return daily
@@ -250,6 +254,11 @@ def walk_forward(
             rank_train = rank_train[
                 rank_train["year"] >= test_year - rank_window_years
             ].copy()
+        rank_train = purge_overlapping_label_tail(
+            rank_train,
+            horizon=5,
+            prediction_start_date=f"{test_year}0101",
+        )
         rank_test = frame[frame["year"].eq(test_year)].copy()
         if rank_train.empty or rank_test.empty:
             continue
@@ -283,6 +292,11 @@ def walk_forward(
             test_market["gate_prediction"] = 1.0
             threshold = -np.inf
         else:
+            prior_days = purge_overlapping_label_tail(
+                prior_days,
+                horizon=5,
+                prediction_start_date=f"{test_year}0101",
+            )
             gate_train = prior_days.merge(market.drop(columns="year"), on="trade_date", how="left")
             gate_target = pd.to_numeric(gate_train["net_ret"], errors="coerce")
             # 数据末端没有完整持有期标签，必须先剔除，否则会令下一年度模型整体变为 NaN。

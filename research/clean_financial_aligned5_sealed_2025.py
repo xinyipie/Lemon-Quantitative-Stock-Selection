@@ -49,7 +49,9 @@ CACHE = ROOT / "data" / "cache"
 
 
 def build_2025_universe() -> pd.DataFrame:
-    events = prepare_financial_events(pd.read_parquet(FINANCIAL_CACHE))
+    events = prepare_financial_events(
+        pd.read_parquet(FINANCIAL_CACHE), require_versioned_history=True
+    )
     dates = _available_dates(CACHE, "20240101", "20260228")
     regimes = _build_regimes(CACHE, dates)
     stock_info = _load_stock_info(CACHE)
@@ -77,7 +79,11 @@ def run() -> None:
     years = history["trade_date"].astype(str).str[:4].astype(int)
     model_training = history.loc[years.le(2023)]
     calibration = history.loc[years.eq(2024)].copy()
-    estimator = fit_target_model(model_training, 5)
+    estimator = fit_target_model(
+        model_training,
+        5,
+        prediction_start_date="20240101",
+    )
     calibration["prediction"] = estimator.predict(calibration[FEATURE_COLUMNS])
     target["prediction"] = estimator.predict(target[FEATURE_COLUMNS])
     calibration_top = daily_top_with_margin(calibration)

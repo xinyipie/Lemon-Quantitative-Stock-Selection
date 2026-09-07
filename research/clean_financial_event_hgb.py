@@ -27,6 +27,7 @@ from research.no_future_signal_pipeline import (  # noqa: E402
 )
 from research.point_in_time_financials import merge_point_in_time, prepare_financial_events  # noqa: E402
 from research.two_stage_walkforward_research import _bootstrap_probability  # noqa: E402
+from research.research_integrity import purge_overlapping_label_tail  # noqa: E402
 
 
 CACHE = ROOT / "data" / "cache"
@@ -89,7 +90,16 @@ def _model() -> HistGradientBoostingRegressor:
     return HistGradientBoostingRegressor(**MODEL_CONFIG)
 
 
-def fit_model(training: pd.DataFrame) -> HistGradientBoostingRegressor:
+def fit_model(
+    training: pd.DataFrame,
+    *,
+    prediction_start_date: str,
+) -> HistGradientBoostingRegressor:
+    training = purge_overlapping_label_tail(
+        training,
+        horizon=5,
+        prediction_start_date=prediction_start_date,
+    )
     target = pd.to_numeric(training["ret_5d"], errors="coerce") - 0.25
     valid = target.notna()
     train = training.loc[valid].copy()
@@ -137,7 +147,7 @@ def training_walk_forward(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFra
     for test_year in (2019, 2020, 2021):
         training = frame[(years >= 2016) & (years < test_year)]
         testing = frame[years == test_year]
-        estimator = fit_model(training)
+        estimator = fit_model(training, prediction_start_date=f"{test_year}0101")
         year_trades, year_execution = predict_and_execute(estimator, testing)
         trades.append(year_trades)
         executions.append(year_execution)
@@ -156,7 +166,9 @@ def run() -> None:
     prereg_hash = hashlib.sha256(PREREG.read_bytes()).hexdigest()
     print(f"prereg_sha256={prereg_hash}")
     assert_no_future_features(FEATURE_COLUMNS)
-    financial_events = prepare_financial_events(pd.read_parquet(FINANCIAL_CACHE))
+    financial_events = prepare_financial_events(
+        pd.read_parquet(FINANCIAL_CACHE), require_versioned_history=True
+    )
     dates = _available_dates(CACHE, "20160101", "20260807")
     regimes = _build_regimes(CACHE, dates)
     stock_info = _load_stock_info(CACHE)
@@ -198,7 +210,7 @@ def run() -> None:
     validation_all = pd.concat(validation_frames, ignore_index=True)
     all_candidates = pd.concat([training, validation_all], ignore_index=True)
     all_candidates.to_csv(CANDIDATES, index=False, encoding="utf-8-sig")
-    frozen_model = fit_model(training)
+    frozen_model = fit_model(training, prediction_start_date="20220101")
     forward_trades, forward_execution = predict_and_execute(frozen_model, validation_all)
     forward_trades.to_csv(REPORT.with_name(REPORT.stem + "_trades.csv"), index=False, encoding="utf-8-sig")
     forward_execution.to_csv(REPORT.with_name(REPORT.stem + "_locked_signals.csv"), index=False, encoding="utf-8-sig")

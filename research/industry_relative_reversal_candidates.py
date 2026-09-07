@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 
 import pandas as pd
+from research.no_future_signal_pipeline import signal_eligible_mask
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,12 +68,10 @@ def build_candidates(panel: pd.DataFrame, topn: int = 60, per_industry: int = 2)
         work[column] = pd.to_numeric(work[column], errors="coerce")
     work["industry_bucket"] = work.get("industry", pd.Series(index=work.index, dtype=object)).fillna("未知行业").astype(str)
     mask = (
-        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
-        & (work["history_count"] >= 120)
+        signal_eligible_mask(work, min_history=120)
         & work["pct_chg"].between(-3.5, 4.5)
         & work["turnover_rate"].between(0.6, 12.0)
         & work["volume_ratio"].between(0.4, 1.8)
-        & work["entry_gap_pct"].between(-3.0, 4.0)
         & work["drawdown_20"].between(4.0, 25.0)
         & work["ret_60"].between(-15.0, 35.0)
         & work["rsi_14"].between(25.0, 60.0)

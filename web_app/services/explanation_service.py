@@ -37,6 +37,11 @@ SYSTEM_EXPLANATION_ANALYST = (
 PROMPT_VERSION = "signal_explanation_v1"
 MAIN_REPORT_PROMPT_VERSION = "main_ai_observation_v2"
 DAILY_BRIEF_PROMPT_VERSION = "daily_brief_v1"
+_AI_ANALYSIS_SCHEMA_VERSION = 1
+
+
+class ExplanationCacheBusyError(RuntimeError):
+    """解释缓存被其他写事务占用，调用方可提示用户稍后重试。"""
 
 SYSTEM_DAILY_BRIEF_ANALYST = (
     "你是专业但克制的A股策略值班研究员。你的任务是把今日本地量化事实总结成盘前/盘后决策摘要。"
@@ -90,6 +95,39 @@ def get_or_create_signal_explanation(
     doc = sanitize_observation_copy(doc)
     _write_cache(cache_key, signal, doc, source, signal_db, model=cfg.get("model", ""), input_hash=input_hash)
     return {"source": source, "doc": doc, "signal": signal}
+
+
+def get_signal_explanation(
+    trade_date: str,
+    ts_code: str,
+    signal_db: str | Path = DEFAULT_DB_PATH,
+    history_db: str | Path | None = DEFAULT_HISTORY_DB_PATH,
+) -> dict:
+    """只读取已有解释；缓存缺失时返回本地预览，不调用AI或写数据库。"""
+    signal = _find_signal(trade_date, ts_code, signal_db, history_db)
+    if not signal:
+        return {
+            "source": "not_found",
+            "doc": {
+                "title": "未找到信号",
+                "summary": "本地信号库中没有找到这条记录，无法读取解释文档。",
+                "positives": [],
+                "risks": ["请确认日期和股票代码是否正确。"],
+                "watch_plan": "返回短线复盘页重新选择记录。",
+                "invalidation": "-",
+                "style": "无记录",
+                "confidence_note": "没有事实数据时不生成分析结论。",
+            },
+            "signal": {},
+        }
+    cached = _read_cached(_cache_key(signal), signal_db, allow_fallback=True)
+    if cached:
+        return {"source": "cache", "doc": sanitize_observation_copy(cached), "signal": signal}
+    return {
+        "source": "fallback_preview",
+        "doc": sanitize_observation_copy(build_fallback_explanation(signal)),
+        "signal": signal,
+    }
 
 
 def get_or_create_daily_brief(
@@ -148,7 +186,10 @@ def get_daily_brief(
     date_text = _date_text(trade_date)
     cache_key = f"daily_brief:{date_text}"
     facts = build_daily_brief_facts(date_text, signal_db=signal_db, history_db=history_db)
-    cached = _read_cached(cache_key, signal_db, allow_fallback=True)
+    try:
+        cached = _read_cached(cache_key, signal_db, allow_fallback=True)
+    except ExplanationCacheBusyError:
+        cached = None
     if cached:
         return {"source": "cache", "doc": cached, "facts": facts}
     return {"source": "fallback_preview", "doc": build_fallback_daily_brief(facts), "facts": facts}
@@ -545,7 +586,28 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    _migrate_legacy_documents(conn)
+    conn.execute(
+        """
+        create table if not exists ai_analysis_schema_state (
+            schema_name text primary key,
+            version integer not null
+        )
+        """
+    )
+    row = conn.execute(
+        "select version from ai_analysis_schema_state where schema_name = 'documents'"
+    ).fetchone()
+    current_version = int(row[0]) if row else 0
+    if current_version < _AI_ANALYSIS_SCHEMA_VERSION:
+        _migrate_legacy_documents(conn)
+        conn.execute(
+            """
+            insert into ai_analysis_schema_state(schema_name, version)
+            values('documents', ?)
+            on conflict(schema_name) do update set version = excluded.version
+            """,
+            (_AI_ANALYSIS_SCHEMA_VERSION,),
+        )
     conn.commit()
 
 
@@ -553,10 +615,14 @@ def _read_cached(cache_key: str, signal_db: str | Path, allow_fallback: bool = T
     path = Path(signal_db)
     if not path.exists():
         return None
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=0.25)
     try:
-        _init_schema(conn)
-        row = conn.execute("select doc_json, source from ai_analysis_documents where cache_key = ?", (cache_key,)).fetchone()
+        row = None
+        if _table_exists(conn, "ai_analysis_documents"):
+            row = conn.execute(
+                "select doc_json, source from ai_analysis_documents where cache_key = ?",
+                (cache_key,),
+            ).fetchone()
         if not row:
             legacy = _read_legacy_cached(conn, cache_key)
             if not legacy:
@@ -565,15 +631,23 @@ def _read_cached(cache_key: str, signal_db: str | Path, allow_fallback: bool = T
         if row[1] != "ai" and not allow_fallback:
             return None
         return _parse_doc(row[0])
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise ExplanationCacheBusyError(str(exc)) from exc
+        raise
     finally:
         conn.close()
 
 
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return conn.execute(
+        "select 1 from sqlite_master where type = 'table' and name = ?",
+        (table_name,),
+    ).fetchone() is not None
+
+
 def _read_legacy_cached(conn: sqlite3.Connection, cache_key: str):
-    exists = conn.execute(
-        "select name from sqlite_master where type = 'table' and name = 'ai_explanations'"
-    ).fetchone()
-    if not exists:
+    if not _table_exists(conn, "ai_explanations"):
         return None
     return conn.execute("select doc_json, source from ai_explanations where cache_key = ?", (cache_key,)).fetchone()
 
@@ -711,7 +785,7 @@ def _write_document_cache(
     path = Path(signal_db)
     path.parent.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=1.0)
     try:
         _init_schema(conn)
         with conn:
@@ -750,6 +824,10 @@ def _write_document_cache(
                     now,
                 ),
             )
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise ExplanationCacheBusyError(str(exc)) from exc
+        raise
     finally:
         conn.close()
 

@@ -128,19 +128,27 @@ def validate() -> tuple[pd.DataFrame, pd.DataFrame]:
         train_strong = all_strong[all_strong["year"].isin(train_years)].copy()
         test_strong = all_strong[all_strong["year"].isin(test_years)].copy()
 
+        trained_rules = []
         for rule in rules:
             train_expansion, train_expansion_metrics, train_combo_metrics = _evaluate_rule(rule, train_candidates, train_strong)
             if train_expansion_metrics["trades"] < 3:
                 continue
             train_score = _score_train(train_expansion_metrics, train_combo_metrics)
+            trained_rules.append((train_score, str(rule["rule"]), rule, train_expansion_metrics, train_combo_metrics))
+
+        # 每个切分只按训练期资料锁定一个规则；测试期只做一次评价。
+        trained_rules.sort(key=lambda item: (-item[0], item[1]))
+        for split_rank, (train_score, _, rule, train_expansion_metrics, train_combo_metrics) in enumerate(
+            trained_rules[:1], start=1
+        ):
             test_expansion, test_expansion_metrics, test_combo_metrics = _evaluate_rule(rule, test_candidates, test_strong)
             selected = test_expansion.copy()
             selected["split"] = split_name
-            selected["rank"] = len(summary_rows) + 1
+            selected["rank"] = split_rank
             selected_trade_frames.append(selected)
             summary_rows.append({
                 "split": split_name,
-                "rank": len(summary_rows) + 1,
+                "rank": split_rank,
                 "rule": rule["rule"],
                 "macro_mode": rule["macro_mode"],
                 "market_style": rule["market_style"],
@@ -162,8 +170,8 @@ def validate() -> tuple[pd.DataFrame, pd.DataFrame]:
     summary = pd.DataFrame(summary_rows)
     if not summary.empty:
         summary = summary.sort_values(
-            ["test_pass", "test_expansion_win_rate", "test_expansion_total_ret", "train_score"],
-            ascending=[False, False, False, False],
+            ["split", "rank", "train_score"],
+            ascending=[True, True, False],
         ).reset_index(drop=True)
     trades = pd.concat(selected_trade_frames, ignore_index=True) if selected_trade_frames else pd.DataFrame()
     return summary, trades

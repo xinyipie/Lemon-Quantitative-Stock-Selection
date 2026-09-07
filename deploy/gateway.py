@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -9,13 +11,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from gateway_home import render_public_home
-from web_app.app import BASE_DIR, PRODUCT_WORK_DIR, app as stock_app
+from web_app.app import BASE_DIR, app as stock_app
 
 
-PROTOTYPE_DIR = PRODUCT_WORK_DIR / "prototypes"
+_product_work_dir = os.environ.get("STOCK_PRODUCT_WORK_DIR", "").strip()
+PROTOTYPE_DIR = Path(_product_work_dir).expanduser() / "prototypes" if _product_work_dir else None
 
 app = FastAPI(title="Personal web gateway", docs_url=None, redoc_url=None)
-app.mount("/prototypes", StaticFiles(directory=PROTOTYPE_DIR, html=True), name="prototypes")
+if PROTOTYPE_DIR and PROTOTYPE_DIR.is_dir():
+    app.mount("/prototypes", StaticFiles(directory=PROTOTYPE_DIR, html=True), name="prototypes")
+    # 保留现有生产环境的旧入口，原型内容仍来自独立目录。
+    app.mount("/stock/prototypes", StaticFiles(directory=PROTOTYPE_DIR, html=True), name="stock-prototypes")
 app.mount("/stock/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/stock", stock_app, name="stock")
 

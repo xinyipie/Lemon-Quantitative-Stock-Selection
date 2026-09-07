@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+from research.research_integrity import purge_overlapping_label_tail
 from sklearn.utils.class_weight import compute_sample_weight
 
 from research.clean_bagged_lcb_existing_regime_gate import evaluate, summarize
@@ -35,6 +36,11 @@ def predict_market_tail_risk_walkforward() -> tuple[pd.DataFrame, dict]:
     metadata = {}
     for predict_year in RESEARCH_YEARS:
         train = pd.concat([frames[year] for year in range(2016, predict_year)], ignore_index=True)
+        train = purge_overlapping_label_tail(
+            train,
+            horizon=5,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frames[predict_year].copy()
         labels = (train[MARKET_TARGET] <= TAIL_RISK_RETURN_PCT).astype(int)
         weights = compute_sample_weight(class_weight="balanced", y=labels)

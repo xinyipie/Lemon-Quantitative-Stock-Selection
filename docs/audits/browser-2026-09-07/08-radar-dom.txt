@@ -1,0 +1,663 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - generic: Market Radar
+  - heading "市场雷达" [level=1]
+  - paragraph: 行业口径热度追踪，用来判断市场主线、过热风险和板块内候选观察名单。
+  - button "更新行情并刷新雷达"
+  - strong: 刷新任务状态 数据对齐情况见下方数据时钟
+  - generic: 同步完成。
+  - generic: 完成 2026-07-01 11:18:25
+  - strong: 市场雷达数据时钟
+  - paragraph: 仅输出可验证数据；缺失或错配模块：消息雷达、概念热度
+  - generic: 降级运行
+  - article:
+    - generic: 行业行情
+    - strong: 已对齐
+    - generic: 2026-06-30
+    - paragraph: 数据日期与市场雷达目标日一致。
+  - article:
+    - generic: 消息雷达
+    - strong: 待更新
+    - generic: 无可验证日期
+    - paragraph: 没有可验证的数据日期。
+  - article:
+    - generic: 概念热度
+    - strong: 待更新
+    - generic: 无可验证日期
+    - paragraph: 没有可验证的数据日期。
+  - article:
+    - generic: 策略信号
+    - strong: 已对齐
+    - generic: 2026-06-30
+    - paragraph: 数据日期与市场雷达目标日一致。
+  - generic "历史复盘"
+  - navigation "市场雷达页面分区":
+    - link "最新态势":
+      - /url: "#radar-situation"
+    - link "研究简报":
+      - /url: "#research-brief"
+    - link "AI消息研判":
+      - /url: "#ai-news-brief"
+    - link "关键事件":
+      - /url: "#key-events"
+    - link "主线判断":
+      - /url: "#mainline-view"
+    - link "策略共振":
+      - /url: "#strategy-overlap"
+    - link "消息概念":
+      - /url: "#news-concepts"
+    - link "板块候选":
+      - /url: "#sector-candidates"
+    - link "风险提醒":
+      - /url: "#risk-sectors"
+  - text: Live Market Signals
+  - heading "最新雷达态势" [level=2]
+  - paragraph: 独立追踪消息、行业与量价变化，不承担日报核查职责。
+  - generic: 趋势主线
+  - generic: 仅输出可验证数据；缺失或错配模块：消息雷达、概念热度
+  - link "新变化 0 未取得新闻 查看消息研判与来源状态":
+    - /url: "#ai-news-brief"
+    - generic: 新变化
+    - generic: "0"
+    - strong: 未取得新闻
+    - generic: 查看消息研判与来源状态
+  - link "量价共振 2 半导体、玻璃 行业趋势有扩散，但缺少明确消息面共振。":
+    - /url: "#mainline-view"
+    - generic: 量价共振
+    - generic: "2"
+    - strong: 半导体、玻璃
+    - generic: 行业趋势有扩散，但缺少明确消息面共振。
+  - link "待确认 0 暂无新增待确认项 查看时效、行业映射与验证条件":
+    - /url: "#key-events"
+    - generic: 待确认
+    - generic: "0"
+    - strong: 暂无新增待确认项
+    - generic: 查看时效、行业映射与验证条件
+  - link "风险变化 86 机床制造、电器仪表、专用机械 利空只作风险提示，不作为推荐":
+    - /url: "#risk-sectors"
+    - generic: 风险变化
+    - generic: "86"
+    - strong: 机床制造、电器仪表、专用机械
+    - generic: 利空只作风险提示，不作为推荐
+  - heading "研究员简报" [level=2]
+  - paragraph: 风险优先：趋势主线。
+  - generic: 中
+  - generic: 已保存复盘 2026-06-30
+  - generic: 风险阻断
+  - strong: 谨慎跟踪
+  - paragraph: 机床制造：板块热度偏高或处于风险阶段，避免按新闻热度追高。
+  - generic: 先核验风险是否扩散，再决定是否保留观察。
+  - text: 市场判断
+  - strong: 趋势主线
+  - paragraph: 20260630 行业热度：有主线；重点观察 半导体、玻璃，但需要个股信号确认。
+  - text: 事件
+  - strong: "0"
+  - paragraph: 有效事件，最高等级 -
+  - text: 行业 thesis
+  - strong: "10"
+  - paragraph: 按事件、量价、风险综合审计
+  - text: 个股证据
+  - strong: "6"
+  - paragraph: 只作研究观察清单
+  - text: AI News Intelligence
+  - heading "AI 消息面研判" [level=2]
+  - paragraph: 汇总时效合格新闻，与健康主线和量化候选交叉验证；独立展示，不影响任何量化分数。
+  - generic: 2026-06-30
+  - generic: 0 条消息
+  - generic: 本批次失败，等待下次刷新
+  - strong: 本次未形成可靠 AI 研判
+  - paragraph: 该交易日尚未生成 AI 消息面研判。
+  - text: 原始新闻、关键事件和量化主线仍可正常使用。
+  - heading "关键事件" [level=2]
+  - paragraph: 风险优先，先看今日催化、风险阻断和来源缺口；旧消息只进入背景，不作为盘中新信号。
+  - link "全部事件 0":
+    - /url: "#event-all"
+    - text: 全部事件
+    - generic: "0"
+  - link "今日新增催化 0":
+    - /url: "#event-catalysts"
+    - text: 今日新增催化
+    - generic: "0"
+  - link "风险 0":
+    - /url: "#event-risk"
+    - text: 风险
+    - generic: "0"
+  - link "背景 0":
+    - /url: "#event-background"
+    - text: 背景
+    - generic: "0"
+  - strong: 新闻阅读流
+  - generic: 利多和利空分列阅读，先判断方向，再展开原文。
+  - generic: 0 条
+  - strong: 暂无明确利多 / 利空
+  - generic: 当前消息均为规则待判或背景信息，不强行归类。
+  - complementary "关键事件摘要":
+    - link "0 今日催化":
+      - /url: "#event-catalysts"
+      - strong: "0"
+      - generic: 今日催化
+    - link "0 风险阻断":
+      - /url: "#event-risk"
+      - strong: "0"
+      - generic: 风险阻断
+    - link "0 背景消息":
+      - /url: "#event-background"
+      - strong: "0"
+      - generic: 背景消息
+    - strong: "0"
+    - text: 来源待核验
+    - strong: 先看催化
+    - generic: 暂无可作为今日催化的消息。
+    - strong: 再看风险
+    - generic: 暂无需要阻断的新鲜风险。
+  - heading "复盘闭环" [level=2]
+  - paragraph: 记录主线是否被市场验证，以及下一交易日要核验什么。
+  - generic: 风险优先
+  - list:
+    - listitem: 跟踪半导体是否继续强于市场并保持成交承接。
+    - listitem: 跟踪玻璃是否继续强于市场并保持成交承接。
+    - listitem: 先验证机床制造是否从消息热度扩散到量价承接。
+    - listitem: 先验证电器仪表是否从消息热度扩散到量价承接。
+    - listitem: 先验证专用机械是否从消息热度扩散到量价承接。
+  - heading "风险审计" [level=3]
+  - list:
+    - strong: 机床制造
+    - generic: 板块热度偏高或处于风险阶段，避免按新闻热度追高。
+    - strong: 电器仪表
+    - generic: 板块热度偏高或处于风险阶段，避免按新闻热度追高。
+    - strong: 专用机械
+    - generic: 板块热度偏高或处于风险阶段，避免按新闻热度追高。
+    - strong: 化工原料
+    - generic: 板块热度偏高或处于风险阶段，避免按新闻热度追高。
+    - strong: 互联网
+    - generic: 板块热度偏高或处于风险阶段，避免按新闻热度追高。
+  - heading "数据状态" [level=3]
+  - generic: 行业
+  - strong: "20260630"
+  - generic: 新闻
+  - strong: "-"
+  - generic: 概念
+  - strong: "-"
+  - generic: 来源
+  - strong: "0"
+  - heading "行业研判" [level=2]
+  - paragraph: 把行业热度、事件质量、风险冲突合成研究判断。
+  - article:
+    - strong: 半导体
+    - generic: 先放观察池
+    - paragraph: 趋势主线 · 置信度 中 · 46分
+    - text: 半导体属于趋势主线，已有市场热度支撑。
+    - generic: 半导体处于趋势延续，量价热度进入可观察区。
+  - article:
+    - strong: 玻璃
+    - generic: 先放观察池
+    - paragraph: 趋势主线 · 置信度 中 · 36分
+    - text: 玻璃属于趋势主线，已有市场热度支撑。
+    - generic: 玻璃处于弱修复，量价热度进入可观察区。
+  - article:
+    - strong: 机床制造
+    - generic: 等回踩确认
+    - paragraph: 过热风险 · 置信度 中 · 6分
+    - text: 机床制造属于过热风险，当前主要来自消息线索。
+  - article:
+    - strong: 电器仪表
+    - generic: 等回踩确认
+    - paragraph: 过热风险 · 置信度 中 · 6分
+    - text: 电器仪表属于过热风险，当前主要来自消息线索。
+  - article:
+    - strong: 专用机械
+    - generic: 等回踩确认
+    - paragraph: 过热风险 · 置信度 中 · 6分
+    - text: 专用机械属于过热风险，当前主要来自消息线索。
+  - article:
+    - strong: 化工原料
+    - generic: 等回踩确认
+    - paragraph: 过热风险 · 置信度 中 · 5分
+    - text: 化工原料属于过热风险，当前主要来自消息线索。
+  - generic: 行业状态
+  - heading "20260630 行业热度：有主线" [level=2]
+  - paragraph: 先看健康主线里的承接，不追过热板块。
+  - generic: 最强健康主线
+  - strong: 半导体
+  - generic: 趋势延续 · 89.0分
+  - generic: 健康主线
+  - strong: "2"
+  - generic: 当前展示 2 个 · 低位启动/趋势延续/弱修复
+  - generic: 风险板块
+  - strong: "86"
+  - generic: 当前展示 8 个 · 过热高潮/退潮中
+  - heading "当前主线判断" [level=2]
+  - paragraph: 先判断市场有没有可做方向，再看个股。概念和新闻只作辅助，不单独触发买入。
+  - generic: 置信度 中
+  - strong: 趋势主线
+  - paragraph: 重点观察 半导体、玻璃，但需要个股信号确认。
+  - generic: 行业趋势有扩散，但缺少明确消息面共振。
+  - generic: 重点方向
+  - link "半导体":
+    - /url: "#sector-半导体"
+  - link "玻璃":
+    - /url: "#sector-玻璃"
+  - generic: 风险回避
+  - generic: 机床制造
+  - generic: 电器仪表
+  - generic: 专用机械
+  - generic: 数据日期已对齐。 行业 2026-06-30； 新闻 -； 概念 -
+  - generic: 以本地行业热度、入库信号新闻/概念因子和概念缓存综合判断；外部概念接口缺失时不参与决策。
+  - heading "策略共振观察" [level=2]
+  - paragraph: 只列真实入库的短线/长线信号，并要求落在健康主线或正向消息行业里。
+  - generic: 2026-06-30
+  - generic: 当日策略已运行，但没有可展示的候选信号。
+  - heading "消息面雷达" [level=2]
+  - paragraph: 原始消息审计区：看来源、发布时间、筛选链路和行业映射。上方关键事件是交易阅读顺序，这里用于追溯消息质量。
+  - generic: 消息筛选链路
+  - strong: 暂无新闻筛选链路
+  - generic: 消息评级
+  - strong: 暂无有效消息
+  - generic: 保留规则
+  - strong: 新闻缓存为空时，消息面不参与市场判断。
+  - generic "消息处理状态":
+    - strong: 消息处理状态
+    - generic: 当前缓存中没有可供研判的原始新闻
+    - generic: 未取得新闻
+    - generic: AI 映射未完成
+    - generic: 原始新闻
+    - strong: "0"
+    - generic: 采集或缓存可读
+    - text: ">"
+    - generic: AI 候选
+    - strong: "0"
+    - generic: 价值筛选后送入研判
+    - text: ">"
+    - generic: 行业映射
+    - strong: "0"
+    - generic: 通过严格行业校验
+    - text: ">"
+    - generic: 方向结果
+    - strong: "0"
+    - generic: 利多 0 / 利空 0 / 待判 0
+  - generic: 新闻板块缓存为空。
+  - heading "概念热度" [level=2]
+  - paragraph: 用来观察题材温度和短期拥挤度，不直接等于买入信号。
+  - generic: 概念热度缓存为空，当前只展示行业热度和已入库信号。
+  - heading "健康主线" [level=2]
+  - paragraph: 优先看扩散充分、相对大盘有超额、但没有明显过热的行业。
+  - generic: 行业口径 · 2026-06-30
+  - table:
+    - rowgroup:
+      - row "行业 状态 热度 5日表现 10日超额 扩散 动作 解释":
+        - columnheader "行业"
+        - columnheader "状态"
+        - columnheader "热度"
+        - columnheader "5日表现"
+        - columnheader "10日超额"
+        - columnheader "扩散"
+        - columnheader "动作"
+        - columnheader "解释"
+    - rowgroup:
+      - row "半导体 195只样本 · 看候选 趋势延续 89.0 +15.20% +20.64% MA20 95% 放量 47% 看承接 10日超额+20.64%，MA20上方占比95%，放量扩散47%":
+        - cell "半导体 195只样本 · 看候选":
+          - link "半导体 195只样本 · 看候选":
+            - /url: "#sector-半导体"
+            - strong: 半导体
+            - text: 195只样本 · 看候选
+        - cell "趋势延续":
+          - generic: 趋势延续
+        - cell "89.0":
+          - strong: "89.0"
+        - cell "+15.20%"
+        - cell "+20.64%"
+        - cell "MA20 95% 放量 47%":
+          - text: MA20 95%
+          - text: 放量 47%
+        - cell "看承接":
+          - generic: 看承接
+        - cell "10日超额+20.64%，MA20上方占比95%，放量扩散47%"
+      - row "玻璃 19只样本 · 看候选 弱修复 61.2 +3.57% +2.99% MA20 58% 放量 21% 谨慎观察 10日超额+2.99%，MA20上方占比58%，放量扩散21%":
+        - cell "玻璃 19只样本 · 看候选":
+          - link "玻璃 19只样本 · 看候选":
+            - /url: "#sector-玻璃"
+            - strong: 玻璃
+            - text: 19只样本 · 看候选
+        - cell "弱修复":
+          - generic: 弱修复
+        - cell "61.2":
+          - strong: "61.2"
+        - cell "+3.57%"
+        - cell "+2.99%"
+        - cell "MA20 58% 放量 21%":
+          - text: MA20 58%
+          - text: 放量 21%
+        - cell "谨慎观察":
+          - generic: 谨慎观察
+        - cell "10日超额+2.99%，MA20上方占比58%，放量扩散21%"
+  - heading "主线板块与个股证据" [level=2]
+  - paragraph: 按板块集中展示候选、量价角色、事件共振和下一步验证，不再重复铺设个股卡片。
+  - generic "半导体 趋势延续 · 热度 89.0 · 看承接 10日超额+20.64%，MA20上方占比95%，放量扩散47% 收起":
+    - strong: 半导体
+    - text: 趋势延续 · 热度 89.0 · 看承接
+    - generic: 10日超额+20.64%，MA20上方占比95%，放量扩散47%
+    - text: 收起
+  - table:
+    - rowgroup:
+      - row "排名 股票 分数 阶段表现 相对板块 证据组合 动作 / 下一步验证":
+        - columnheader "排名"
+        - columnheader "股票"
+        - columnheader "分数"
+        - columnheader "阶段表现"
+        - columnheader "相对板块"
+        - columnheader "证据组合"
+        - columnheader "动作 / 下一步验证"
+    - rowgroup:
+      - row "1 富乐德 301297.SZ 82.3 5日 +16.60% 10日 +35.43% +9.07% 领先板块 ★★ 过热 放量承接 · 无事件支撑 等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 涨幅偏大，不追高，等分歧再看":
+        - cell "1"
+        - cell "富乐德 301297.SZ":
+          - link "富乐德 301297.SZ":
+            - /url: /stock/stock/301297.SZ
+            - strong: 富乐德
+            - text: 301297.SZ
+        - cell "82.3":
+          - strong: "82.3"
+        - cell "5日 +16.60% 10日 +35.43%":
+          - text: 5日 +16.60%
+          - text: 10日 +35.43%
+        - cell "+9.07% 领先板块":
+          - strong: +9.07%
+          - generic: 领先板块
+        - cell "★★ 过热 放量承接 · 无事件支撑":
+          - strong: ★★ 过热
+          - generic: 放量承接 · 无事件支撑
+        - cell "等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 涨幅偏大，不追高，等分歧再看":
+          - generic: 等回踩确认
+          - generic: 验证条件：半导体继续承接，事件线索有后续来源确认。
+          - generic: 涨幅偏大，不追高，等分歧再看
+      - row "2 安凯微 688620.SH 81.6 5日 +12.19% 10日 +32.90% +6.54% 领先板块 ★★ 过热 放量承接 · 无事件支撑 等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 涨幅偏大，不追高，等分歧再看":
+        - cell "2"
+        - cell "安凯微 688620.SH":
+          - link "安凯微 688620.SH":
+            - /url: /stock/stock/688620.SH
+            - strong: 安凯微
+            - text: 688620.SH
+        - cell "81.6":
+          - strong: "81.6"
+        - cell "5日 +12.19% 10日 +32.90%":
+          - text: 5日 +12.19%
+          - text: 10日 +32.90%
+        - cell "+6.54% 领先板块":
+          - strong: +6.54%
+          - generic: 领先板块
+        - cell "★★ 过热 放量承接 · 无事件支撑":
+          - strong: ★★ 过热
+          - generic: 放量承接 · 无事件支撑
+        - cell "等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 涨幅偏大，不追高，等分歧再看":
+          - generic: 等回踩确认
+          - generic: 验证条件：半导体继续承接，事件线索有后续来源确认。
+          - generic: 涨幅偏大，不追高，等分歧再看
+      - row "3 晶升股份 688478.SH 76.1 5日 +0.85% 10日 +38.62% +12.26% 领先板块 ★★ 过热 追高 · 无事件支撑 等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+        - cell "3"
+        - cell "晶升股份 688478.SH":
+          - link "晶升股份 688478.SH":
+            - /url: /stock/stock/688478.SH
+            - strong: 晶升股份
+            - text: 688478.SH
+        - cell "76.1":
+          - strong: "76.1"
+        - cell "5日 +0.85% 10日 +38.62%":
+          - text: 5日 +0.85%
+          - text: 10日 +38.62%
+        - cell "+12.26% 领先板块":
+          - strong: +12.26%
+          - generic: 领先板块
+        - cell "★★ 过热 追高 · 无事件支撑":
+          - strong: ★★ 过热
+          - generic: 追高 · 无事件支撑
+        - cell "等回踩确认 验证条件：半导体继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+          - generic: 等回踩确认
+          - generic: 验证条件：半导体继续承接，事件线索有后续来源确认。
+          - generic: 节奏相对健康，继续跟踪承接
+  - generic "玻璃 弱修复 · 热度 61.2 · 谨慎观察 10日超额+2.99%，MA20上方占比58%，放量扩散21% 收起":
+    - strong: 玻璃
+    - text: 弱修复 · 热度 61.2 · 谨慎观察
+    - generic: 10日超额+2.99%，MA20上方占比58%，放量扩散21%
+    - text: 收起
+  - table:
+    - rowgroup:
+      - row "排名 股票 分数 阶段表现 相对板块 证据组合 动作 / 下一步验证":
+        - columnheader "排名"
+        - columnheader "股票"
+        - columnheader "分数"
+        - columnheader "阶段表现"
+        - columnheader "相对板块"
+        - columnheader "证据组合"
+        - columnheader "动作 / 下一步验证"
+    - rowgroup:
+      - row "1 宏和科技 603256.SH 75.0 5日 +7.03% 10日 +16.03% +7.32% 领先板块 ★★ 领涨 正常观察 · 无事件支撑 先放观察池 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+        - cell "1"
+        - cell "宏和科技 603256.SH":
+          - link "宏和科技 603256.SH":
+            - /url: /stock/stock/603256.SH
+            - strong: 宏和科技
+            - text: 603256.SH
+        - cell "75.0":
+          - strong: "75.0"
+        - cell "5日 +7.03% 10日 +16.03%":
+          - text: 5日 +7.03%
+          - text: 10日 +16.03%
+        - cell "+7.32% 领先板块":
+          - strong: +7.32%
+          - generic: 领先板块
+        - cell "★★ 领涨 正常观察 · 无事件支撑":
+          - strong: ★★ 领涨
+          - generic: 正常观察 · 无事件支撑
+        - cell "先放观察池 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+          - generic: 先放观察池
+          - generic: 验证条件：玻璃继续承接，事件线索有后续来源确认。
+          - generic: 节奏相对健康，继续跟踪承接
+      - row "2 力诺药包 301188.SZ 69.3 5日 +0.65% 10日 +13.62% +4.91% 领先板块 ★★ 跟随 正常观察 · 无事件支撑 先放观察池 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+        - cell "2"
+        - cell "力诺药包 301188.SZ":
+          - link "力诺药包 301188.SZ":
+            - /url: /stock/stock/301188.SZ
+            - strong: 力诺药包
+            - text: 301188.SZ
+        - cell "69.3":
+          - strong: "69.3"
+        - cell "5日 +0.65% 10日 +13.62%":
+          - text: 5日 +0.65%
+          - text: 10日 +13.62%
+        - cell "+4.91% 领先板块":
+          - strong: +4.91%
+          - generic: 领先板块
+        - cell "★★ 跟随 正常观察 · 无事件支撑":
+          - strong: ★★ 跟随
+          - generic: 正常观察 · 无事件支撑
+        - cell "先放观察池 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+          - generic: 先放观察池
+          - generic: 验证条件：玻璃继续承接，事件线索有后续来源确认。
+          - generic: 节奏相对健康，继续跟踪承接
+      - row "3 中材科技 002080.SZ 56.3 5日 +17.19% 10日 +32.14% +23.43% 领先板块 ★★ 过热 追高 · 无事件支撑 等回踩确认 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+        - cell "3"
+        - cell "中材科技 002080.SZ":
+          - link "中材科技 002080.SZ":
+            - /url: /stock/stock/002080.SZ
+            - strong: 中材科技
+            - text: 002080.SZ
+        - cell "56.3":
+          - strong: "56.3"
+        - cell "5日 +17.19% 10日 +32.14%":
+          - text: 5日 +17.19%
+          - text: 10日 +32.14%
+        - cell "+23.43% 领先板块":
+          - strong: +23.43%
+          - generic: 领先板块
+        - cell "★★ 过热 追高 · 无事件支撑":
+          - strong: ★★ 过热
+          - generic: 追高 · 无事件支撑
+        - cell "等回踩确认 验证条件：玻璃继续承接，事件线索有后续来源确认。 节奏相对健康，继续跟踪承接":
+          - generic: 等回踩确认
+          - generic: 验证条件：玻璃继续承接，事件线索有后续来源确认。
+          - generic: 节奏相对健康，继续跟踪承接
+  - heading "过热/退潮提醒" [level=2]
+  - paragraph: 这里不是机会榜，而是提醒哪些行业已经不适合追价。
+  - table:
+    - rowgroup:
+      - row "行业 状态 热度 5日表现 10日超额 扩散 动作 解释":
+        - columnheader "行业"
+        - columnheader "状态"
+        - columnheader "热度"
+        - columnheader "5日表现"
+        - columnheader "10日超额"
+        - columnheader "扩散"
+        - columnheader "动作"
+        - columnheader "解释"
+    - rowgroup:
+      - row "机床制造 24只样本 退潮中 28.5 -2.83% -9.51% MA20 38% 放量 29% 暂不参与 10日超额-9.51%，MA20上方占比38%，放量扩散29%":
+        - cell "机床制造 24只样本":
+          - strong: 机床制造
+          - text: 24只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "28.5":
+          - strong: "28.5"
+        - cell "-2.83%"
+        - cell "-9.51%"
+        - cell "MA20 38% 放量 29%":
+          - text: MA20 38%
+          - text: 放量 29%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-9.51%，MA20上方占比38%，放量扩散29%"
+      - row "电器仪表 107只样本 退潮中 28.2 -2.50% -7.19% MA20 36% 放量 26% 暂不参与 10日超额-7.19%，MA20上方占比36%，放量扩散26%":
+        - cell "电器仪表 107只样本":
+          - strong: 电器仪表
+          - text: 107只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "28.2":
+          - strong: "28.2"
+        - cell "-2.50%"
+        - cell "-7.19%"
+        - cell "MA20 36% 放量 26%":
+          - text: MA20 36%
+          - text: 放量 26%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-7.19%，MA20上方占比36%，放量扩散26%"
+      - row "专用机械 291只样本 退潮中 27.9 -2.72% -6.57% MA20 35% 放量 19% 暂不参与 10日超额-6.57%，MA20上方占比35%，放量扩散19%":
+        - cell "专用机械 291只样本":
+          - strong: 专用机械
+          - text: 291只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "27.9":
+          - strong: "27.9"
+        - cell "-2.72%"
+        - cell "-6.57%"
+        - cell "MA20 35% 放量 19%":
+          - text: MA20 35%
+          - text: 放量 19%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-6.57%，MA20上方占比35%，放量扩散19%"
+      - row "化工原料 256只样本 退潮中 26.6 -2.02% -4.86% MA20 44% 放量 18% 只复盘 10日超额-4.86%，MA20上方占比44%，放量扩散18%":
+        - cell "化工原料 256只样本":
+          - strong: 化工原料
+          - text: 256只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "26.6":
+          - strong: "26.6"
+        - cell "-2.02%"
+        - cell "-4.86%"
+        - cell "MA20 44% 放量 18%":
+          - text: MA20 44%
+          - text: 放量 18%
+        - cell "只复盘":
+          - generic: 只复盘
+        - cell "10日超额-4.86%，MA20上方占比44%，放量扩散18%"
+      - row "互联网 80只样本 退潮中 22.1 -2.89% -7.51% MA20 31% 放量 11% 暂不参与 10日超额-7.51%，MA20上方占比31%，放量扩散11%":
+        - cell "互联网 80只样本":
+          - strong: 互联网
+          - text: 80只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "22.1":
+          - strong: "22.1"
+        - cell "-2.89%"
+        - cell "-7.51%"
+        - cell "MA20 31% 放量 11%":
+          - text: MA20 31%
+          - text: 放量 11%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-7.51%，MA20上方占比31%，放量扩散11%"
+      - row "通信设备 137只样本 退潮中 21.4 -4.52% -7.70% MA20 29% 放量 18% 暂不参与 10日超额-7.70%，MA20上方占比29%，放量扩散18%":
+        - cell "通信设备 137只样本":
+          - strong: 通信设备
+          - text: 137只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "21.4":
+          - strong: "21.4"
+        - cell "-4.52%"
+        - cell "-7.70%"
+        - cell "MA20 29% 放量 18%":
+          - text: MA20 29%
+          - text: 放量 18%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-7.70%，MA20上方占比29%，放量扩散18%"
+      - row "机械基件 136只样本 退潮中 19.0 -4.02% -7.48% MA20 32% 放量 20% 暂不参与 10日超额-7.48%，MA20上方占比32%，放量扩散20%":
+        - cell "机械基件 136只样本":
+          - strong: 机械基件
+          - text: 136只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "19.0":
+          - strong: "19.0"
+        - cell "-4.02%"
+        - cell "-7.48%"
+        - cell "MA20 32% 放量 20%":
+          - text: MA20 32%
+          - text: 放量 20%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-7.48%，MA20上方占比32%，放量扩散20%"
+      - row "IT设备 81只样本 退潮中 18.1 -4.80% -8.46% MA20 28% 放量 22% 暂不参与 10日超额-8.46%，MA20上方占比28%，放量扩散22%":
+        - cell "IT设备 81只样本":
+          - strong: IT设备
+          - text: 81只样本
+        - cell "退潮中":
+          - generic: 退潮中
+        - cell "18.1":
+          - strong: "18.1"
+        - cell "-4.80%"
+        - cell "-8.46%"
+        - cell "MA20 28% 放量 22%":
+          - text: MA20 28%
+          - text: 放量 22%
+        - cell "暂不参与":
+          - generic: 暂不参与
+        - cell "10日超额-8.46%，MA20上方占比28%，放量扩散22%"

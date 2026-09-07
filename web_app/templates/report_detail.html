@@ -2,10 +2,10 @@
 {% block title %}{{ report.title }}{% endblock %}
 {% block content %}
 <nav class="report-navigation" aria-label="日报导航">
-  <a href="/reports">返回日报归档</a>
+  <a href="{{ app_url_for(request, 'report_archive').path }}">返回日报归档</a>
   <span>
-    {% if previous_date %}<a href="/reports/{{ previous_date }}">上一篇</a>{% endif %}
-    {% if next_date %}<a href="/reports/{{ next_date }}">下一篇</a>{% endif %}
+    {% if previous_date %}<a href="{{ app_url_for(request, 'report_detail', report_date=previous_date).path }}">上一篇</a>{% endif %}
+    {% if next_date %}<a href="{{ app_url_for(request, 'report_detail', report_date=next_date).path }}">下一篇</a>{% endif %}
   </span>
 </nav>
 

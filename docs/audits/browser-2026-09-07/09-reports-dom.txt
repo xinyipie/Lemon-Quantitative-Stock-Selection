@@ -1,0 +1,43 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - paragraph: Daily Market Research
+  - heading "市场日报" [level=1]
+  - paragraph: 按日期、公司、行业、事件或风险词查找每日研究记录。
+  - text: 关键词
+  - textbox "关键词":
+    - /placeholder: 公司、行业、事件或风险
+  - text: 开始日期
+  - textbox "开始日期"
+  - text: 结束日期
+  - textbox "结束日期"
+  - button "查询"
+  - list:
+    - time: 2026-07-24
+    - heading "市场情绪高涨但行业分化，半导体趋势延续存分歧" [level=2]:
+      - link "市场情绪高涨但行业分化，半导体趋势延续存分歧":
+        - /url: /stock/reports/20260724
+    - paragraph: 市场情绪高涨但行业分化，半导体趋势延续存分歧 核心判断 市场整体情绪高涨，但多个行业处于退潮中，结构性分化明显。半导体行业趋势延续，但高活跃个股存在分歧风险，需关注分歧能否收敛。玻璃行业处于弱修复阶段，个股活跃度较低，需观察行业扩散和成交承接。 市场背景 市场处于弱势环境中的快速
+    - text: 行情截至 2026-07-23

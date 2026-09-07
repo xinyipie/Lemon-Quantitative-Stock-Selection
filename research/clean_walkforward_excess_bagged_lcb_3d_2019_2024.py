@@ -6,6 +6,8 @@ import json
 
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_bagged_lcb_existing_regime_gate import evaluate, summarize
 from research.clean_walkforward_absolute_bagged_lcb_2019_2024 import load_featured_year
 from research.clean_walkforward_excess_bagged3 import SEEDS
@@ -40,7 +42,15 @@ def sample_member_year_3d(frame: pd.DataFrame, year: int, seed: int) -> pd.DataF
     part = frame.dropna(subset=FEATURES + [EXCESS_TARGET_3D]).copy()
     if len(part) > 150_000:
         part = part.sample(n=150_000, random_state=seed + year)
-    return part[FEATURES + [EXCESS_TARGET_3D]].reset_index(drop=True)
+    sampled = part[
+        FEATURES + [EXCESS_TARGET_3D, "trade_date", "label_exit_date_3d"]
+    ].reset_index(drop=True)
+    purged = purge_overlapping_label_tail(
+        sampled,
+        horizon=3,
+        prediction_start_date=f"{year + 1}0101",
+    )
+    return purged[FEATURES + [EXCESS_TARGET_3D]].reset_index(drop=True)
 
 
 def execute_daily_top3_3d(predictions: pd.DataFrame) -> pd.DataFrame:

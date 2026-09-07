@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+from research.research_integrity import purge_overlapping_label_tail
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -38,6 +39,11 @@ def predict_market_rolling3y() -> tuple[pd.DataFrame, dict]:
     for predict_year in RESEARCH_YEARS:
         train_years = list(range(predict_year - 3, predict_year))
         train = pd.concat([frames[year] for year in train_years], ignore_index=True)
+        train = purge_overlapping_label_tail(
+            train,
+            horizon=5,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frames[predict_year].copy()
         model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
         model.fit(train[MARKET_FEATURES], train[MARKET_TARGET].clip(-10.0, 10.0))

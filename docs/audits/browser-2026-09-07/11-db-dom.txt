@@ -1,0 +1,109 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - heading "数据库状态" [level=1]
+  - paragraph: 检查历史事实库覆盖范围，确认页面数据是否新鲜。
+  - generic: 最新交易日
+  - strong: "20260630"
+  - generic: 股票基础数
+  - strong: "5536"
+  - generic: 最新日线股票数
+  - strong: "5508"
+  - heading "数据更新入口" [level=2]
+  - paragraph: 日常更新会补齐核心行情并刷新页面数据；完整重算耗时更久，适合补历史复盘和审计。
+  - button "更新到最新交易日"
+  - button "完整重算"
+  - generic: 当前状态：同步完成。
+  - generic "高级操作"
+  - generic: 表覆盖
+  - region "数据库表覆盖":
+    - table:
+      - rowgroup:
+        - row "表 行数 日期范围 状态":
+          - columnheader "表"
+          - columnheader "行数"
+          - columnheader "日期范围"
+          - columnheader "状态"
+      - rowgroup:
+        - row "stock_daily 3626804 19901219 → 20260630 OK":
+          - cell "stock_daily"
+          - cell "3626804"
+          - cell "19901219 → 20260630"
+          - cell "OK":
+            - generic: OK
+        - row "stock_daily_basic 3663219 19901219 → 20260630 OK":
+          - cell "stock_daily_basic"
+          - cell "3663219"
+          - cell "19901219 → 20260630"
+          - cell "OK":
+            - generic: OK
+        - row "stock_moneyflow 3478931 20230904 → 20260630 OK":
+          - cell "stock_moneyflow"
+          - cell "3478931"
+          - cell "20230904 → 20260630"
+          - cell "OK":
+            - generic: OK
+        - row "index_daily 1470 19901219 → 20260625 滞后":
+          - cell "index_daily"
+          - cell "1470"
+          - cell "19901219 → 20260625"
+          - cell "滞后":
+            - generic: 滞后
+        - row "fund_daily 0 - 缺失":
+          - cell "fund_daily"
+          - cell "0"
+          - cell "-"
+          - cell "缺失":
+            - generic: 缺失
+        - row "index_basic 0 - 缺失":
+          - cell "index_basic"
+          - cell "0"
+          - cell "-"
+          - cell "缺失":
+            - generic: 缺失
+        - row "fund_basic 0 - 缺失":
+          - cell "fund_basic"
+          - cell "0"
+          - cell "-"
+          - cell "缺失":
+            - generic: 缺失
+        - row "stock_basic 5536 - OK":
+          - cell "stock_basic"
+          - cell "5536"
+          - cell "-"
+          - cell "OK":
+            - generic: OK
+        - row "fina_indicator 127814 20210407 → 20260529 OK":
+          - cell "fina_indicator"
+          - cell "127814"
+          - cell "20210407 → 20260529"
+          - cell "OK":
+            - generic: OK
+        - row "income 116968 20210407 → 20260528 OK":
+          - cell "income"
+          - cell "116968"
+          - cell "20210407 → 20260528"
+          - cell "OK":
+            - generic: OK

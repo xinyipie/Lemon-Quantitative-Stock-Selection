@@ -55,6 +55,7 @@ TARGET_YEARS = (2022, 2023, 2024)
 
 SLIM_COLUMNS = [
     "ts_code", "name", "industry", "trade_date", "entry_open", "entry_gap_pct", "ret_5d", "ret_8d",
+    "label_exit_date_5d", "label_exit_date_8d",
     *FEATURE_COLUMNS,
 ]
 
@@ -76,7 +77,9 @@ def _slim(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_validation_universe() -> pd.DataFrame:
-    financial_events = prepare_financial_events(pd.read_parquet(FINANCIAL_CACHE))
+    financial_events = prepare_financial_events(
+        pd.read_parquet(FINANCIAL_CACHE), require_versioned_history=True
+    )
     dates = _available_dates(CACHE, "20210101", "20250131")
     regimes = _build_regimes(CACHE, dates)
     stock_info = _load_stock_info(CACHE)
@@ -102,7 +105,10 @@ def walk_forward_validate(frame: pd.DataFrame) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for target_year in TARGET_YEARS:
         training, calibration, target = split_walk_forward(frame, target_year)
-        estimator = fit_model(training)
+        estimator = fit_model(
+            training,
+            prediction_start_date=f"{target_year - 1}0101",
+        )
         calibration_top = _predict_top(estimator, calibration)
         target_top = _predict_top(estimator, target)
         score_threshold, margin_threshold = relative_thresholds(calibration_top, 0.50, 0.0)

@@ -232,8 +232,11 @@ def latest_ic_short_file(since_mtime: float | None = None) -> Path | None:
 def refresh_core_history_data(py: str, args: argparse.Namespace, target_start: str, target_end: str) -> str:
     if not args.skip_download:
         download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end, "--core-only"]
+        download_cmd.extend(["--cache-dir", str(args.cache_dir)])
         if args.skip_financial:
             download_cmd.append("--skip-financial")
+        elif getattr(args, "financial_only_force", False):
+            download_cmd.append("--financial-only-force")
         run_command(download_cmd, args.dry_run)
 
     if not args.skip_history_import:
@@ -254,6 +257,7 @@ def refresh_core_history_data(py: str, args: argparse.Namespace, target_start: s
                 "daily_basic",
                 "moneyflow",
                 "stock_basic",
+                *([] if args.skip_financial else ["fina_indicator", "income"]),
             ],
             args.dry_run,
         )
@@ -294,8 +298,11 @@ def run_update(args: argparse.Namespace) -> None:
     else:
         if not args.skip_download:
             download_cmd = [py, "data_downloader.py", "--start", target_start, "--end", target_end]
+            download_cmd.extend(["--cache-dir", str(args.cache_dir)])
             if args.skip_financial:
                 download_cmd.append("--skip-financial")
+            elif getattr(args, "financial_only_force", False):
+                download_cmd.append("--financial-only-force")
             run_command(download_cmd, args.dry_run)
 
         if not args.skip_history_import:
@@ -320,6 +327,7 @@ def run_update(args: argparse.Namespace) -> None:
                     "fund_daily",
                     "index_basic",
                     "fund_basic",
+                    *([] if args.skip_financial else ["fina_indicator", "income"]),
                 ],
                 args.dry_run,
             )
@@ -607,8 +615,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["daily", "dragon", "radar", "full"], default="daily", help="daily=轻量日更；dragon=只更新热门龙头；radar=只更新市场雷达；full=补齐短线复盘和长线审计")
     parser.add_argument("--full-history", action="store_true", help="重跑并导入 2024H1 起所有半年度长线审计")
     parser.add_argument("--fast", action="store_true", help="线上极速同步：跳过限频重接口、市场上下文和AI解释，只刷新核心信号")
-    parser.add_argument("--skip-financial", action="store_true", default=True, help="日常更新默认跳过财务下载")
+    parser.add_argument("--skip-financial", action="store_true", default=False, help="显式跳过财务增量下载（默认更新）")
     parser.add_argument("--with-financial", dest="skip_financial", action="store_false", help="同时下载财务数据")
+    parser.add_argument("--financial-only-force", action="store_true", help="全量刷新财务并合并历史，不重下已有行情")
     parser.add_argument("--skip-download", action="store_true")
     parser.add_argument("--skip-history-import", action="store_true")
     parser.add_argument("--skip-market-context", action="store_true")

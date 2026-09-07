@@ -40,7 +40,11 @@ def oos_calibrated_predictions(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]
     predictions = []
     metadata = {}
     for train_years, calibration_year, predict_year in oos_calibration_splits():
-        train = sample_training_rows(frame, train_years)
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         calibration = frame[frame["year"] == calibration_year].dropna(subset=FEATURES).copy()
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
         model = new_model()

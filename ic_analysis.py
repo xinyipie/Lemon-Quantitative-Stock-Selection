@@ -65,15 +65,14 @@ def load_trades(csv_path: str) -> pd.DataFrame:
 
 
 def pick_score_col(df: pd.DataFrame, use_profit: bool = False) -> str:
-    """自动选评分列：short_score（短线）> longterm_score（波段）> profit_after_fee"""
+    """选择入场时可知的有效评分列；已实现收益不能充当预测分数。"""
     if use_profit:
-        return 'profit_after_fee'
+        raise ValueError("profit_after_fee 是事后收益，不是预测评分")
     if 'short_score' in df.columns and df['short_score'].gt(0).any():
         return 'short_score'
     if 'longterm_score' in df.columns and df['longterm_score'].gt(0).any():
         return 'longterm_score'
-    logger.warning("未找到有效评分列（short_score/longterm_score均为0），降级使用 profit_after_fee")
-    return 'profit_after_fee'
+    raise ValueError("未找到有效预测评分列（short_score/longterm_score）")
 
 
 def load_daily_for_date(date: str) -> pd.DataFrame:
@@ -354,9 +353,10 @@ def run_batch(horizons: List[int]):
             print(f"  ⚠️  读取失败：{fname}  ({e})")
             continue
 
-        score_col = pick_score_col(df)
-        if score_col == 'profit_after_fee':
-            print(f"  ⏭️  跳过（无有效评分列）：{fname}")
+        try:
+            score_col = pick_score_col(df)
+        except ValueError as exc:
+            print(f"  ⏭️  跳过（IC不可用）：{fname}（{exc}）")
             continue
 
         n_trades = len(df)

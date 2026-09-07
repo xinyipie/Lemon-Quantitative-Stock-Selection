@@ -6,6 +6,8 @@ import sys
 
 import pandas as pd
 
+from research.research_integrity import lock_observable_topn
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -289,8 +291,7 @@ def search_combinations(candidates: pd.DataFrame, strong: pd.DataFrame, top_sing
             if expansion.empty:
                 continue
             score_col = "hybrid_score" if "hybrid_score" in expansion.columns else "consensus_score"
-            expansion = expansion.sort_values(["select_date", score_col, "ret", "ts_code"], ascending=[True, False, False, True])
-            expansion = expansion.groupby("select_date", group_keys=False).head(1)
+            expansion = lock_observable_topn(expansion, "select_date", score_col, topn=1)
             combined = pd.concat([strong, expansion], ignore_index=True, sort=False)
             combined["ret"] = pd.to_numeric(combined["ret"], errors="coerce").fillna(0.0)
             combined["win"] = combined["ret"] > 0
@@ -327,8 +328,7 @@ def search_combinations(candidates: pd.DataFrame, strong: pd.DataFrame, top_sing
         frames = [selected for name, selected in materialized if name in rule_names]
         expansion = pd.concat(frames, ignore_index=True, sort=False)
         score_col = "hybrid_score" if "hybrid_score" in expansion.columns else "consensus_score"
-        expansion = expansion.sort_values(["select_date", score_col, "ret", "ts_code"], ascending=[True, False, False, True])
-        expansion = expansion.groupby("select_date", group_keys=False).head(1)
+        expansion = lock_observable_topn(expansion, "select_date", score_col, topn=1)
         best_events = pd.concat([strong, expansion], ignore_index=True, sort=False)
     return result, best_events
 

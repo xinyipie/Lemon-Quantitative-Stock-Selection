@@ -1,9 +1,10 @@
 {% set observe_card = observation_candidates|default({}) %}
+{% set historical_card = (page_time is defined and page_time.is_historical) or (freshness is defined and freshness and not freshness.is_fresh) %}
 <section class="strong-recommendation-card observe {{ observe_card.tone or 'neutral' }}">
   <div class="strong-card-head">
     <div>
       <div class="eyebrow">Observe Candidates</div>
-      <h2>{{ observe_card.title or '观察候选未运行' }}</h2>
+      <h2>{{ (observe_card.title|replace('今日', '该历史日')) if historical_card else (observe_card.title or '观察候选未运行') }}</h2>
       <p>{{ observe_card.subtitle or '运行实盘选股后，这里会显示与强推荐分离的观察候选。' }}</p>
     </div>
     <div class="strong-card-meta">
@@ -18,7 +19,7 @@
     {% for item in observe_card["items"] %}
     <article class="strong-stock-card observe-stock-card">
       <div class="strong-stock-main">
-        <a href="/stock/{{ item.ts_code }}">
+        <a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
           <strong>{{ item.display_name }}</strong>
           <span>{{ item.display_code }} · {{ item.industry or '-' }}</span>
         </a>

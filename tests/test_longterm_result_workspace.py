@@ -1,6 +1,6 @@
 import unittest
 
-from web_app.app import _build_longterm_result_context
+from web_app.app import _build_longterm_result_context, _select_longterm_result_view
 
 
 class LongtermResultWorkspaceTest(unittest.TestCase):
@@ -27,6 +27,16 @@ class LongtermResultWorkspaceTest(unittest.TestCase):
         self.assertEqual(samples[0]["result_label"], "显著跑赢")
         self.assertEqual(samples[0]["result_risk_label"], "80日回撤可控")
         self.assertEqual([point["label"] for point in samples[0]["return_path"]], ["10日", "40日", "80日"])
+
+    def test_risk_view_uses_completed_80_day_mae_only(self):
+        completed_deep = {"ret_80d": -2.0, "mae_80d": -18.0, "watch_risk_tone": "ok"}
+        completed_current_warning = {"ret_80d": 3.0, "mae_80d": -5.0, "watch_risk_tone": "bad"}
+        current_warning = {"ret_80d": None, "mae_80d": None, "watch_risk_tone": "bad"}
+        context = _build_longterm_result_context([completed_deep, completed_current_warning, current_warning])
+
+        selected = _select_longterm_result_view(context, "risk")
+
+        self.assertEqual(selected, [completed_deep])
 
 
 if __name__ == "__main__":

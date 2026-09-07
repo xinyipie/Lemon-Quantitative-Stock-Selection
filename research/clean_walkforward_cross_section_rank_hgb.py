@@ -6,6 +6,8 @@ import json
 
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_walkforward_technical_hgb_excess_target import (
     ALL_YEARS,
     FEATURES,
@@ -40,7 +42,12 @@ def add_cross_section_ranks(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.DataFrame:
+def sample_training_rows(
+    frame: pd.DataFrame,
+    years: tuple[int, ...],
+    *,
+    prediction_start_date: str | None = None,
+) -> pd.DataFrame:
     """使用固定年度样本上限，避免较新年份支配训练。"""
 
     parts = []
@@ -49,7 +56,11 @@ def sample_training_rows(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.Data
         if len(part) > 150_000:
             part = part.sample(n=150_000, random_state=20260808 + year)
         parts.append(part)
-    return pd.concat(parts, ignore_index=True)
+    return purge_overlapping_label_tail(
+        pd.concat(parts, ignore_index=True),
+        horizon=5,
+        prediction_start_date=prediction_start_date,
+    )
 
 
 def predict_walkforward(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -58,7 +69,11 @@ def predict_walkforward(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     predictions = []
     metadata = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows(frame, train_years)
+        train = sample_training_rows(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frame[frame["year"] == predict_year].dropna(subset=RANK_FEATURES).copy()
         model = new_model()
         model.fit(train[RANK_FEATURES], train[RANK_TARGET])

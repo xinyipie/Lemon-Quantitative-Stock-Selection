@@ -40,7 +40,6 @@ def breakout_candidate_mask(frame: pd.DataFrame) -> pd.Series:
         & pd.to_numeric(frame["pct_chg"], errors="coerce").between(-1, 7)
         & pd.to_numeric(frame["turnover_rate"], errors="coerce").between(0.5, 15)
         & pd.to_numeric(frame["volume_ratio"], errors="coerce").between(0.8, 3)
-        & pd.to_numeric(frame["entry_gap_pct"], errors="coerce").between(-2.5, 4)
     )
 
 

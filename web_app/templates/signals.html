@@ -6,7 +6,7 @@
   <div>
     <div class="eyebrow">Short Decision Desk</div>
     <h1>短线复盘</h1>
-    <p>先看今天有没有值得跟踪的信号，再用已满5日样本检验策略。实盘记录与历史回测分开呈现，避免把事后收益误认为今日推荐。</p>
+    <p>{% if page_time.is_historical %}复盘截至 {{ page_time.as_of_date|fmt_date }} 的历史扫描，再用已满5日样本检验策略。{% else %}先看今天有没有值得跟踪的信号，再用已满5日样本检验策略。{% endif %}实盘记录与历史回测分开呈现，避免把事后收益误认为当前推荐。</p>
   </div>
 </header>
 
@@ -16,13 +16,13 @@
   <div class="short-decision-card">
     <div class="eyebrow">Today's Short Decision</div>
     {% if strong_recommendation and strong_recommendation.get('items') %}
-      <h2>今日有 {{ strong_recommendation.get('items')|length }} 只强推荐</h2>
+      <h2>{% if page_time.is_historical %}截至 {{ page_time.as_of_date|fmt_date }} 的历史扫描有{% else %}今日有{% endif %} {{ strong_recommendation.get('items')|length }} 只强推荐</h2>
       <p>优先查看正式层信号，观察候选只用于等待确认，不为数量硬推股票。</p>
     {% elif observation_candidates and observation_candidates.get('items') %}
-      <h2>今日无强推荐，保留观察</h2>
+      <h2>{% if page_time.is_historical %}截至 {{ page_time.as_of_date|fmt_date }} 的历史扫描无强推荐，保留观察{% else %}今日无强推荐，保留观察{% endif %}</h2>
       <p>正式层没有放行标的，观察候选需要后续确认后再决定是否继续跟踪。</p>
     {% else %}
-      <h2>今日不宜勉强出手</h2>
+      <h2>{% if page_time.is_historical %}截至 {{ page_time.as_of_date|fmt_date }} 的历史扫描没有入池标的{% else %}今日不宜勉强出手{% endif %}</h2>
       <p>最新运行没有强推荐或观察候选。空着也是策略的一部分，先保护本金和注意力。</p>
     {% endif %}
     <div class="short-decision-meta">
@@ -54,6 +54,7 @@
       <small>平均回撤 {% if short_stats and short_stats.avg_mae is not none %}{{ "%+.2f"|format(short_stats.avg_mae) }}%{% else %}-{% endif %}</small>
     </div>
   </div>
+  <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
 </section>
 
 <section class="short-today-grid">
@@ -82,7 +83,7 @@
           <tr>
             <td>{{ item.trade_date|fmt_date }}</td>
             <td><span class="live-layer-badge {{ item.history_layer_tone }}">{{ item.history_layer_label }}</span></td>
-            <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+            <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
             <td>{{ item.industry or '-' }}</td>
             <td><strong>{{ "%.1f"|format(item.score or 0) }}</strong></td>
             <td>{{ item.history_entry_timing or '-' }}</td>
@@ -108,7 +109,7 @@
     </div>
   </div>
 
-  <form class="filter-bar" action="/signals" method="get">
+  <form class="filter-bar" action="{{ app_path(request, '/signals') }}" method="get" data-date-range-form>
     <label class="sr-only" for="signal-query">股票代码或中文名</label>
     <label class="sr-only" for="signal-start">开始日期</label>
     <label class="sr-only" for="signal-end">结束日期</label>
@@ -120,8 +121,9 @@
     <input id="signal-end" type="date" name="end" value="{{ filters.get('end', '')|fmt_date_input }}">
     <input id="signal-industry" name="industry" value="{{ filters.get('industry', '') }}" placeholder="行业，可留空">
     <button type="submit">筛选</button>
-    <a class="ghost-button" href="/signals">重置</a>
+    <a class="ghost-button" href="{{ app_path(request, '/signals') }}">重置</a>
   </form>
+  <p class="filter-summary warn" role="alert" data-date-range-error {% if not date_error %}hidden{% endif %}>{{ date_error }}</p>
 
   <div class="short-result-toolbar">
     <div class="short-view-tabs" aria-label="短线结果快捷筛选">
@@ -155,7 +157,7 @@
       {% for item in signals %}
         <tr>
           <td>
-            <a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong></a>
+            <a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong></a>
             <div class="muted">{{ item.display_code }} · {{ item.trade_date|fmt_date }}</div>
             <div class="short-result-caption">{{ item.industry or '行业未知' }} · 第{{ item.rank or '-' }}名</div>
           </td>
@@ -245,7 +247,21 @@
   </nav>
 </section>
 <script>
-document.querySelectorAll('a[href^="/signals"]').forEach(function(link){
+(() => {
+  const form = document.querySelector("[data-date-range-form]");
+  if (!form) return;
+  const errorBox = document.querySelector("[data-date-range-error]");
+  form.addEventListener("submit", (event) => {
+    const start = form.querySelector("[name='start']").value;
+    const end = form.querySelector("[name='end']").value;
+    if (start && end && start > end) {
+      event.preventDefault();
+      errorBox.hidden = false;
+      errorBox.textContent = "开始日期不能晚于结束日期";
+    }
+  });
+})();
+document.querySelectorAll('a[href^="{{ app_path(request, '/signals') }}"]').forEach(function(link){
   var url = new URL(link.href, window.location.origin);
   if (!url.searchParams.has('strategy')) {
     url.searchParams.set('strategy', '{{ active_strategy }}');

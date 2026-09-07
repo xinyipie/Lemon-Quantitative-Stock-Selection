@@ -1,9 +1,10 @@
 {% set strong_card = strong_recommendation|default({}) %}
+{% set historical_card = (page_time is defined and page_time.is_historical) or (freshness is defined and freshness and not freshness.is_fresh) %}
 <section class="strong-recommendation-card {{ strong_card.tone or 'neutral' }}">
   <div class="strong-card-head">
     <div>
       <div class="eyebrow">Strong Shortlist</div>
-      <h2>{{ strong_card.title or '强推荐未运行' }}</h2>
+      <h2>{{ (strong_card.title|replace('今日', '该历史日')) if historical_card else (strong_card.title or '强推荐未运行') }}</h2>
       <p>{{ strong_card.subtitle or '运行实盘选股后，这里会显示高置信短线推荐。' }}</p>
     </div>
     <div class="strong-card-meta">
@@ -18,7 +19,7 @@
     {% for item in strong_card["items"] %}
     <article class="strong-stock-card">
       <div class="strong-stock-main">
-        <a href="/stock/{{ item.ts_code }}">
+        <a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
           <strong>{{ item.display_name }}</strong>
           <span>{{ item.display_code }} · {{ item.industry or '-' }}</span>
         </a>

@@ -114,7 +114,10 @@ def classify_samples(
 
     data = data.dropna(subset=[ret_col]).copy()
     if excess_col not in data.columns:
-        data[excess_col] = data[ret_col]
+        data[excess_col] = pd.NA
+        data[out_col] = pd.NA
+        data["sample_group"] = "基准缺失"
+        return data
     if out_col not in data.columns:
         data[out_col] = data[excess_col] > 0
 

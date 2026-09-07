@@ -14,22 +14,23 @@
   <div class="metric"><span>最新日线股票数</span><strong>{{ status.latest_daily_stock_count }}</strong></div>
 </section>
 
-<section class="panel attention-panel">
+<section class="panel attention-panel" data-update-status-url="{{ app_path(request, '/update/status') }}">
   <div class="panel-head">
     <div>
       <h2>数据更新入口</h2>
       <p>日常更新会补齐核心行情并刷新页面数据；完整重算耗时更久，适合补历史复盘和审计。</p>
     </div>
     <div class="update-actions">
-      <form method="post" action="/update/run?mode=daily" data-background-update-form>
-        <button type="submit" data-update-button data-update-mode="daily" data-update-label="更新到最新交易日">更新到最新交易日</button>
+      <form method="post" action="{{ app_url_for(request, 'run_update').path }}?mode=daily" data-background-update-form>
+        <button type="submit" data-update-button data-update-mode="daily" data-update-label="更新到最新交易日" {% if update_status and update_status.running %}disabled{% endif %}>更新到最新交易日</button>
       </form>
-      <form method="post" action="/update/run?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
-        <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算">完整重算</button>
+      <form method="post" action="{{ app_url_for(request, 'run_update').path }}?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
+        <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算" {% if update_status and update_status.running %}disabled{% endif %}>完整重算</button>
       </form>
     </div>
   </div>
-  <div class="filter-summary" data-update-message>当前状态：{{ update_status.message if update_status and update_status.message else '尚未运行一键更新。' }}</div>
+  <div class="filter-summary {{ 'warn' if update_status and update_status.alignment_state == 'warn' else '' }}" data-update-message>当前状态：{{ (update_status.display_message or update_status.message) if update_status and (update_status.display_message or update_status.message) else '尚未运行一键更新。' }}</div>
+  <span data-update-finished {% if not update_status or not update_status.finished_at or update_status.running %}hidden{% endif %}>{{ '完成' if update_status and update_status.state == 'finished' else '结束' }} {{ update_status.finished_at if update_status and update_status.finished_at else '' }}</span>
   <pre class="update-error" data-update-error hidden></pre>
   <details class="detail-fold">
     <summary>高级操作</summary>

@@ -6,6 +6,8 @@ import json
 
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_walkforward_technical_hgb_excess_target import (
     ALL_YEARS,
     FEATURES,
@@ -38,7 +40,12 @@ def add_excess_target_8d(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def sample_training_rows_8d(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.DataFrame:
+def sample_training_rows_8d(
+    frame: pd.DataFrame,
+    years: tuple[int, ...],
+    *,
+    prediction_start_date: str | None = None,
+) -> pd.DataFrame:
     """保持既有固定随机种子和年度样本上限。"""
 
     parts = []
@@ -47,7 +54,11 @@ def sample_training_rows_8d(frame: pd.DataFrame, years: tuple[int, ...]) -> pd.D
         if len(part) > 150_000:
             part = part.sample(n=150_000, random_state=20260808 + year)
         parts.append(part)
-    return pd.concat(parts, ignore_index=True)
+    return purge_overlapping_label_tail(
+        pd.concat(parts, ignore_index=True),
+        horizon=8,
+        prediction_start_date=prediction_start_date,
+    )
 
 
 def predict_walkforward_8d(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -56,7 +67,11 @@ def predict_walkforward_8d(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     predictions = []
     metadata = {}
     for train_years, predict_year in walkforward_splits():
-        train = sample_training_rows_8d(frame, train_years)
+        train = sample_training_rows_8d(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES + [TARGET_8D]).copy()
         model = new_model()
         model.fit(train[FEATURES], train[EXCESS_TARGET_8D].clip(-20.0, 20.0))

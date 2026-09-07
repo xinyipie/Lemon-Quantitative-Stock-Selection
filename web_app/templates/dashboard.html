@@ -12,13 +12,15 @@
     {"label": "单股体检", "href": "/stock/000001", "hint": "输入代码或中文名检查自选股。"}
   ]
 }) %}
+{% set historical_decision = freshness and not freshness.is_fresh %}
+{% set decision_date = freshness.live_date or freshness.history_date if freshness else none %}
 <header class="terminal-header">
   <div>
     <div class="eyebrow">Local Research Console</div>
     <h1>策略工作台</h1>
-    <p>首页只放今日实盘和关键入口；历史回测信号放到短线复盘里，避免把过去数据误读成今日推荐。</p>
+    <p>{% if historical_decision %}首页标明最近一次实盘截面和关键入口；{% else %}首页只放今日实盘和关键入口；{% endif %}历史回测信号放到短线复盘里，避免把过去数据误读成当前推荐。</p>
   </div>
-  <form class="command-search" action="/stock" method="get">
+  <form class="command-search" action="{{ app_url_for(request, 'stock_redirect').path }}" method="get">
     <input name="code" placeholder="输入股票代码或中文名，例 平安银行 / 000001">
     <button type="submit">体检</button>
   </form>
@@ -39,21 +41,26 @@
 
 <section class="decision-panel {{ decision.tone }} dashboard-primary-decision">
   <div>
-    <div class="eyebrow">Today's Decision</div>
+    <div class="eyebrow">{{ 'Historical Decision' if historical_decision else "Today's Decision" }}</div>
+    {% if historical_decision %}
+    <h2>截至 {{ decision_date|fmt_date }} 的历史判断：{{ decision.level|replace('今日', '当日')|replace('明日', '下一交易日') }}</h2>
+    <p>{{ decision.stance|replace('今日', '当日')|replace('明日', '下一交易日') }}</p>
+    {% else %}
     <h2>今日决策（最近运行决策）：{{ decision.level }}</h2>
     <p>{{ decision.stance }}</p>
+    {% endif %}
     <div class="hint-list compact">
       {% for item in decision.reasons %}<span>{{ item }}</span>{% endfor %}
     </div>
   </div>
   <div class="action-list">
     {% for item in decision.next_actions %}
-    <a href="{{ item.href }}"><strong>{{ item.label }}</strong><span>{{ item.hint }}</span></a>
+    <a href="{{ app_path(request, item.href) }}"><strong>{{ item.label }}</strong><span>{{ item.hint }}</span></a>
     {% endfor %}
   </div>
 </section>
 
-<section class="panel update-panel" data-update-status-url="/update/status">
+<section class="panel update-panel" data-update-status-url="{{ app_path(request, '/update/status') }}">
   <div>
     <h2>同步中心</h2>
     <p>日常使用“更新到最新交易日”：先补核心行情，再刷新今日信号、龙头池和市场摘要；“完整重算”用于补短线复盘、长线审计和市场上下文，耗时会更久。复盘样本日只统计已经产生入池样本且后续收益可验证的日期。</p>
@@ -65,12 +72,12 @@
     <pre class="update-error" data-update-error hidden></pre>
   </div>
   <div class="update-actions">
-    <form method="post" action="/update/run?mode=daily" data-background-update-form>
+    <form method="post" action="{{ app_path(request, '/update/run') }}?mode=daily" data-background-update-form>
       <button type="submit" data-update-button data-update-mode="daily" data-update-label="更新到最新交易日" {% if update_status and update_status.running %}disabled{% endif %}>
         {% if update_status and update_status.running %}正在同步{% else %}更新到最新交易日{% endif %}
       </button>
     </form>
-    <form method="post" action="/update/run?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
+    <form method="post" action="{{ app_path(request, '/update/run') }}?mode=full" data-background-update-form data-confirm-message="完整重算通常需要 5-30 分钟，确认开始？">
       <button class="ghost-button" type="submit" data-update-button data-update-mode="full" data-update-label="完整重算" {% if update_status and update_status.running %}disabled{% endif %}>
         完整重算
       </button>
@@ -124,6 +131,12 @@
     </div>
     <span class="tag {{ 'ok' if daily_brief.source == 'cache' else 'warn' }}">{{ 'AI已缓存' if daily_brief.source == 'cache' else '规则摘要' }}</span>
   </div>
+  {% if historical_decision %}
+  <div class="notice-band">
+    <strong>历史摘要 · 来源日期 {{ (daily_brief.facts.trade_date or decision_date)|fmt_date }}</strong>
+    <span>以下为旧截面的缓存正文，不能作为当前建议；请先更新行情和实盘信号。</span>
+  </div>
+  {% endif %}
   <div class="ai-brief-summary">{{ daily_brief.doc.summary }}</div>
   <div class="ai-brief-grid">
     <div>
@@ -173,7 +186,7 @@
         <h2>最近实盘短线</h2>
         <p>只展示实盘运行记录；如果日期不是今天，说明还没有生成当天信号，不用历史回测顶替。</p>
       </div>
-      <a href="/signals">历史复盘</a>
+      <a href="{{ app_path(request, '/signals') }}">历史复盘</a>
     </div>
     {% if live_signals %}
     <table class="dense-table">
@@ -183,7 +196,7 @@
       <tr>
         <td>{{ item.trade_date|fmt_date }}</td>
         <td>{{ item.rank or '-' }}</td>
-        <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+        <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
         <td>{{ item.industry or '-' }}</td>
         <td><strong class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</strong></td>
         <td><span class="tag {{ item.confidence_tone }}" title="{{ item.confidence_summary }}">{{ item.confidence_label }}</span></td>
@@ -215,7 +228,7 @@
         <p>支持股票代码和中文名。</p>
       </div>
     </div>
-    <form class="quick-box" action="/stock" method="get">
+    <form class="quick-box" action="{{ app_url_for(request, 'stock_redirect').path }}" method="get">
       <input name="code" placeholder="平安银行 / 000001 / 贵州茅台">
       <button type="submit">打开体检卡</button>
     </form>
@@ -234,7 +247,7 @@
       <h2>短线 v9 历史复盘预览</h2>
       <p>这是回测回填数据，不是今日推荐。当前已补到 {{ signal_summary.latest_backtest_date|fmt_date }}；如果某些交易日没有记录，表示短线 v9 当天没有产生可入库的 Top3 信号。</p>
     </div>
-    <a href="/signals">查看复盘表</a>
+    <a href="{{ app_path(request, '/signals') }}">查看复盘表</a>
   </div>
   <table class="dense-table">
       <thead><tr><th>日期</th><th>股票</th><th>分数</th><th>系统原因</th><th>收益路径</th><th>盘中机会</th><th>盘中风险</th><th>可信度 / 复盘</th><th>AI状态</th></tr></thead>
@@ -242,7 +255,7 @@
     {% for item in backtest_signals[:8] %}
     <tr>
       <td>{{ item.trade_date|fmt_date }}</td>
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
       <td><span class="score-main" title="{{ item.score_tooltip }}">{{ "%.1f"|format(item.score or 0) }}</span></td>
       <td class="reason">{{ item.recommend_reason }}</td>
       <td class="{{ item.final_return_tone }}">{{ item.final_return_text }}</td>
@@ -269,19 +282,19 @@
   <div class="pool-column elite">
     <div class="column-title">Elite</div>
     {% for item in longterm_buckets.elite[:6] %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
     {% else %}<div class="empty-mini">暂无强提醒</div>{% endfor %}
   </div>
   <div class="pool-column watch">
     <div class="column-title">Watch</div>
     {% for item in longterm_buckets.watch[:6] %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
     {% else %}<div class="empty-mini">暂无观察标的</div>{% endfor %}
   </div>
   <div class="pool-column other">
     <div class="column-title">Other</div>
     {% for item in longterm_buckets.other[:6] %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><span>{{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span></a>
     {% else %}<div class="empty-mini">暂无其他 active 状态</div>{% endfor %}
   </div>
 </section>
@@ -292,59 +305,8 @@
     <h2>{{ longterm_pool_status.title if longterm_pool_status else '当前长线池：空仓' }}</h2>
     <p>{{ longterm_pool_status.description if longterm_pool_status else '长线规则当前没有放行标的。' }}</p>
   </div>
-  <a class="mini-button" href="/longterm">查看长线池</a>
+  <a class="mini-button" href="{{ app_path(request, '/longterm') }}">查看长线池</a>
 </section>
 {% endif %}
 
-<script>
-(() => {
-  const panel = document.querySelector("[data-update-status-url]");
-  if (!panel) return;
-  const statusUrl = panel.dataset.updateStatusUrl;
-  const message = panel.querySelector("[data-update-message]");
-  const buttons = panel.querySelectorAll("[data-update-button]");
-  const errorBox = panel.querySelector("[data-update-error]");
-
-  function renderStatus(status) {
-    if (!status || !message || !buttons.length) return;
-    const displayMessage = status.display_message || status.message || "状态读取中";
-    let text = `当前状态：${displayMessage}`;
-    if (status.started_at && status.running) {
-      const eta = status.mode === "full" ? "通常需要 5-30 分钟" : "通常需要 1-5 分钟";
-      text += `（开始于 ${status.started_at}，${eta}）`;
-    } else if (status.finished_at) {
-      text += `（完成于 ${status.finished_at}）`;
-    }
-    message.textContent = text;
-    buttons.forEach((button) => {
-      button.disabled = Boolean(status.running);
-      if (status.running) {
-        button.textContent = button.dataset.updateMode === status.mode ? "正在同步" : "请稍候";
-      } else {
-        button.textContent = button.dataset.updateLabel || button.textContent;
-      }
-    });
-    if (errorBox) {
-      const tail = status.state === "failed" ? (status.stderr_tail || status.stdout_tail || "") : "";
-      errorBox.hidden = !tail;
-      errorBox.textContent = tail.slice(-1200);
-    }
-    if (status.running) {
-      window.setTimeout(fetchStatus, 5000);
-    }
-  }
-
-  async function fetchStatus() {
-    try {
-      const response = await fetch(statusUrl, { cache: "no-store" });
-      if (!response.ok) return;
-      renderStatus(await response.json());
-    } catch (error) {
-      if (message) message.textContent = "当前状态：暂时读取不到更新进度，页面刷新后可重试。";
-    }
-  }
-
-  fetchStatus();
-})();
-</script>
 {% endblock %}

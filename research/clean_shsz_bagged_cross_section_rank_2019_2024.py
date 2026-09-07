@@ -6,6 +6,8 @@ import json
 
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_bagged_lcb_existing_regime_gate import evaluate, summarize
 from research.clean_shsz_conditional_risk_rank_2019_2024 import eligible_shsz
 from research.clean_walkforward_absolute_bagged_lcb_2019_2024 import load_featured_year
@@ -42,7 +44,15 @@ def sample_member_year_rank(frame: pd.DataFrame, year: int, seed: int) -> pd.Dat
     part = frame.dropna(subset=FEATURES + [RANK_TARGET]).copy()
     if len(part) > 150_000:
         part = part.sample(n=150_000, random_state=seed + year)
-    return part[FEATURES + [RANK_TARGET]].reset_index(drop=True)
+    sampled = part[
+        FEATURES + [RANK_TARGET, "trade_date", "label_exit_date_5d"]
+    ].reset_index(drop=True)
+    purged = purge_overlapping_label_tail(
+        sampled,
+        horizon=5,
+        prediction_start_date=f"{year + 1}0101",
+    )
+    return purged[FEATURES + [RANK_TARGET]].reset_index(drop=True)
 
 
 def load_ranked_year(year: int) -> pd.DataFrame:

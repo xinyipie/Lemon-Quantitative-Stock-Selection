@@ -112,7 +112,9 @@ def promote_watchlist(df: pd.DataFrame, lookback_scans: int = 10, min_appearance
             out["watch_appearances"] = int(len(recent))
             out["first_seen_date"] = str(first["select_date"])
             out["promote_date"] = str(row["select_date"])
-            out["days_since_first_seen"] = _date_key(row["select_date"]) - _date_key(first["select_date"])
+            current_dt = pd.to_datetime(str(row["select_date"]), format="%Y%m%d", errors="coerce")
+            first_dt = pd.to_datetime(str(first["select_date"]), format="%Y%m%d", errors="coerce")
+            out["days_since_first_seen"] = int((current_dt - first_dt).days)
             promoted_keys.add(key)
             rows.append(out)
 

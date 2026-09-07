@@ -68,7 +68,7 @@ def select_two_stage_candidates(
         & pd.to_numeric(work.get("ret_3d"), errors="coerce").notna()
     )
     if "tradeable" in work.columns:
-        eligible &= work["tradeable"].fillna(False).astype(bool)
+        eligible &= market_research._signal_day_tradeable(work)
     work = work[eligible].copy()
     if work.empty:
         return pd.DataFrame()

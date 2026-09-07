@@ -41,7 +41,35 @@ def _available_dates(cache_dir: Path, start: str, end: str) -> list[str]:
     )
 
 
-def _load_stock_info(cache_dir: Path) -> pd.DataFrame:
+def _load_stock_info(
+    cache_dir: Path,
+    *,
+    require_point_in_time: bool = True,
+) -> pd.DataFrame:
+    history_dir = cache_dir / "stock_basic_history"
+    history_paths = sorted(history_dir.glob("*.parquet")) if history_dir.exists() else []
+    if history_paths:
+        parts = []
+        for path in history_paths:
+            snapshot = _read_parquet(path)
+            if snapshot.empty or "ts_code" not in snapshot.columns:
+                continue
+            snapshot = snapshot.copy()
+            snapshot["effective_date"] = path.stem[:8]
+            parts.append(snapshot)
+        if parts:
+            history = pd.concat(parts, ignore_index=True)
+            for column in ("name", "industry"):
+                if column not in history.columns:
+                    history[column] = ""
+            return history[["ts_code", "effective_date", "name", "industry"]].drop_duplicates(
+                ["ts_code", "effective_date"], keep="last"
+            )
+    if require_point_in_time:
+        raise ValueError(
+            "严格历史研究需要data/cache/stock_basic_history/YYYYMMDD.parquet历史证券主数据；"
+            "单份当前stock_basic.parquet不能验证历史ST、退市和行业"
+        )
     frame = _read_parquet(cache_dir / "stock_basic.parquet")
     if frame.empty or "ts_code" not in frame.columns:
         return pd.DataFrame(columns=["name", "industry"])
@@ -159,6 +187,7 @@ def _future_path(panel: pd.DataFrame, grouped) -> pd.DataFrame:
     for horizon in (3, 5, 8):
         log_sum = sum(future_log_returns[index] for index in range(2, horizon + 1))
         panel[f"ret_{horizon}d"] = (day1_factor * np.exp(log_sum) - 1) * 100
+        panel[f"label_exit_date_{horizon}d"] = grouped["trade_date"].shift(-horizon)
 
     path_highs = []
     path_lows = []
@@ -177,21 +206,19 @@ def _future_path(panel: pd.DataFrame, grouped) -> pd.DataFrame:
             path_highs.append(cumulative_close * (day_high / day_pre_close) - 1)
             path_lows.append(cumulative_close * (day_low / day_pre_close) - 1)
             cumulative_close = cumulative_close * np.exp(grouped["log_return"].shift(-horizon))
-    panel["mfe_8d"] = pd.concat(path_highs, axis=1).max(axis=1) * 100
-    panel["mae_8d"] = pd.concat(path_lows, axis=1).min(axis=1) * 100
+    high_path = pd.concat(path_highs, axis=1)
+    low_path = pd.concat(path_lows, axis=1)
+    complete_path = high_path.notna().all(axis=1) & low_path.notna().all(axis=1)
+    panel["mfe_8d"] = high_path.max(axis=1).where(complete_path) * 100
+    panel["mae_8d"] = low_path.min(axis=1).where(complete_path) * 100
     return panel
 
 
 def _signal_day_tradeable(panel: pd.DataFrame) -> pd.Series:
-    """只使用信号日及次日开盘已知信息判断样本是否可交易。"""
-    # 未来收益是否齐全只决定对应持有期能否进入统计，不能反向决定信号日资格。
-    return (
-        ~panel["name"].astype(str).str.upper().str.contains("ST|退", regex=True, na=False)
-        & panel["history_count"].ge(60)
-        & panel["entry_open"].gt(0)
-        & panel["entry_gap_pct"].lt(9.5)
-        & panel["turnover_rate"].notna()
-    )
+    """只使用信号日收盘前信息判断候选资格。"""
+    from research.no_future_signal_pipeline import signal_eligible_mask
+
+    return signal_eligible_mask(panel, min_history=60)
 
 def build_year_panel(
     cache_dir: Path,
@@ -254,7 +281,22 @@ def build_year_panel(
         panel["volume_ratio"] = np.nan
         panel["circ_mv"] = np.nan
 
-    panel = panel.join(stock_info, on="ts_code")
+    if "effective_date" in stock_info.columns:
+        left = panel.sort_values(["trade_date", "ts_code"]).copy()
+        right = stock_info.copy()
+        left["trade_date"] = left["trade_date"].astype(str)
+        right["effective_date"] = right["effective_date"].astype(str)
+        panel = pd.merge_asof(
+            left.sort_values(["trade_date", "ts_code"]),
+            right.sort_values(["effective_date", "ts_code"]),
+            left_on="trade_date",
+            right_on="effective_date",
+            by="ts_code",
+            direction="backward",
+            allow_exact_matches=True,
+        ).drop(columns=["effective_date"])
+    else:
+        panel = panel.join(stock_info, on="ts_code")
     panel["name"] = panel["name"].fillna("").astype(str)
     panel["industry"] = panel["industry"].fillna("未知行业").astype(str)
     panel["regime"] = panel["trade_date"].map(regimes).fillna("UNKNOWN")

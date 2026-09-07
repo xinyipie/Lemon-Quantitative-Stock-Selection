@@ -7,6 +7,7 @@ import json
 import pandas as pd
 
 from research.clean_financial_relative_confidence import enforce_same_stock_cooldown
+from research.research_integrity import purge_overlapping_label_tail
 from research.clean_walkforward_technical_hgb import (
     ALL_YEARS,
     COST_PCT,
@@ -25,20 +26,33 @@ from research.clean_walkforward_technical_hgb import (
 )
 
 
-def split_fit_and_calibration(frame: pd.DataFrame, years: tuple[int, ...]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """每个年份固定抽样后按80/20永久拆分，集合互不重叠。"""
+def split_fit_and_calibration(
+    frame: pd.DataFrame,
+    years: tuple[int, ...],
+    *,
+    prediction_start_date: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """每年按日期前80%拟合、后20%校准，并隔离重叠标签。"""
 
     fit_parts = []
     calibration_parts = []
     for year in years:
         part = frame[(frame["year"] == year) & frame[TARGET].notna()].dropna(subset=FEATURES)
-        if len(part) > 150000:
-            part = part.sample(n=150000, random_state=RANDOM_STATE + year)
-        else:
-            part = part.sample(frac=1.0, random_state=RANDOM_STATE + year)
-        split_index = int(len(part) * 0.80)
-        fit_parts.append(part.iloc[:split_index])
-        calibration_parts.append(part.iloc[split_index:])
+        dates = sorted(part["trade_date"].astype(str).unique().tolist())
+        split_index = max(1, int(len(dates) * 0.80))
+        calibration_dates = dates[split_index:]
+        if not calibration_dates:
+            continue
+        calibration_start = calibration_dates[0]
+        fit = part[part["trade_date"].astype(str) < calibration_start]
+        fit = purge_overlapping_label_tail(
+            fit,
+            horizon=5,
+            prediction_start_date=calibration_start,
+        )
+        calibration = part[part["trade_date"].astype(str).isin(calibration_dates)]
+        fit_parts.append(fit)
+        calibration_parts.append(calibration)
     return pd.concat(fit_parts, ignore_index=True), pd.concat(calibration_parts, ignore_index=True)
 
 
@@ -48,7 +62,11 @@ def holdout_calibrated_predictions(frame: pd.DataFrame) -> tuple[pd.DataFrame, d
     predictions = []
     metadata = {}
     for train_years, predict_year in walkforward_splits():
-        fit, calibration = split_fit_and_calibration(frame, train_years)
+        fit, calibration = split_fit_and_calibration(
+            frame,
+            train_years,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frame[frame["year"] == predict_year].dropna(subset=FEATURES).copy()
         model = new_model()
         model.fit(fit[FEATURES], fit[TARGET].clip(-15.0, 15.0))

@@ -1,0 +1,154 @@
+- link "跳到主要内容":
+  - /url: "#main-content"
+- complementary:
+  - generic: QS
+  - generic: 策略工作台
+  - generic: Research Console
+  - navigation "主导航":
+    - link "工作台":
+      - /url: /stock/
+    - link "短线复盘":
+      - /url: /stock/signals
+    - link "热门龙头":
+      - /url: /stock/dragon
+    - link "长线池":
+      - /url: /stock/longterm
+    - link "市场雷达":
+      - /url: /stock/sectors
+    - link "市场日报":
+      - /url: /stock/reports
+    - link "单股体检":
+      - /url: /stock/stock/000001
+    - link "数据状态":
+      - /url: /stock/db
+  - generic: 只读研究看板，不包含交易执行功能。
+- main:
+  - generic: Stock Diagnostic
+  - heading "单股查询" [level=1]
+  - paragraph: 股票体检卡：行情、质量、资金、信号状态放在一起看。
+  - textbox "输入股票、指数或ETF代码/名称"
+  - button "查询"
+  - generic: 003043.SZ · 股票
+  - heading "华亚智能" [level=2]
+  - paragraph: 半导体 · 最新交易日 20260630
+  - generic: 最新收盘
+  - strong: "99.39"
+  - generic: 系统结论
+  - strong: 风险偏高
+  - generic: 综合线索 2 项
+  - heading "近 120 个交易日走势" [level=2]
+  - paragraph: 收盘价与 MA20 / MA60 只用于趋势观察，不构成交易指令。
+  - generic "图例":
+    - generic: 收盘
+    - generic: MA20
+    - generic: MA60
+  - img "华亚智能近期价格趋势 从 2025-12-25 到 2026-06-30 的收盘价、20日和60日移动平均线。"
+  - generic: 2025-12-25
+  - generic: 45.02–99.39 元
+  - generic: 2026-06-30
+  - generic: 近10日
+  - strong: 16.79%
+  - generic: 近40日
+  - strong: 79.99%
+  - generic: 近80日
+  - strong: 83.78%
+  - generic: 信号状态
+  - strong: 未入池
+  - heading "策略命中摘要" [level=2]
+  - paragraph: 把这只股票和短线/长线策略历史记录连起来看，避免只看单日行情。
+  - generic: 历史命中
+  - strong: "1"
+  - generic: 短线/长线
+  - strong: 1 / 0
+  - generic: 可评估胜率
+  - strong: 100.0%
+  - generic: 历史最大MFE
+  - strong: +10.60%
+  - paragraph: 最近一次命中：2025-08-27 · short_v9_final · 未走出方向
+  - heading "系统结论" [level=2]
+  - heading "支持因素" [level=3]
+  - paragraph: 近40日走势偏强
+  - paragraph: 近80日趋势有延续
+  - heading "风险因素" [level=3]
+  - paragraph: 净利润同比承压
+  - heading "价格表现" [level=2]
+  - term: 最新收盘
+  - definition: 99.39 元
+  - term: 近10日
+  - definition: 16.79%
+  - term: 近40日
+  - definition: 79.99%
+  - term: 近80日
+  - definition: 83.78%
+  - heading "估值质量" [level=2]
+  - paragraph: 当前历史库未导入 PE/PB/总市值字段，先参考财务质量项。
+  - term: PE(TTM)
+  - definition: "-"
+  - term: PB
+  - definition: "-"
+  - term: 总市值
+  - definition: "-"
+  - term: ROE
+  - definition: 0.42%
+  - term: 净利润同比
+  - definition: "-54.60%"
+  - term: 负债率
+  - definition: 33.67%
+  - heading "资金行为" [level=2]
+  - term: 主力净流入
+  - definition: "-6180.34 万元"
+  - term: 换手率
+  - definition: 8.25%
+  - term: 量比
+  - definition: "0.86"
+  - term: 最近策略
+  - definition: "-"
+  - term: 入池状态
+  - definition: 未入池
+  - heading "历史信号记录" [level=2]
+  - paragraph: 同一只股票在实盘或历史回测中出现过的记录，收益字段只用于事后复盘。
+  - table:
+    - rowgroup:
+      - row "日期 来源 策略 排名 分数 系统原因 收益路径 盘中机会 盘中风险 可信度 信号质量 收益结果 过程标签 AI状态":
+        - columnheader "日期"
+        - columnheader "来源"
+        - columnheader "策略"
+        - columnheader "排名"
+        - columnheader "分数"
+        - columnheader "系统原因"
+        - columnheader "收益路径"
+        - columnheader "盘中机会"
+        - columnheader "盘中风险"
+        - columnheader "可信度"
+        - columnheader "信号质量"
+        - columnheader "收益结果"
+        - columnheader "过程标签"
+        - columnheader "AI状态"
+    - rowgroup:
+      - row "2025-08-27 历史回测 短线v9定板 3 35.7 原始短线分69分；资金分较强。注意：v9重排分低于40；形态分低于30（20），结构不支持追买。 5日+2.10% +10.60% -3.61% · 可接受 暂不跟 线索不足 未走出方向 盘中给过机会 AI待生成 等待独立判断 当前还没有这只股票的AI观察，量化结果不受影响。 需要时生成判断 →":
+        - cell "2025-08-27"
+        - cell "历史回测"
+        - cell "短线v9定板"
+        - cell "3"
+        - cell "35.7":
+          - strong: "35.7"
+        - cell "原始短线分69分；资金分较强。注意：v9重排分低于40；形态分低于30（20），结构不支持追买。":
+          - generic "总分：35.7 拆解：v9分 35.7 / 原始分 69.3 / 资金100 / 板块44 / 形态20 / 量能84 / 回撤100 / 结构87 支持：原始短线分69分；资金分较强 风险：v9重排分低于40；形态分低于30（20），结构不支持追买；量比3.19偏热 处理：轻仓观察，次日不能站稳关键位就放弃": 原始短线分69分；资金分较强。注意：v9重排分低于40；形态分低于30（20），结构不支持追买。
+        - cell "5日+2.10%"
+        - cell "+10.60%"
+        - cell "-3.61% · 可接受":
+          - generic: "-3.61% · 可接受"
+        - cell "暂不跟":
+          - generic "分数偏低（35.7）；形态分低于30（20），不宜按重点跟踪理解；盘中曾给出较好兑现机会": 暂不跟
+        - cell "线索不足":
+          - generic: 线索不足
+        - cell "未走出方向":
+          - generic: 未走出方向
+        - cell "盘中给过机会":
+          - generic: 盘中给过机会
+        - cell "AI待生成 等待独立判断 当前还没有这只股票的AI观察，量化结果不受影响。 需要时生成判断 →":
+          - generic: AI待生成
+          - strong: 等待独立判断
+          - paragraph: 当前还没有这只股票的AI观察，量化结果不受影响。
+          - link "需要时生成判断 →":
+            - /url: /stock/explain/signal/20250827/003043.SZ

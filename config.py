@@ -258,7 +258,17 @@ AI_CONFIG = {
 # 获取地址：https://tushare.pro/register
 # 要求：积分 >= 5000（通过签到、分享等方式获取）
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
-TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "http://14.nat0.cn:32817")
+TUSHARE_HTTP_URL = os.environ.get("TUSHARE_HTTP_URL", "")
+
+
+def require_secure_tushare_url(url: str) -> str:
+    """拒绝明文传输令牌，也不猜测第三方服务的HTTPS地址。"""
+    from urllib.parse import urlsplit
+    value = str(url or "").strip().rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("请设置 TUSHARE_HTTP_URL 为服务方提供的 HTTPS 地址（不能包含用户名或密码）")
+    return value
 
 TUSHARE_CONFIG = {
     "token": TUSHARE_TOKEN,

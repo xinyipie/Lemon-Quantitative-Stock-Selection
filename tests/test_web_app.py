@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -8,13 +9,16 @@ from web_app.app import app
 
 class WebAppTest(unittest.TestCase):
     def setUp(self):
-        self.client = TestClient(app)
+        self.local_write = patch.dict(os.environ, {"STOCK_WEB_ALLOW_LOCAL_WRITE": "1"})
+        self.local_write.start()
+        self.addCleanup(self.local_write.stop)
+        self.client = TestClient(app, client=("127.0.0.1", 41000))
 
     def test_dashboard_page_renders(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("策略工作台", response.text)
-        self.assertIn("最近运行决策", response.text)
+        self.assertTrue("最近运行决策" in response.text or "历史判断" in response.text)
         self.assertIn("行情有效日", response.text)
         self.assertIn("数据状态", response.text)
         self.assertIn("已复盘至", response.text)
@@ -72,7 +76,8 @@ class WebAppTest(unittest.TestCase):
             "page-explanation",
         ):
             self.assertIn(f".{page_class}", css_response.text)
-        self.assertIn("20260722-longterm-results-v1", page_response.text)
+        css_href = page_response.text.split('rel="stylesheet" href="', 1)[1].split('"', 1)[0]
+        self.assertEqual(self.client.get(css_href).status_code, 200)
 
     def test_dashboard_update_button_starts_background_update(self):
         with patch("web_app.app.start_web_update") as start_update:
@@ -146,21 +151,18 @@ class WebAppTest(unittest.TestCase):
     def test_stock_page_shows_not_found_for_invalid_input(self):
         response = self.client.get("/stock/abcdef")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("未找到股票", response.text)
+        self.assertIn("未找到该品种", response.text)
+        self.assertIn("abcdef", response.text)
         self.assertNotIn("ABCDEF.SZ", response.text)
 
     def test_signals_page_renders(self):
         response = self.client.get("/signals")
         self.assertEqual(response.status_code, 200)
         self.assertIn("短线复盘", response.text)
-        self.assertIn("收益路径", response.text)
-        self.assertIn("系统原因", response.text)
-        self.assertIn("可信度 / 复盘", response.text)
+        self.assertIn("5日最终收益", response.text)
         self.assertIn("机会", response.text)
         self.assertIn("风险", response.text)
-        self.assertIn("AI状态", response.text)
-        self.assertIn("初筛通过", response.text)
-        self.assertIn("可信度", response.text)
+        self.assertIn("已满5日", response.text)
         self.assertIn("Strong Shortlist", response.text)
         self.assertIn('data-update-status-url="/update/status"', response.text)
         self.assertIn("stock:updatePending", response.text)
@@ -174,17 +176,21 @@ class WebAppTest(unittest.TestCase):
                 "display_code": f"{index:06d}",
                 "industry": "银行",
                 "score": 60,
-                "performance": {},
+                "factors": {},
+                "ai_view": {},
+                "performance": {"ret_3d": 1.0, "ret_5d": 2.0, "ret_8d": 3.0, "mfe_pct": 4.0, "mae_pct": -1.0},
             }
             for index in range(120)
         ]
         with patch("web_app.app.get_signal_runs", return_value=[]), patch(
-            "web_app.app.get_recent_signals", side_effect=[[], [], fake_signals]
+            "web_app.app.get_recent_signals", side_effect=lambda *args, **kwargs: fake_signals if kwargs.get("limit") in {900, 3000} else []
         ), patch("web_app.app.get_short_live_push_history", return_value=[]):
             response = self.client.get("/signals?page=2&start=2026-01-01&industry=银行")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("第 2 / 3 页", response.text)
+        self.assertIn("第 2 / 4 页", response.text)
+        self.assertIn("样本30", response.text)
+        self.assertNotIn("样本60", response.text)
         self.assertIn('type="date"', response.text)
         self.assertIn('class="table-shell"', response.text)
 
@@ -202,6 +208,124 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("2026-06-30", response.text)
+
+    def test_signals_kpi_uses_the_selected_strategy_samples(self):
+        from fastapi import Response
+
+        steady = {"strategy_key": "steady", "performance": {"ret_5d": 5.0}, "factors": {}}
+        repair = {"strategy_key": "repair", "performance": {"ret_5d": -5.0}, "factors": {}}
+
+        def fake_signals(*args, **kwargs):
+            return [steady, repair] if kwargs.get("limit") == 900 else []
+
+        with patch("web_app.app.get_signal_runs", return_value=[]), patch(
+            "web_app.app.get_recent_signals", side_effect=fake_signals
+        ), patch("web_app.app.get_short_live_push_history", return_value=[]), patch(
+            "web_app.app.summarize_short_signal_performance", return_value={}
+        ) as summarize, patch(
+            "web_app.app.templates.TemplateResponse", return_value=Response("ok")
+        ):
+            response = self.client.get("/signals?strategy=steady")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(summarize.call_args.args[0], [steady])
+        self.assertEqual(summarize.call_args.kwargs["limit"], 1)
+
+    def test_strategy_links_urlencode_existing_filters(self):
+        with patch("web_app.app.get_signal_runs", return_value=[]), patch(
+            "web_app.app.get_recent_signals", return_value=[]
+        ), patch("web_app.app.get_short_live_push_history", return_value=[]):
+            response = self.client.get("/signals?q=A%26B%2BC%23D&industry=%E9%93%B6%E8%A1%8C%26AI")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("q=A%26B%2BC%23D", response.text)
+        self.assertIn("industry=%E9%93%B6%E8%A1%8C%26AI", response.text)
+
+    def test_configured_token_protects_reads_and_accepts_bearer_and_basic(self):
+        import base64
+
+        basic = base64.b64encode(b"stock:secret").decode("ascii")
+        with patch.dict(os.environ, {"STOCK_WEB_TOKEN": "secret"}):
+            denied = self.client.get("/")
+            bearer = self.client.get("/static/app.css", headers={"Authorization": "Bearer secret"})
+            browser = self.client.get("/static/app.css", headers={"Authorization": f"Basic {basic}"})
+
+        self.assertEqual(denied.status_code, 401)
+        self.assertIn("Basic", denied.headers["www-authenticate"])
+        self.assertEqual(bearer.status_code, 200)
+        self.assertEqual(browser.status_code, 200)
+
+    def test_non_ascii_basic_password_is_rejected_without_server_error(self):
+        import base64
+
+        basic = base64.b64encode("stock:错误".encode("utf-8")).decode("ascii")
+        with patch.dict(os.environ, {"STOCK_WEB_TOKEN": "secret"}):
+            response = self.client.get("/", headers={"Authorization": f"Basic {basic}"})
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_remote_write_is_forbidden_without_configured_token(self):
+        remote_client = TestClient(app, client=("203.0.113.9", 41000))
+        with patch.dict(os.environ, {"STOCK_WEB_ALLOW_LOCAL_WRITE": "1"}, clear=True), patch(
+            "web_app.app.start_web_update"
+        ) as start_update:
+            response = remote_client.post("/update/run?mode=daily")
+
+        self.assertEqual(response.status_code, 403)
+        start_update.assert_not_called()
+
+    def test_local_write_requires_explicit_development_opt_in_without_token(self):
+        with patch.dict(os.environ, {}, clear=True), patch("web_app.app.start_web_update") as start_update:
+            response = self.client.post("/update/run?mode=daily")
+
+        self.assertEqual(response.status_code, 403)
+        start_update.assert_not_called()
+
+    def test_cross_origin_write_is_forbidden(self):
+        with patch.dict(os.environ, {"STOCK_WEB_ALLOW_LOCAL_WRITE": "1"}, clear=True), patch(
+            "web_app.app.start_web_update"
+        ) as start_update:
+            response = self.client.post(
+                "/update/run?mode=daily",
+                headers={"Origin": "https://attacker.example"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        start_update.assert_not_called()
+
+    def test_signal_explanation_get_only_reads_cached_content(self):
+        cached = {
+            "source": "cache",
+            "doc": {"title": "缓存解释", "summary": "只读", "positives": [], "risks": []},
+            "signal": {},
+        }
+        with patch("web_app.app.get_signal_explanation", return_value=cached) as read_cached, patch(
+            "web_app.app.get_or_create_signal_explanation"
+        ) as generate:
+            response = self.client.get("/explain/signal/20260525/000012.SZ")
+
+        self.assertEqual(response.status_code, 200)
+        read_cached.assert_called_once()
+        generate.assert_not_called()
+
+    def test_signal_explanation_cache_lock_returns_service_unavailable(self):
+        from web_app.services.explanation_service import ExplanationCacheBusyError
+
+        with patch("web_app.app.get_signal_explanation", side_effect=ExplanationCacheBusyError("busy")):
+            response = self.client.get("/explain/signal/20260525/000012.SZ")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["retry-after"], "2")
+
+    def test_dashboard_uses_single_retrying_update_poller(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text.count("async function fetchStatus()"), 1)
+        self.assertIn("scheduleNext", response.text)
+        self.assertIn("throw new Error", response.text)
+        self.assertIn("window.sessionStorage.removeItem(pendingKey)", response.text)
+        self.assertIn("if (!response.ok)", response.text)
 
     def test_signal_explanation_page_renders(self):
         response = self.client.get("/explain/signal/20260525/000012.SZ")
@@ -243,7 +367,7 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("20260228", response.text)
 
     def test_longterm_page_has_section_navigation_and_pagination(self):
-        samples = [{"select_date": "20260709", "ts_code": f"{index:06d}.SZ"} for index in range(120)]
+        samples = [{"select_date": "20260709", "ts_code": f"{index:06d}.SZ", "ret_80d": 2.0} for index in range(120)]
         with patch("web_app.app.get_active_longterm_pool", return_value=[]), patch(
             "web_app.app.get_longterm_runs", return_value=[]
         ), patch("web_app.app.get_longterm_events", return_value=[]), patch(
@@ -256,7 +380,9 @@ class WebAppTest(unittest.TestCase):
         self.assertIn('href="#lifecycle"', response.text)
         self.assertIn('href="#history-audit"', response.text)
         self.assertIn('class="pagination"', response.text)
-        self.assertIn("第 2 / 3 页", response.text)
+        self.assertIn("第 2 / 4 页", response.text)
+        self.assertIn("000030.SZ", response.text)
+        self.assertNotIn("000060.SZ", response.text)
 
 
 if __name__ == "__main__":

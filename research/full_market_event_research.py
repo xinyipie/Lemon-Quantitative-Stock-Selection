@@ -11,6 +11,7 @@ from research.all_market_multi_engine_research import (
     _load_stock_info,
     build_year_panel,
 )
+from research.no_future_signal_pipeline import signal_eligible_mask
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,8 +56,8 @@ def build_event_candidates(panel: pd.DataFrame) -> pd.DataFrame:
     for column in numeric:
         if column in p.columns:
             p[column] = pd.to_numeric(p[column], errors="coerce")
-    tradeable = p["tradeable"].astype(str).str.lower().isin(["true", "1"])
-    liquid = p["turnover_rate"].between(1, 20) & p["entry_gap_pct"].between(-4, 6)
+    tradeable = signal_eligible_mask(p, min_history=120)
+    liquid = p["turnover_rate"].between(1, 20)
     risk_on = ~p["regime"].astype(str).eq("BEAR_TREND")
     frames: list[pd.DataFrame] = []
 

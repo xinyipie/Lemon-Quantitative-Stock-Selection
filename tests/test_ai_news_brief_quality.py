@@ -1,10 +1,18 @@
 import unittest
+from unittest.mock import patch
+from datetime import datetime
+from market_radar.freshness import BEIJING_TZ
 
 from market_radar.ai_news_brief import _validate_result
 from market_radar.evidence_pack import build_evidence_pack
 
 
 class AiNewsBriefQualityTest(unittest.TestCase):
+    def setUp(self):
+        clock = patch("market_radar.freshness._now", return_value=datetime(2026, 8, 12, 20, tzinfo=BEIJING_TZ))
+        clock.start()
+        self.addCleanup(clock.stop)
+
     def test_cninfo_raw_announcement_enters_final_evidence(self):
         concept_news = {
             "news": {

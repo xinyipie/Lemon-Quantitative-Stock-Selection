@@ -10,7 +10,15 @@ import pandas as pd
 FINANCIAL_COLUMNS = ["ts_code", "ann_date", "end_date", "roe", "debt_to_assets", "netprofit_yoy"]
 
 
-def prepare_financial_events(frame: pd.DataFrame) -> pd.DataFrame:
+def prepare_financial_events(
+    frame: pd.DataFrame,
+    *,
+    require_versioned_history: bool = False,
+) -> pd.DataFrame:
+    if require_versioned_history:
+        verified = frame.get("point_in_time_verified")
+        if verified is None or not pd.Series(verified).fillna(False).astype(bool).all():
+            raise ValueError("严格点时验证要求逐记录的历史版本来源；静态当前快照不可用")
     work = frame[FINANCIAL_COLUMNS].copy()
     for column in ("ann_date", "end_date"):
         work[column] = work[column].astype("string").str.replace(r"\.0$", "", regex=True)

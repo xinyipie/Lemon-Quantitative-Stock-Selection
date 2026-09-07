@@ -119,7 +119,7 @@ def build_case_control_sample(panel: pd.DataFrame, controls_per_day: int = 80) -
     """保留全部机会，并按稳定哈希抽取同日对照股票。"""
     if panel.empty:
         return panel.copy()
-    work = panel[panel["tradeable"].fillna(False)].copy()
+    work = panel[market_research._signal_day_tradeable(panel)].copy()
     work["top20_opportunity"] = work["top20_opportunity"].fillna(False).astype(bool)
     cases = work[work["top20_opportunity"]].copy()
     controls = work[~work["top20_opportunity"]].copy()

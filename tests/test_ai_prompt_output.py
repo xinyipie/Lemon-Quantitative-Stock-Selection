@@ -1,4 +1,6 @@
 import sys
+import json
+import re
 import unittest
 from pathlib import Path
 
@@ -8,22 +10,13 @@ import ai_prompts
 
 
 class AiPromptOutputTest(unittest.TestCase):
-    def test_short_prompt_requires_conditional_execution_plan(self):
-        prompt = ai_prompts.PROMPT_STOCK_ANALYSIS
-
-        for field in [
-            "buy_condition",
-            "avoid_condition",
-            "stop_plan",
-            "take_profit_plan",
-            "position_advice",
-        ]:
-            self.assertIn(field, prompt)
-
-        self.assertIn("明日执行计划", prompt)
-        self.assertIn("条件式", prompt)
-        self.assertIn("不承诺收益", prompt)
-        self.assertIn("不生成自动下单", prompt)
+    def test_short_prompt_renders_valid_observation_schema(self):
+        prompt = ai_prompts.PROMPT_STOCK_ANALYSIS.format(
+            data_date="20260907", market_context="震荡", stock_list="样本股票"
+        )
+        schema = json.loads(re.search(r'\{\s*"code".*?\}', prompt, re.S).group())
+        self.assertTrue({"summary", "positives", "risks", "watch_plan", "invalidation"} <= schema.keys())
+        self.assertFalse({"score", "position_advice", "buy_condition"} & schema.keys())
 
 
 if __name__ == "__main__":

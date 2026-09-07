@@ -20,8 +20,7 @@ class ScheduledUpdateTest(unittest.TestCase):
 
     def test_full_retry_only_runs_when_today_full_update_is_not_finished(self):
         script = Path("deploy/stock-daily-full-retry").read_text(encoding="utf-8")
-        self.assertIn('ZoneInfo("Asia/Shanghai")', script)
-        self.assertIn('status.get("state") == "finished"', script)
+        self.assertIn('needs_full_update_retry()', script)
         self.assertIn("/usr/local/sbin/stock-daily-full-update", script)
 
     def test_daily_report_has_independent_status_and_log(self):

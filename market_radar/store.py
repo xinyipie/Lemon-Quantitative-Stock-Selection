@@ -8,12 +8,16 @@ from datetime import datetime
 from pathlib import Path
 
 
+class MarketRadarStoreBusyError(RuntimeError):
+    """雷达存储被其他事务占用。"""
+
+
 def save_market_radar_snapshot(db_path: str | Path, radar_date: str, brief: dict, decision: dict) -> int:
     """Upsert one Market Radar snapshot and return its row id."""
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = _snapshot_payload(str(radar_date or ""), brief, decision)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=1.0)
     try:
         _ensure_schema(conn)
         conn.execute(
@@ -52,6 +56,10 @@ def save_market_radar_snapshot(db_path: str | Path, radar_date: str, brief: dict
         ).fetchone()
         conn.commit()
         return int(row[0])
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise MarketRadarStoreBusyError(str(exc)) from exc
+        raise
     finally:
         conn.close()
 
@@ -61,10 +69,14 @@ def get_latest_market_radar_snapshot(db_path: str | Path) -> dict | None:
     path = Path(db_path)
     if not path.exists():
         return None
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=0.25)
     conn.row_factory = sqlite3.Row
     try:
-        _ensure_schema(conn)
+        exists = conn.execute(
+            "select 1 from sqlite_master where type='table' and name='market_radar_snapshots'"
+        ).fetchone()
+        if not exists:
+            return None
         row = conn.execute(
             """
             select *
@@ -76,6 +88,10 @@ def get_latest_market_radar_snapshot(db_path: str | Path) -> dict | None:
         if row is None:
             return None
         return _row_to_snapshot(row)
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise MarketRadarStoreBusyError(str(exc)) from exc
+        raise
     finally:
         conn.close()
 

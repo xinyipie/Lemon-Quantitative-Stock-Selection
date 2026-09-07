@@ -4,21 +4,9 @@ set -uo pipefail
 cd /opt/stock
 
 retry_needed="$('/opt/stock/.venv/bin/python' - <<'PY'
-import json
-from datetime import datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
+from web_app.services.update_service import needs_full_update_retry
 
-path = Path("data/web_update_status.json")
-try:
-    status = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, ValueError):
-    status = {}
-
-today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
-started_at = str(status.get("started_at") or "")[:10].replace("-", "")
-finished = status.get("state") == "finished" and status.get("returncode") in (0, None)
-print("no" if finished and started_at == today else "yes")
+print("yes" if needs_full_update_retry() else "no")
 PY
 )"
 

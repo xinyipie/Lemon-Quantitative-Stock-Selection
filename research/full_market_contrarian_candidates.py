@@ -37,15 +37,13 @@ def _rank(frame: pd.DataFrame, column: str, higher: bool) -> pd.Series:
 
 def build_candidates(panel: pd.DataFrame, topn: int = 50) -> pd.DataFrame:
     work = panel.copy()
-    for column in SCORE_COLUMNS | {"pct_chg", "entry_gap_pct", "history_count"}:
+    for column in SCORE_COLUMNS | {"pct_chg", "history_count"}:
         work[column] = pd.to_numeric(work[column], errors="coerce")
     mask = (
-        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
-        & (work["history_count"] >= 60)
+        (work["history_count"] >= 60)
         & work["pct_chg"].between(-4, 7)
         & work["turnover_rate"].between(0.8, 20)
         & work["volume_ratio"].between(0.4, 4)
-        & work["entry_gap_pct"].between(-4, 6)
     )
     work = work[mask].copy()
     if work.empty:

@@ -11,6 +11,7 @@
 
 import logging
 import re
+from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
 
 import pandas as pd
@@ -379,6 +380,9 @@ def build_sector_boosts(ai_news_result: List[Dict]) -> Dict[str, float]:
             continue  # neutral 不加分
 
         for sector in sectors:
+            if sector not in INDUSTRY_CONCEPT_KEYWORDS:
+                logger.warning(f"忽略未验证的行业映射：{sector}")
+                continue
             raw_boosts[sector] = raw_boosts.get(sector, 0) + delta
 
     # clip 到配置范围
@@ -390,7 +394,19 @@ def build_sector_boosts(ai_news_result: List[Dict]) -> Dict[str, float]:
 
 # ==================== 新闻情绪综合分析（保留+增强） ====================
 
-def get_policy_news(days: int = 3, prefer_rich: bool = True) -> pd.DataFrame:
+def _filter_news_window(df: pd.DataFrame, days: int, as_of: str | None) -> pd.DataFrame:
+    if df is None or df.empty or "date" not in df.columns:
+        return pd.DataFrame(columns=getattr(df, 'columns', None))
+    end = pd.Timestamp(as_of or datetime.now().date()).normalize()
+    start = end - pd.Timedelta(days=max(int(days) - 1, 0))
+    dates = pd.to_datetime(df["date"], errors="coerce")
+    mask = dates.between(start, end + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1))
+    result = df.loc[mask].copy()
+    result["date"] = dates.loc[mask]
+    return result
+
+
+def get_policy_news(days: int = 3, prefer_rich: bool = True, as_of: str | None = None) -> pd.DataFrame:
     """
     获取近期财经要闻（使用 akshare）。
     失败时返回空 DataFrame，不影响主流程。
@@ -415,7 +431,7 @@ def get_policy_news(days: int = 3, prefer_rich: bool = True) -> pd.DataFrame:
                 )
                 if not df.empty:
                     logger.info(f"✅ 多源新闻获取完成：{len(df)} 条（含来源/链接/摘要）")
-                    return df
+                    return _filter_news_window(df, days, as_of) if as_of else df
         except Exception as e:
             logger.warning(f"⚠️ 多源新闻获取失败，回退旧新闻接口：{e}")
 
@@ -439,7 +455,8 @@ def get_policy_news(days: int = 3, prefer_rich: bool = True) -> pd.DataFrame:
         if "title" not in df.columns:
             return pd.DataFrame()
 
-        logger.info(f"✅ 获取到 {len(df)} 条财经新闻（取最新{min(20, len(df))}条）")
+        df = _filter_news_window(df, days, as_of)
+        logger.info(f"✅ 获取到 {len(df)} 条时间窗内财经新闻")
         return df.head(20)
 
     except Exception as e:
@@ -450,6 +467,8 @@ def get_policy_news(days: int = 3, prefer_rich: bool = True) -> pd.DataFrame:
 def analyze_news_sentiment(
     news_df: pd.DataFrame,
     ai_news_result: Optional[List[Dict]] = None,
+    as_of: str | None = None,
+    max_age_days: int = 3,
 ) -> Dict:
     """
     综合分析新闻情绪。
@@ -466,10 +485,25 @@ def analyze_news_sentiment(
           "top_negative_sectors": ["房地产"],
         }
     """
+    work_news = news_df.copy() if isinstance(news_df, pd.DataFrame) else pd.DataFrame()
+    dropped_duplicates = 0
+    dropped_bad_dates = 0
+    if not work_news.empty:
+        before = len(work_news)
+        work_news = work_news.drop_duplicates(subset=["title"], keep="first") if "title" in work_news.columns else work_news
+        dropped_duplicates = before - len(work_news)
+        if as_of and "date" in work_news.columns:
+            parsed = pd.to_datetime(work_news["date"], errors="coerce")
+            end = pd.Timestamp(as_of).normalize()
+            start = end - pd.Timedelta(days=max(int(max_age_days), 0))
+            valid = parsed.between(start, end + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1))
+            dropped_bad_dates = int((~valid).sum())
+            work_news = work_news.loc[valid].copy()
+
     # 1. 关键词统计（兜底）
     pos_count = neg_count = 0
-    if not news_df.empty and "title" in news_df.columns:
-        titles = " ".join(news_df["title"].astype(str).tolist())
+    if not work_news.empty and "title" in work_news.columns:
+        titles = " ".join(work_news["title"].astype(str).tolist())
         for kws in POSITIVE_KEYWORDS.values():
             pos_count += sum(titles.count(w) for w in kws)
         for kws in NEGATIVE_KEYWORDS.values():
@@ -528,6 +562,10 @@ def analyze_news_sentiment(
         "positive": pos_count,
         "negative": neg_count,
         "ai_boost_total": round(ai_boost_total, 1),
+        "news_count_used": int(len(work_news)),
+        "dropped_duplicate_count": int(dropped_duplicates),
+        "dropped_bad_date_count": int(dropped_bad_dates),
+        "data_quality": "degraded" if dropped_bad_dates else "ok",
         "top_positive_sectors": top_positive,
         "top_negative_sectors": top_negative,
     }

@@ -24,6 +24,7 @@ from research.no_future_signal_pipeline import (  # noqa: E402
     apply_next_open_execution,
     assert_no_future_features,
 )
+from research.research_integrity import purge_overlapping_label_tail  # noqa: E402
 
 
 PREREG = ROOT / "reports" / "research" / "prereg_clean_broad_cross_sectional_rank_20260808.json"
@@ -38,7 +39,7 @@ BASE_COLUMNS = [
     "ts_code", "name", "industry", "trade_date", "close", "amount", "history_count",
     "pct_chg", "ret_5", "ret_10", "ret_20", "ret_60", "ma_20", "ma_60", "drawdown_20",
     "rsi_14", "volatility_20", "turnover_rate", "volume_ratio", "industry_rs_20", "regime",
-    "entry_open", "entry_gap_pct", "ret_5d",
+    "entry_open", "entry_gap_pct", "ret_5d", "label_exit_date_5d",
 ]
 RANK_SOURCES = [
     "pct_chg", "ret_5", "ret_10", "ret_20", "ret_60", "drawdown_20", "rsi_14",
@@ -53,9 +54,12 @@ TARGET_YEARS = (2018, 2019, 2020, 2021)
 
 def prepare_year(frame: pd.DataFrame) -> pd.DataFrame:
     work = frame.copy()
-    numeric = set(BASE_COLUMNS) - {"ts_code", "name", "industry", "trade_date", "regime"}
+    numeric = set(BASE_COLUMNS) - {
+        "ts_code", "name", "industry", "trade_date", "regime", "label_exit_date_5d"
+    }
     for column in numeric:
-        work[column] = pd.to_numeric(work[column], errors="coerce")
+        if column in work.columns:
+            work[column] = pd.to_numeric(work[column], errors="coerce")
     work = work.loc[
         work["history_count"].ge(120)
         & work["close"].ge(2.0)
@@ -71,12 +75,13 @@ def prepare_year(frame: pd.DataFrame) -> pd.DataFrame:
     work["target_rank_5d"] = grouped["ret_5d"].rank(method="average", pct=True)
     work["regime_code"] = work["regime"].map(REGIME_CODES).fillna(-1)
     assert_no_future_features(FEATURE_COLUMNS)
-    return work[
-        [
-            "ts_code", "name", "industry", "trade_date", "regime", "entry_open", "entry_gap_pct",
-            "ret_5d", "target_rank_5d", *FEATURE_COLUMNS,
-        ]
-    ].dropna(subset=["target_rank_5d", *FEATURE_COLUMNS]).reset_index(drop=True)
+    columns = [
+        "ts_code", "name", "industry", "trade_date", "regime", "entry_open", "entry_gap_pct",
+        "ret_5d", "target_rank_5d", *FEATURE_COLUMNS,
+    ]
+    if "label_exit_date_5d" in work.columns:
+        columns.insert(8, "label_exit_date_5d")
+    return work[columns].dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
 
 
 def build_training_universe() -> pd.DataFrame:
@@ -91,7 +96,17 @@ def build_training_universe() -> pd.DataFrame:
     return combined
 
 
-def fit_rank_model(training: pd.DataFrame) -> HistGradientBoostingRegressor:
+def fit_rank_model(
+    training: pd.DataFrame,
+    *,
+    prediction_start_date: str,
+) -> HistGradientBoostingRegressor:
+    training = purge_overlapping_label_tail(
+        training,
+        horizon=5,
+        prediction_start_date=prediction_start_date,
+    )
+    training = training.dropna(subset=["target_rank_5d"]).copy()
     counts = training.groupby("trade_date")["ts_code"].transform("size").clip(lower=1)
     weights = (1.0 / counts).to_numpy()
     weights = weights / weights.mean()
@@ -106,7 +121,10 @@ def walk_forward(frame: pd.DataFrame) -> pd.DataFrame:
     for target_year in TARGET_YEARS:
         training = frame.loc[years.lt(target_year)]
         target = frame.loc[years.eq(target_year) & frame["regime"].isin(ALLOWED_REGIMES)].copy()
-        estimator = fit_rank_model(training)
+        estimator = fit_rank_model(
+            training,
+            prediction_start_date=f"{target_year}0101",
+        )
         target["prediction"] = estimator.predict(target[FEATURE_COLUMNS])
         top = daily_top_with_margin(target)
         locked = enforce_same_stock_cooldown(

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}策略工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v=20260727-short-score-v2">
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}?v={{ static_asset_version('app.css') }}">
 </head>
 <body class="page-{{ active_nav or 'default' }}">
   <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -20,14 +20,14 @@
       <button class="mobile-nav-toggle" type="button" aria-controls="primary-navigation" aria-expanded="false">菜单</button>
     </div>
     <nav id="primary-navigation" aria-label="主导航">
-      <a class="{{ 'active' if active_nav == 'dashboard' else '' }}" href="/">工作台</a>
-      <a class="{{ 'active' if active_nav == 'signals' else '' }}" href="/signals">短线复盘</a>
-      <a class="{{ 'active' if active_nav == 'dragon' else '' }}" href="/dragon">热门龙头</a>
-      <a class="{{ 'active' if active_nav == 'longterm' else '' }}" href="/longterm">长线池</a>
-      <a class="{{ 'active' if active_nav == 'sectors' else '' }}" href="/sectors">市场雷达</a>
-      <a class="{{ 'active' if active_nav == 'reports' else '' }}" href="/reports">市场日报</a>
-      <a class="{{ 'active' if active_nav == 'stock' else '' }}" href="/stock/000001">单股体检</a>
-      <a class="{{ 'active' if active_nav == 'db' else '' }}" href="/db">数据状态</a>
+      <a class="{{ 'active' if active_nav == 'dashboard' else '' }}" href="{{ app_path(request, '/') }}">工作台</a>
+      <a class="{{ 'active' if active_nav == 'signals' else '' }}" href="{{ app_path(request, '/signals') }}">短线复盘</a>
+      <a class="{{ 'active' if active_nav == 'dragon' else '' }}" href="{{ app_path(request, '/dragon') }}">热门龙头</a>
+      <a class="{{ 'active' if active_nav == 'longterm' else '' }}" href="{{ app_path(request, '/longterm') }}">长线池</a>
+      <a class="{{ 'active' if active_nav == 'sectors' else '' }}" href="{{ app_path(request, '/sectors') }}">市场雷达</a>
+      <a class="{{ 'active' if active_nav == 'reports' else '' }}" href="{{ app_path(request, '/reports') }}">市场日报</a>
+      <a class="{{ 'active' if active_nav == 'stock' else '' }}" href="{{ app_path(request, '/stock/000001') }}">单股体检</a>
+      <a class="{{ 'active' if active_nav == 'db' else '' }}" href="{{ app_path(request, '/db') }}">数据状态</a>
     </nav>
     <div class="sidebar-note">只读研究看板，不包含交易执行功能。</div>
   </aside>
@@ -52,11 +52,21 @@
     const panels = document.querySelectorAll("[data-update-status-url]");
     if (!forms.length && !panels.length) return;
 
-    const statusUrl = (panels[0] && panels[0].dataset.updateStatusUrl) || "/update/status";
+    const statusUrl = (panels[0] && panels[0].dataset.updateStatusUrl) || "{{ app_path(request, '/update/status') }}";
     const pendingKey = "stock:updatePending";
     let reloadWhenFinished = window.sessionStorage.getItem(pendingKey) === "1";
+    let pollTimer = null;
+    let retryDelay = 5000;
+    let statusRequestRunning = false;
+    let submissionErrorActive = false;
+
+    function scheduleNext(delay) {
+      if (pollTimer) window.clearTimeout(pollTimer);
+      pollTimer = window.setTimeout(fetchStatus, delay);
+    }
 
     function updatePanels(status) {
+      if (submissionErrorActive) return;
       panels.forEach((panel) => {
         const message = panel.querySelector("[data-update-message]");
         const buttons = panel.querySelectorAll("[data-update-button]");
@@ -100,6 +110,7 @@
     }
 
     function maybeReload(status) {
+      if (submissionErrorActive) return;
       if (status.running) return;
       if (reloadWhenFinished && status.state === "finished") {
         window.sessionStorage.removeItem(pendingKey);
@@ -109,19 +120,29 @@
     }
 
     async function fetchStatus() {
+      if (statusRequestRunning) return;
+      if (pollTimer) window.clearTimeout(pollTimer);
+      pollTimer = null;
+      statusRequestRunning = true;
       try {
         const response = await fetch(statusUrl, { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error(`status ${response.status}`);
         const status = await response.json();
         updatePanels(status);
         maybeReload(status);
-        if (status.running) window.setTimeout(fetchStatus, 5000);
+        retryDelay = 5000;
+        scheduleNext(status.running ? 5000 : 30000);
       } catch (error) {
-        panels.forEach((panel) => {
-          const message = panel.querySelector("[data-update-message]");
-          if (message) message.textContent = "当前状态：暂时读取不到更新进度，稍后自动重试。";
-        });
-        if (reloadWhenFinished) window.setTimeout(fetchStatus, 5000);
+        if (!submissionErrorActive) {
+          panels.forEach((panel) => {
+            const message = panel.querySelector("[data-update-message]");
+            if (message) message.textContent = "当前状态：暂时读取不到更新进度，稍后自动重试。";
+          });
+        }
+        scheduleNext(retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 30000);
+      } finally {
+        statusRequestRunning = false;
       }
     }
 
@@ -129,20 +150,52 @@
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (form.dataset.confirmMessage && !window.confirm(form.dataset.confirmMessage)) return;
+        // 用户主动重试时，才允许后续状态请求重新接管面板。
+        submissionErrorActive = false;
         window.sessionStorage.setItem(pendingKey, "1");
         reloadWhenFinished = true;
         form.querySelectorAll("[data-update-button], button[type='submit']").forEach((button) => {
           button.disabled = true;
           button.textContent = "正在同步";
         });
+        let submitted = false;
         try {
-          await fetch(form.action, {
+          const response = await fetch(form.action, {
             method: "POST",
             headers: { "Accept": "application/json" },
             cache: "no-store",
           });
+          if (!response.ok) {
+            let detail = `更新请求失败（${response.status}）`;
+            try {
+              const payload = await response.json();
+              if (payload.detail) detail = payload.detail;
+            } catch (parseError) {
+              // 非 JSON 错误响应保留状态码提示。
+            }
+            throw new Error(detail);
+          }
+          submitted = true;
+        } catch (error) {
+          submissionErrorActive = true;
+          window.sessionStorage.removeItem(pendingKey);
+          reloadWhenFinished = false;
+          form.querySelectorAll("[data-update-button], button[type='submit']").forEach((button) => {
+            button.disabled = false;
+            button.textContent = button.dataset.updateLabel || "重新提交";
+          });
+          panels.forEach((panel) => {
+            const message = panel.querySelector("[data-update-message]");
+            const errorBox = panel.querySelector("[data-update-error]");
+            if (message) message.textContent = `更新未启动：${error.message}`;
+            if (errorBox) {
+              errorBox.hidden = false;
+              errorBox.textContent = error.message;
+            }
+          });
         } finally {
-          fetchStatus();
+          if (submitted) fetchStatus();
+          else scheduleNext(30000);
         }
       });
     });

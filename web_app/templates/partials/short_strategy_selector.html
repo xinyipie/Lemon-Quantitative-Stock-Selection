@@ -2,7 +2,7 @@
   <div class="strategy-summary-grid">
     {% for card in strategy_cards %}
     <a class="strategy-summary-card strategy-tone-{{ card.tone }}{% if active_strategy == card.key %} is-active{% endif %}"
-       href="/signals?strategy={{ card.key }}&view={{ result_view }}&q={{ filters.q }}&start={{ filters.start }}&end={{ filters.end }}&industry={{ filters.industry }}">
+       href="{{ request.url.include_query_params(strategy=card.key, view=result_view, q=filters.q, start=filters.start, end=filters.end, industry=filters.industry, page=1) }}">
       <div class="strategy-card-heading">
         <span class="strategy-mini-icon" aria-hidden="true">
           {% if card.key == 'all' %}▦{% elif card.key == 'steady' %}◇{% elif card.key == 'balance' %}↔{% else %}↻{% endif %}

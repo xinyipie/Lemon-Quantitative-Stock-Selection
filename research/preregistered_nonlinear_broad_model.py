@@ -11,6 +11,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+from research.no_future_signal_pipeline import signal_eligible_mask
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 
@@ -57,12 +58,10 @@ def build_broad_candidates(panel: pd.DataFrame, topn: int = 120, per_industry: i
         work[column] = pd.to_numeric(work[column], errors="coerce")
     work["industry_bucket"] = work.get("industry", pd.Series(index=work.index, dtype=object)).fillna("未知行业").astype(str)
     mask = (
-        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
-        & (work["history_count"] >= 120)
+        signal_eligible_mask(work, min_history=120)
         & work["pct_chg"].between(-6.0, 8.0)
         & work["turnover_rate"].between(0.5, 15.0)
         & work["volume_ratio"].between(0.3, 3.0)
-        & work["entry_gap_pct"].between(-5.0, 5.0)
         & work["amount"].gt(0)
         & work["industry_bucket"].ne("未知行业")
     )

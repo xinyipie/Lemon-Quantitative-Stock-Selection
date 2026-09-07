@@ -24,7 +24,8 @@ STORE_COLUMNS = [
     "ts_code", "name", "industry", "trade_date", "open", "high", "low", "close", "synthetic_close", "pct_chg", "amount",
     "history_count", "ret_5", "ret_10", "ret_20", "ret_60", "ma_5", "ma_10", "ma_20", "ma_60",
     "prior_high_20", "drawdown_20", "rsi_14", "volatility_20", "turnover_rate", "volume_ratio",
-    "industry_rs_20", "regime", "entry_open", "entry_gap_pct", "ret_3d", "ret_5d", "ret_8d", "mfe_8d", "mae_8d",
+    "industry_rs_20", "regime", "entry_open", "entry_gap_pct", "ret_3d", "ret_5d", "ret_8d",
+    "label_exit_date_3d", "label_exit_date_5d", "label_exit_date_8d", "mfe_8d", "mae_8d",
 ]
 
 

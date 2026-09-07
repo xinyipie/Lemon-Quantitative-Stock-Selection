@@ -2,7 +2,7 @@
 
 基于 Tushare、A 股离线行情数据和本地回测引擎的量化选股研究工具。项目当前重点是短线选股质量优化，支持日常选股、离线回测、交易归因、IC 分析和多版本实验记录。
 
-> 当前定板短线版本：`profile_v4_adaptive_quality_v9_sector_quality_guard + baseline exit + fixed Top3`。长线当前为 v18 market-sync 观察池 + elite 提醒层，实盘已开启状态记录，但不包含任何交易执行。
+> 当前正式短线组合：`profile_v9_sector_quality_guard + adaptive_quality_v6 + v39`，观察层为 `best_balance`。长线为 v18 market-sync 观察池 + elite 提醒层，不包含任何交易执行。
 > 短线 live 推送前额外启用硬风控：过滤 ST/退市名称和严重财务恶化样本；这不改变短线回测定板评分。
 
 ## 项目定位
@@ -10,6 +10,12 @@
 - 这是研究和辅助决策工具，不是自动交易系统。
 - 回测以 T 日收盘后选股、T+1 开盘买入为基础，避免使用未来数据。
 - 生成的回测结果、日志和本地缓存默认不进入 Git，只保留代码和关键研究文档。
+
+## 2026-09 审查修复
+
+本次修复统一了受影响研究脚本的时点、成交和标签契约；旧报告不会因为代码更新而自动成为新的有效验证。使用研究结果前，应核对生成版本、执行参数、数据完整性和证据资格。已反复参与选参的历史区间不能再当独立封存样本。旧 clean store 缺少标签实际结束日期时必须重建。
+
+详细审查及修复状态见 `docs/audits/2026-09-07-full-strategy-browser-review.md` 和同目录专项修复报告。Python 建议使用 3.12（生产环境）；本地测试另覆盖当前 3.14 环境。
 
 ## 目录结构
 
@@ -72,8 +78,11 @@ pip install -r requirements.txt
 
 ```powershell
 $env:TUSHARE_TOKEN="你的 tushare token"
+$env:TUSHARE_HTTP_URL="服务提供方确认可用的 HTTPS 接口地址"
 $env:DEEPSEEK_API_KEY="你的 DeepSeek key"
 ```
+
+2026-09-07 审查修复后的配置、历史数据要求与验证记录见 [修复说明](docs/audits/2026-09-07-remediation.md)。行情接口不再默认使用明文 HTTP；Web 未配置令牌时默认只读；严格历史回测需要对应日期的股票基础信息快照。
 
 日常更新 Web 看板数据（推荐）：
 

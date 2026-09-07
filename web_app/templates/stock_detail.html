@@ -2,10 +2,10 @@
 {% block title %}单股查询{% endblock %}
 {% block content %}
 {% set stock = detail.stock %}
-{% set latest = detail.latest_daily %}
-{% set basic = detail.latest_basic %}
-{% set moneyflow = detail.latest_moneyflow %}
-{% set finance = detail.latest_finance %}
+{% set latest = detail.latest_daily or {} %}
+{% set basic = detail.latest_basic or {} %}
+{% set moneyflow = detail.latest_moneyflow or {} %}
+{% set finance = detail.latest_finance or {} %}
 {% set returns = detail.returns %}
 {% set signal = detail.signal_state %}
 {% set verdict = detail.verdict %}
@@ -13,15 +13,16 @@
 {% set found = detail.found if detail.found is defined else true %}
 {% set query_text = detail.query if detail.query is defined else '' %}
 {% set asset_type_label = detail.asset_type_label|default('股票') %}
+{% set price_unit = '点' if detail.asset_type == 'index' else '元' %}
 {% set strategy_summary = strategy_summary|default({}) %}
 
 <header class="terminal-header compact">
   <div>
     <div class="eyebrow">Stock Diagnostic</div>
     <h1>单股查询</h1>
-    <p>股票体检卡：行情、质量、资金、信号状态放在一起看。</p>
+    <p>{{ asset_type_label }}体检卡：行情与历史趋势放在一起看。</p>
   </div>
-  <form class="command-search" action="/stock" method="get">
+  <form class="command-search" action="{{ app_url_for(request, 'stock_redirect').path }}" method="get">
     <input name="code" placeholder="输入股票、指数或ETF代码/名称">
     <button type="submit">查询</button>
   </form>
@@ -35,7 +36,7 @@
       <p>没有在本地历史库中找到“{{ query_text }}”。支持股票、常用指数和已上市ETF的代码或中文名称。</p>
     </div>
   </div>
-  <form class="quick-box" action="/stock" method="get">
+  <form class="quick-box" action="{{ app_url_for(request, 'stock_redirect').path }}" method="get">
     <input name="code" placeholder="重新输入股票、指数或ETF">
     <button type="submit">重新查询</button>
   </form>
@@ -44,12 +45,12 @@
 <section class="stock-card">
   <div>
     <div class="stock-code">{{ stock.ts_code }} · {{ asset_type_label }}</div>
-    <h2>{{ stock.name or '' }}</h2>
+    <h2>{{ stock.name or query_text or stock.ts_code }}</h2>
     <p>{{ stock.industry or '-' }} · 最新交易日 {{ detail.latest_trade_date or '-' }}</p>
   </div>
   <div class="price-block">
     <span>最新收盘</span>
-    <strong>{{ latest.close|fmt_optional(2) }}</strong>
+    <strong>{{ latest.get('close')|fmt_optional(2) }}</strong>
   </div>
   <div class="verdict {{ verdict.level }}">
     <span>系统结论</span>
@@ -77,7 +78,7 @@
       <path d="{{ chart.ma20_path }}" class="chart-line chart-ma20"></path>
       <path d="{{ chart.ma60_path }}" class="chart-line chart-ma60"></path>
     </svg>
-    <div class="chart-range"><span>{{ chart.start_date|fmt_date }}</span><span>{{ chart.min_value|fmt_optional(2) }}–{{ chart.max_value|fmt_optional(2) }} 元</span><span>{{ chart.end_date|fmt_date }}</span></div>
+    <div class="chart-range"><span>{{ chart.start_date|fmt_date }}</span><span>{{ chart.min_value|fmt_optional(2) }}–{{ chart.max_value|fmt_optional(2) }} {{ price_unit }}</span><span>{{ chart.end_date|fmt_date }}</span></div>
   </div>
   {% else %}
   <div class="empty-state soft">历史价格不足，暂时无法绘制趋势。</div>
@@ -88,9 +89,10 @@
   <div class="metric"><span>近10日</span><strong>{{ returns["10d"] if returns["10d"] is not none else '-' }}%</strong></div>
   <div class="metric"><span>近40日</span><strong>{{ returns["40d"] if returns["40d"] is not none else '-' }}%</strong></div>
   <div class="metric"><span>近80日</span><strong>{{ returns["80d"] if returns["80d"] is not none else '-' }}%</strong></div>
-  <div class="metric"><span>信号状态</span><strong>{{ signal.state if signal else '未入池' }}</strong></div>
+  <div class="metric"><span>信号状态</span><strong>{{ signal.state if signal else ('未入池' if detail.asset_type == 'stock' else '不适用') }}</strong></div>
 </section>
 
+{% if detail.asset_type == 'stock' %}
 <section class="panel strategy-link-panel">
   <div class="panel-head">
     <div>
@@ -110,8 +112,10 @@
   <div class="empty-state soft">这只股票目前没有被定板策略命中过。它可以继续体检，但不应被误读为系统推荐。</div>
   {% endif %}
 </section>
+{% endif %}
 
 <section class="diagnostic-grid">
+  {% if detail.asset_type == 'stock' %}
   <div class="panel">
     <div class="panel-head"><h2>系统结论</h2></div>
     <div class="verdict-list">
@@ -137,7 +141,7 @@
   <div class="panel">
     <div class="panel-head"><h2>价格表现</h2></div>
     <dl class="info-list">
-      <dt>最新收盘</dt><dd>{{ latest.close|fmt_optional(2, ' 元') }}</dd>
+      <dt>最新收盘</dt><dd>{{ latest.get('close')|fmt_optional(2, ' ' ~ price_unit) }}</dd>
       <dt>近10日</dt><dd>{{ returns["10d"] if returns["10d"] is not none else '-' }}%</dd>
       <dt>近40日</dt><dd>{{ returns["40d"] if returns["40d"] is not none else '-' }}%</dd>
       <dt>近80日</dt><dd>{{ returns["80d"] if returns["80d"] is not none else '-' }}%</dd>
@@ -146,31 +150,38 @@
 
   <div class="panel">
     <div class="panel-head"><h2>估值质量</h2></div>
-    {% if not basic.pe_ttm and not basic.pb and not basic.total_mv %}
+    {% if not basic.get('pe_ttm') and not basic.get('pb') and not basic.get('total_mv') %}
     <p class="muted">当前历史库未导入 PE/PB/总市值字段，先参考财务质量项。</p>
     {% endif %}
     <dl class="info-list">
-      <dt>PE(TTM)</dt><dd>{{ basic.pe_ttm|fmt_optional(2) }}</dd>
-      <dt>PB</dt><dd>{{ basic.pb|fmt_optional(2) }}</dd>
-      <dt>总市值</dt><dd>{% if basic.total_mv is not none %}{{ (basic.total_mv / 10000)|fmt_optional(1, ' 亿元') }}{% else %}-{% endif %}</dd>
-      <dt>ROE</dt><dd>{{ finance.roe|fmt_optional(2, '%') }}</dd>
-      <dt>净利润同比</dt><dd>{{ finance.netprofit_yoy|fmt_optional(2, '%') }}</dd>
-      <dt>负债率</dt><dd>{{ finance.debt_to_assets|fmt_optional(2, '%') }}</dd>
+      <dt>PE(TTM)</dt><dd>{{ basic.get('pe_ttm')|fmt_optional(2) }}</dd>
+      <dt>PB</dt><dd>{{ basic.get('pb')|fmt_optional(2) }}</dd>
+      <dt>总市值</dt><dd>{% if basic.get('total_mv') is not none %}{{ (basic.get('total_mv') / 10000)|fmt_optional(1, ' 亿元') }}{% else %}-{% endif %}</dd>
+      <dt>ROE</dt><dd>{{ finance.get('roe')|fmt_optional(2, '%') }}</dd>
+      <dt>净利润同比</dt><dd>{{ finance.get('netprofit_yoy')|fmt_optional(2, '%') }}</dd>
+      <dt>负债率</dt><dd>{{ finance.get('debt_to_assets')|fmt_optional(2, '%') }}</dd>
     </dl>
   </div>
 
   <div class="panel">
     <div class="panel-head"><h2>资金行为</h2></div>
     <dl class="info-list">
-      <dt>主力净流入</dt><dd>{{ moneyflow.net_mf_amount|fmt_optional(2, ' 万元') }}</dd>
-      <dt>换手率</dt><dd>{{ basic.turnover_rate|fmt_optional(2, '%') }}</dd>
-      <dt>量比</dt><dd>{{ basic.volume_ratio|fmt_optional(2) }}</dd>
+      <dt>主力净流入</dt><dd>{{ moneyflow.get('net_mf_amount')|fmt_optional(2, ' 万元') }}</dd>
+      <dt>换手率</dt><dd>{{ basic.get('turnover_rate')|fmt_optional(2, '%') }}</dd>
+      <dt>量比</dt><dd>{{ basic.get('volume_ratio')|fmt_optional(2) }}</dd>
       <dt>最近策略</dt><dd>{{ signal.profile_label if signal else '-' }}</dd>
       <dt>入池状态</dt><dd>{{ signal.state if signal else '未入池' }}</dd>
     </dl>
   </div>
+  {% else %}
+  <div class="panel">
+    <div class="panel-head"><h2>{{ asset_type_label }}行情</h2></div>
+    <p class="muted">指数和场内基金不展示股票专用的估值、财务、资金流与入池字段。</p>
+  </div>
+  {% endif %}
 </section>
 
+{% if detail.asset_type == 'stock' %}
 <section class="panel">
   <div class="panel-head">
     <div>
@@ -204,5 +215,6 @@
     </tbody>
   </table></div>
 </section>
+{% endif %}
 {% endif %}
 {% endblock %}

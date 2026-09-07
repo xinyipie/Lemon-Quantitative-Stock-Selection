@@ -621,6 +621,13 @@ def apply_style_gate(df: pd.DataFrame, style_gate: str) -> pd.DataFrame:
     return df.loc[mask].copy()
 
 
+def stop_risk_pct(close: float, stop: float) -> float:
+    """返回以入场价格为分母的最大止损风险百分比。"""
+    if close <= 0 or stop <= 0:
+        return 7.0
+    return max(0.0, (close - stop) / close * 100)
+
+
 def factor_profile_score(row: pd.Series, factor_profile: str, base_score_col: str = "score") -> float:
     """Score one short candidate using an experimental factor profile."""
     factor_profile = normalize_factor_profile(factor_profile)
@@ -668,7 +675,7 @@ def factor_profile_score(row: pd.Series, factor_profile: str, base_score_col: st
     today_chg = f("change", 0.0)
 
     target_pct = ((target / close - 1) * 100) if close > 0 and target > 0 else 8.0
-    stop_risk_pct = ((close / stop - 1) * 100) if close > 0 and stop > 0 else 7.0
+    stop_risk_pct = globals()["stop_risk_pct"](close, stop)
 
     if factor_profile == "profile_v2":
         volume_fit = band_score(raw_volume_ratio, 0.75, 1.8, 3.2)

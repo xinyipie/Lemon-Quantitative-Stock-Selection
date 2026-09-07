@@ -36,6 +36,17 @@ INDEX_ALIASES = {
     "创业板指数": "399006.SZ",
 }
 
+INDEX_CANONICAL_NAMES = {
+    "000001.SH": "上证指数",
+    "000016.SH": "上证50",
+    "000300.SH": "沪深300",
+    "000688.SH": "科创50",
+    "000905.SH": "中证500",
+    "000852.SH": "中证1000",
+    "399001.SZ": "深证成指",
+    "399006.SZ": "创业板指",
+}
+
 
 def query_stock_history(
     code: str,
@@ -49,6 +60,9 @@ def query_stock_history(
         instrument = _resolve_instrument(conn, query)
         ts_code = instrument["ts_code"]
         asset_type = instrument["asset_type"]
+        if asset_type == "index" and not instrument.get("name"):
+            # 指数基础表未导入时，仍用规范简称展示已识别的指数行情。
+            instrument["name"] = INDEX_CANONICAL_NAMES.get(ts_code) or query or ts_code
         daily_table = ASSET_TABLES[asset_type][1]
         daily_rows = conn.execute(
             f"""
@@ -181,6 +195,19 @@ def _resolve_instrument(conn: sqlite3.Connection, query: str) -> dict:
             ).fetchone()
             if row:
                 return _instrument_from_row(dict(row), asset_type)
+
+    # 基础表可能尚未导入；精确代码仍应由已有日线表判定资产类型。
+    # 保持股票、指数、基金的既有优先级，纯六位代码仍优先匹配股票。
+    for asset_type, (_, daily_table) in ASSET_TABLES.items():
+        if not _table_exists(conn, daily_table):
+            continue
+        for ts_code in candidates:
+            row = conn.execute(
+                f"select 1 from {daily_table} where ts_code = ? limit 1",
+                (ts_code,),
+            ).fetchone()
+            if row:
+                return _instrument_from_row({"ts_code": ts_code, "name": ""}, asset_type)
 
     if normalized:
         for asset_type, (basic_table, _) in ASSET_TABLES.items():

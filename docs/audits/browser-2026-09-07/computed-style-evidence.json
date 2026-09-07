@@ -1,0 +1,29 @@
+{
+  "observed_in_browser": true,
+  "chart_close": {
+    "d_length": 1628,
+    "computed_stroke": "none",
+    "root_accent": ""
+  },
+  "nav": {
+    "foreground": [
+      203,
+      213,
+      225
+    ],
+    "background": [
+      248,
+      250,
+      252
+    ],
+    "contrast_ratio": 1.419
+  },
+  "mobile_stock": {
+    "client_width": 375,
+    "scroll_width": 375,
+    "requested_viewport": [
+      390,
+      844
+    ]
+  }
+}

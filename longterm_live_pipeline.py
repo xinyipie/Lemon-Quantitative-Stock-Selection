@@ -30,7 +30,7 @@ def build_live_watchlists(
     elite_min_drawdown: float = 7.0,
     elite_max_drawdown: float = 15.0,
 ) -> LongtermLiveWatchlists:
-    """Build today's live long-term observation and high-confidence alert lists."""
+    """构建长线观察池；lookback_days 表示最近 N 个日历日。"""
     current = _normalize_live_pool(longterm_pool, trade_date)
     if current.empty:
         empty = pd.DataFrame()

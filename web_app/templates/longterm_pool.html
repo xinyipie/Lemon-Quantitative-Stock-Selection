@@ -27,7 +27,7 @@
 
 <section id="current-pool" class="longterm-state-card {{ pool_status.tone if pool_status else 'neutral' }}">
   <div>
-    <span>今日长线结论</span>
+    <span>{% if page_time.is_historical and page_time.as_of_date %}截至 {{ page_time.as_of_date|fmt_date }} 的历史长线结论{% else %}当前长线结论{% endif %}</span>
     <h2>{{ pool_status.title if pool_status else '当前长线池：NA' }}</h2>
     <p>{{ pool_status.description if pool_status else '' }}</p>
   </div>
@@ -76,7 +76,7 @@
   <div class="pool-column elite">
     <div class="column-title">Elite</div>
     {% for item in buckets.elite %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
       <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
@@ -88,7 +88,7 @@
   <div class="pool-column watch">
     <div class="column-title">Watch</div>
     {% for item in buckets.watch %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
       <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
@@ -100,7 +100,7 @@
   <div class="pool-column other">
     <div class="column-title">Other Active</div>
     {% for item in buckets.other %}
-    <a class="pool-row" href="/stock/{{ item.ts_code }}">
+    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
       <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
@@ -168,7 +168,7 @@
       <td>{{ item.event_date|fmt_date }}</td>
       <td><span class="tag {{ item.event_tone }}">{{ item.event_type_label }}</span></td>
       <td>{{ item.state_path_label }}</td>
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
       <td>{{ item.profile }}</td>
       <td>{{ item.score_delta }}</td>
       <td class="reason">{{ item.message or '-' }}</td>
@@ -185,6 +185,7 @@
     <div>
       <h2>历史长线池验证</h2>
       <p>这里是半年度总览，不受下方入池日期筛选影响；用于判断长线池规则在不同阶段的整体质量。</p>
+      <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
     </div>
   </div>
   <div class="table-shell" role="region" aria-label="历史长线池验证" tabindex="0"><table class="dense-table">
@@ -236,7 +237,7 @@
   </div>
   <div class="longterm-current-grid">
     {% for item in current_audit_samples %}
-    <a class="longterm-current-card {{ item.watch_risk_tone }}" href="/stock/{{ item.ts_code }}">
+    <a class="longterm-current-card {{ item.watch_risk_tone }}" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <div><strong>{{ item.display_name }}</strong><span>{{ item.display_code }} · {{ item.industry or '-' }}</span></div>
       <b class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</b>
       <small>{{ item.watch_risk_label }} · 评分 {{ "%.1f"|format(item.score or 0) }}</small>
@@ -244,15 +245,16 @@
     {% endfor %}
   </div>
   {% endif %}
-  <form class="filter-bar compact-filter" action="/longterm" method="get">
+  <form class="filter-bar compact-filter" action="{{ app_path(request, '/longterm') }}" method="get" data-date-range-form>
     <label class="sr-only" for="longterm-start">开始入池日</label>
     <label class="sr-only" for="longterm-end">结束入池日</label>
     <input id="longterm-start" type="date" name="start" value="{{ (filters.get('start', '') if filters else '')|fmt_date_input }}">
     <input id="longterm-end" type="date" name="end" value="{{ (filters.get('end', '') if filters else '')|fmt_date_input }}">
     <input type="hidden" name="view" value="{{ selected_view }}">
     <button type="submit">筛选</button>
-    <a class="ghost-button" href="/longterm">重置</a>
+    <a class="ghost-button" href="{{ app_path(request, '/longterm') }}">重置</a>
   </form>
+  <p class="filter-summary warn" role="alert" data-date-range-error {% if not date_error %}hidden{% endif %}>{{ date_error }}</p>
   <nav class="longterm-view-tabs" aria-label="长线样本快捷筛选">
     <a class="{{ 'active' if selected_view == 'completed' else '' }}" href="{{ request.url.include_query_params(view='completed', page=1) }}">已完成</a>
     <a class="{{ 'active' if selected_view == 'current' else '' }}" href="{{ request.url.include_query_params(view='current', page=1) }}">进行中</a>
@@ -277,7 +279,7 @@
     <tbody>
     {% for item in audit_samples %}
     <tr class="longterm-result-row {{ item.result_tone }}">
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }} · {{ item.industry or '-' }}</div></a><small>{{ item.select_date|fmt_date }} 入池 · {{ item.period }}</small></td>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }} · {{ item.industry or '-' }}</div></a><small>{{ item.select_date|fmt_date }} 入池 · {{ item.period }}</small></td>
       <td class="history-price-cell"><strong>{{ item.history_entry_price_text }}</strong><small>{{ item.history_entry_source }}</small></td>
       <td class="history-price-cell history-trough-cell"><strong>{{ item.history_trough_price_text }}</strong><small>{{ item.history_trough_date|fmt_date if item.history_trough_date else '-' }} · <span class="{{ item.history_trough_return_tone }}">最低 {{ item.history_trough_return_text }}</span></small></td>
       <td class="history-price-cell history-peak-cell"><strong>{{ item.history_peak_price_text }}</strong><small>{{ item.history_peak_date|fmt_date if item.history_peak_date else '-' }} · <span class="{{ item.history_peak_return_tone }}">峰值 {{ item.history_peak_return_text }}</span></small></td>
@@ -311,7 +313,7 @@
     <tbody>
     {% for item in pool %}
     <tr>
-      <td><a href="/stock/{{ item.ts_code }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
       <td>{{ item.industry or '-' }}</td>
       <td>{{ item.profile }}</td>
       <td>{{ item.first_seen_date|fmt_date }}</td>
@@ -328,4 +330,20 @@
   <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
   {% endif %}
 </section>
+<script>
+(() => {
+  const form = document.querySelector("[data-date-range-form]");
+  const errorBox = document.querySelector("[data-date-range-error]");
+  if (!form || !errorBox) return;
+  form.addEventListener("submit", (event) => {
+    const start = form.querySelector("[name='start']").value;
+    const end = form.querySelector("[name='end']").value;
+    if (start && end && start > end) {
+      event.preventDefault();
+      errorBox.hidden = false;
+      errorBox.textContent = "开始日期不能晚于结束日期";
+    }
+  });
+})();
+</script>
 {% endblock %}

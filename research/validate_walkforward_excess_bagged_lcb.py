@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from research.research_integrity import purge_overlapping_label_tail
+
 from research.clean_walkforward_excess_bagged3 import SEEDS
 from research.clean_walkforward_excess_bagged_lcb import conservative_score
 from research.clean_walkforward_technical_hgb_excess_target import (
@@ -43,7 +45,15 @@ def sample_member_year(frame: pd.DataFrame, year: int, seed: int) -> pd.DataFram
     part = frame.dropna(subset=FEATURES + [EXCESS_TARGET]).copy()
     if len(part) > 150_000:
         part = part.sample(n=150_000, random_state=seed + year)
-    return part[FEATURES + [EXCESS_TARGET]].reset_index(drop=True)
+    sampled = part[
+        FEATURES + [EXCESS_TARGET, "trade_date", "label_exit_date_5d"]
+    ].reset_index(drop=True)
+    purged = purge_overlapping_label_tail(
+        sampled,
+        horizon=5,
+        prediction_start_date=f"{year + 1}0101",
+    )
+    return purged[FEATURES + [EXCESS_TARGET]].reset_index(drop=True)
 
 
 def predict_validation() -> tuple[pd.DataFrame, pd.Series, dict]:

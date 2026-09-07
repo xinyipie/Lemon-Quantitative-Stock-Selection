@@ -102,7 +102,9 @@ def overlap_adjusted_portfolio(trades: pd.DataFrame, cache_dir: Path, cost: floa
                 stock_returns.append(daily_return)
                 previous[code] = float(close)
             if stock_returns:
-                contributions[date] = contributions.get(date, 0.0) + float(np.mean(stock_returns)) / 5.0
+                # 缺行情的持仓保持原权重，不能把它的权重转给当天仍有报价的股票。
+                cohort_return = float(np.sum(stock_returns)) / float(cohort_size)
+                contributions[date] = contributions.get(date, 0.0) + cohort_return / 5.0
     result = pd.DataFrame(sorted(contributions.items()), columns=["trade_date", "net_ret"])
     if not result.empty:
         result["year"] = result["trade_date"].str[:4]

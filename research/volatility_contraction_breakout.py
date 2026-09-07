@@ -22,6 +22,7 @@ from research.all_market_multi_engine_research import (  # noqa: E402
 )
 from research.contrarian_candidate_stress import annual_path_metrics, max_drawdown  # noqa: E402
 from research.high_confidence_abstention_audit import overlap_adjusted_portfolio  # noqa: E402
+from research.no_future_signal_pipeline import signal_eligible_mask  # noqa: E402
 from research.two_stage_walkforward_research import _bootstrap_probability, _metrics, _period, _prepare, walk_forward  # noqa: E402
 
 
@@ -63,12 +64,10 @@ def build_candidates(panel: pd.DataFrame, topn: int = 60) -> pd.DataFrame:
     )
     work["volatility_contraction_60"] = work["volatility_20"] / historical_median.replace(0, pd.NA)
     mask = (
-        work["tradeable"].astype(str).str.lower().isin(["true", "1"])
-        & (work["history_count"] >= 140)
+        signal_eligible_mask(work, min_history=140)
         & work["pct_chg"].between(1.0, 6.0)
         & work["turnover_rate"].between(0.8, 12.0)
         & work["volume_ratio"].between(1.0, 2.4)
-        & work["entry_gap_pct"].between(-1.5, 4.0)
         & work["ret_60"].between(8.0, 80.0)
         & work["ret_20"].between(-2.0, 25.0)
         & work["drawdown_20"].between(0.0, 4.0)

@@ -1,8 +1,13 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
-from market_radar.store import get_latest_market_radar_snapshot, save_market_radar_snapshot
+from market_radar.store import (
+    MarketRadarStoreBusyError,
+    get_latest_market_radar_snapshot,
+    save_market_radar_snapshot,
+)
 
 
 class MarketRadarStoreTest(unittest.TestCase):
@@ -36,6 +41,36 @@ class MarketRadarStoreTest(unittest.TestCase):
             latest = get_latest_market_radar_snapshot(Path(tmpdir) / "missing.db")
 
         self.assertIsNone(latest)
+
+    def test_read_does_not_create_schema_in_existing_empty_database(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "signals.db"
+            sqlite3.connect(db_path).close()
+
+            latest = get_latest_market_radar_snapshot(db_path)
+            conn = sqlite3.connect(db_path)
+            try:
+                table = conn.execute(
+                    "select name from sqlite_master where type='table' and name='market_radar_snapshots'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+        self.assertIsNone(latest)
+        self.assertIsNone(table)
+
+    def test_read_reports_an_exclusive_database_lock(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "signals.db"
+            save_market_radar_snapshot(db_path, "20260622", {"headline": "测试"}, {})
+            conn = sqlite3.connect(db_path)
+            conn.execute("begin exclusive")
+            try:
+                with self.assertRaises(MarketRadarStoreBusyError):
+                    get_latest_market_radar_snapshot(db_path)
+            finally:
+                conn.rollback()
+                conn.close()
 
 
 if __name__ == "__main__":

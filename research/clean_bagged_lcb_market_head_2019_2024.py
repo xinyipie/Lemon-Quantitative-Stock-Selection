@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+from research.research_integrity import purge_overlapping_label_tail
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -40,6 +41,7 @@ def build_market_daily(year: int) -> pd.DataFrame:
     featured = load_featured_year(year)
     aggregations = {column: (column, "first") for column in MARKET_FEATURES}
     aggregations[MARKET_TARGET] = (TARGET, "mean")
+    aggregations["label_exit_date_5d"] = ("label_exit_date_5d", "first")
     daily = featured.groupby("trade_date", as_index=False).agg(**aggregations)
     daily["year"] = year
     return daily.dropna(subset=MARKET_FEATURES + [MARKET_TARGET]).reset_index(drop=True)
@@ -53,6 +55,11 @@ def predict_market_walkforward() -> tuple[pd.DataFrame, dict]:
     metadata = {}
     for predict_year in RESEARCH_YEARS:
         train = pd.concat([frames[year] for year in range(2016, predict_year)], ignore_index=True)
+        train = purge_overlapping_label_tail(
+            train,
+            horizon=5,
+            prediction_start_date=f"{predict_year}0101",
+        )
         target = frames[predict_year].copy()
         model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
         model.fit(train[MARKET_FEATURES], train[MARKET_TARGET].clip(-10.0, 10.0))

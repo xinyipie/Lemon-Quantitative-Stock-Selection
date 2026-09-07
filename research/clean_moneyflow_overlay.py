@@ -10,6 +10,7 @@ import pandas as pd
 
 from research.clean_archetype_family import archetype_candidates
 from research.clean_financial_relative_confidence import enforce_same_stock_cooldown
+from research.no_future_signal_pipeline import apply_next_open_execution
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,8 +169,13 @@ def build_variant_candidates(enriched: pd.DataFrame, variant: str) -> pd.DataFra
     )
     all_signal_dates = sorted(enriched["trade_date"].astype(str).unique().tolist())
     selected = enforce_same_stock_cooldown(selected, all_signal_dates, COOLDOWN_DAYS)
-    selected = selected[pd.to_numeric(selected[TARGET], errors="coerce").notna()].copy()
-    selected["net_return"] = pd.to_numeric(selected[TARGET], errors="coerce") - COST_PCT
+    selected = apply_next_open_execution(
+        selected,
+        cost=COST_PCT,
+        outcome_column=TARGET,
+    )
+    selected = selected[selected["evaluable"]].copy()
+    selected["net_return"] = pd.to_numeric(selected["net_ret"], errors="coerce")
     selected["year"] = selected["trade_date"].astype(str).str[:4].astype(int)
     selected["variant"] = variant
     return selected

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -13,6 +14,10 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+from filelock import FileLock, Timeout
 
 
 DEFAULT_STATUS_PATH = Path("data") / "web_update_status.json"
@@ -97,6 +102,21 @@ def start_web_update(
     launcher: Callable | None = None,
     startup_timeout_seconds: float = 3.0,
 ) -> dict:
+    path = Path(status_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 启动预约与执行锁分开，避免父进程等待子进程时互相阻塞。
+    with FileLock(str(path.parent / ".stock-update.launch.lock")):
+        lock = FileLock(str(path.parent / ".stock-update.run.lock"))
+        try:
+            with lock.acquire(timeout=0):
+                pass
+        except Timeout:
+            status = read_update_status(path)
+            return {**status, "state": "running", "running": True, "started": False, "message": "已有同步任务正在运行。"}
+        return _start_web_update(end, mode, full_history, status_path, launcher, startup_timeout_seconds)
+
+
+def _start_web_update(end, mode, full_history, status_path, launcher, startup_timeout_seconds) -> dict:
     status = read_update_status(status_path)
     if status.get("running"):
         status["started"] = False
@@ -173,6 +193,7 @@ def _launch_update_worker(worker_command: list[str]) -> subprocess.Popen:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         close_fds=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
 
@@ -181,7 +202,18 @@ def run_update_job(
     status_path: str | Path = DEFAULT_STATUS_PATH,
     runner: Callable | None = None,
     log_path: str | Path | None = None,
-) -> None:
+) -> int:
+    path = Path(status_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 操作系统锁在进程退出后自动释放，Web和定时任务共用同一把锁。
+    try:
+        with FileLock(str(path.parent / ".stock-update.run.lock")).acquire(timeout=0):
+            return _run_update_job(command, path, runner, log_path)
+    except Timeout:
+        return 75
+
+
+def _run_update_job(command, status_path, runner, log_path) -> int:
     path = Path(status_path)
     persistent_log = Path(log_path) if log_path else None
     _append_run_log(persistent_log, f"\n===== update started {_now()} mode={_extract_mode(command)} =====\n")
@@ -224,6 +256,7 @@ def run_update_job(
             },
         )
         _append_run_log(persistent_log, f"===== update finished {_now()} state={state} returncode={int(result.returncode or 0)} =====\n")
+        return int(result.returncode or 0)
     except Exception as exc:  # pragma: no cover - fallback status for unexpected runner errors
         _append_run_log(persistent_log, f"worker exception: {exc}\n===== update failed {_now()} =====\n")
         _write_status(
@@ -240,6 +273,7 @@ def run_update_job(
                 "message": "同步任务异常退出。",
             },
         )
+        return 1
 
 
 class _ProcessResult:
@@ -307,21 +341,36 @@ def _append_run_log(log_path: Path | None, text: str) -> None:
 
 
 def _write_status(status_path: str | Path, status: dict) -> None:
-    with _STATUS_FILE_LOCK:
+    path = Path(status_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _STATUS_FILE_LOCK, FileLock(str(path.parent / ".stock-update.status.lock")):
         _write_status_unlocked(status_path, status)
 
 
 def _write_status_unlocked(status_path: str | Path, status: dict) -> None:
     path = Path(status_path)
+    _atomic_write_status(path, status)
+    mode = status.get("mode")
+    if mode in VALID_MODES:
+        _atomic_write_status(path.with_name(f"{path.stem}.{mode}.json"), status)
+        if status.get("state") == "finished" and status.get("returncode") == 0:
+            _atomic_write_status(path.with_name(f"{path.stem}.{mode}.success.json"), status)
+
+
+def _atomic_write_status(path: Path, status: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{threading.get_ident()}.tmp")
-    tmp_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+    try:
+        tmp_path.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _merge_status(status_path: str | Path, patch: dict) -> None:
-    with _STATUS_FILE_LOCK:
-        path = Path(status_path)
+    path = Path(status_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _STATUS_FILE_LOCK, FileLock(str(path.parent / ".stock-update.status.lock")):
         try:
             current = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         except (OSError, json.JSONDecodeError):
@@ -346,7 +395,25 @@ def _tail(text: str, limit: int = 4000) -> str:
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def needs_full_update_retry(status_path: str | Path = DEFAULT_STATUS_PATH, now: datetime | None = None) -> bool:
+    """仅全量任务当天的成功记录可以取消全量重试。"""
+    path = Path(status_path)
+    success_path = path.with_name(f"{path.stem}.full.success.json")
+    try:
+        status = json.loads(success_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
+    today = current.strftime("%Y-%m-%d")
+    return not (
+        status.get("mode") == "full"
+        and status.get("state") == "finished"
+        and status.get("returncode") == 0
+        and str(status.get("started_at") or "")[:10] == today
+    )
 
 
 def _is_stale_status(status: dict, stale_after_seconds: int | None, now: datetime | None = None) -> bool:
@@ -360,7 +427,7 @@ def _is_stale_status(status: dict, stale_after_seconds: int | None, now: datetim
         last_update = datetime.strptime(str(timestamp), "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return False
-    current = now or datetime.now()
+    current = now or datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
     if _looks_like_unstarted_running_job(status) and (current - last_update).total_seconds() > 10:
         return True
     return (current - last_update).total_seconds() > threshold

@@ -17,6 +17,15 @@ from daily_web_update import (
 
 
 class DailyWebUpdateTest(unittest.TestCase):
+    def setUp(self):
+        # 编排用例只检查调用契约，不访问真实雷达数据库或新闻服务。
+        radar = patch("daily_web_update.refresh_market_radar_snapshot")
+        radar.start()
+        self.addCleanup(radar.stop)
+        command = patch("daily_web_update.run_command")
+        command.start()
+        self.addCleanup(command.stop)
+
     def test_current_half_year_period(self):
         self.assertEqual(current_half_year_period("20260615"), ("2026H1", "20260101", "20260615"))
         self.assertEqual(current_half_year_period("20260702"), ("2026H2", "20260701", "20260702"))

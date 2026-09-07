@@ -88,14 +88,14 @@ body {
 .brand-title { font-size: 17px; font-weight: 750; }
 .brand-subtitle { color: #96a3b5; font-size: 12px; margin-top: 2px; }
 
-nav { display: grid; gap: 4px; }
-nav a {
+.sidebar nav { display: grid; gap: 4px; }
+.sidebar nav a {
   color: #cbd5e1;
   text-decoration: none;
   padding: 10px 12px;
   border-radius: 6px;
 }
-nav a.active, nav a:hover {
+.sidebar nav a.active, .sidebar nav a:hover {
   background: #1c2838;
   color: #fff;
 }
@@ -395,7 +395,7 @@ button:hover,
   vector-effect: non-scaling-stroke;
 }
 
-.chart-close { stroke: var(--accent); }
+.chart-close { stroke: var(--blue); }
 .chart-ma20 { stroke: #f0b35a; }
 .chart-ma60 { stroke: #ad8cff; }
 
@@ -416,7 +416,7 @@ button:hover,
   background: currentColor;
 }
 
-.chart-legend .close { color: var(--accent); }
+.chart-legend .close { color: var(--blue); }
 .chart-legend .ma20 { color: #f0b35a; }
 .chart-legend .ma60 { color: #ad8cff; }
 
@@ -540,6 +540,7 @@ button:hover,
   background: var(--surface-2);
   font-size: 12px;
   font-weight: 700;
+  color: var(--ink);
 }
 
 .page-section-nav a:hover {

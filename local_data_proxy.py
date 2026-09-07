@@ -20,6 +20,7 @@
   data/cache/
   ├── trade_cal.parquet
   ├── stock_basic.parquet
+  ├── stock_basic_history/YYYYMMDD.parquet  # 当日 L/D/P 完整快照；严格历史回测必需
   ├── share_float.parquet
   ├── stk_holdertrade.parquet
   ├── fina_indicator.parquet
@@ -42,6 +43,10 @@ logger = logging.getLogger("local_proxy")
 # ── 缓存大小常量（按日文件数量很多，静态文件数量少）──
 _LRU_STATIC = 8       # 静态文件缓存（stock_basic / trade_cal 等）
 _LRU_DAILY  = 1024    # 日频文件缓存（一年约252天×多个sub，适当放大）
+
+
+class PointInTimeDataError(ValueError):
+    """本地静态资料不足以证明历史截面可靠。"""
 
 
 def _select_fields(df: pd.DataFrame, fields: Optional[str]) -> pd.DataFrame:
@@ -77,11 +82,14 @@ class LocalDataProxy:
     本地 Parquet 数据代理，接口与 tushare pro 对象完全一致。
 
     所有方法均返回 pd.DataFrame，与 tushare 原始行为相同。
-    读取失败时返回空 DataFrame 并记录警告，不抛出异常（保持健壮性）。
+    普通读取失败时返回空 DataFrame 并记录警告；严格历史 stock_basic 缺少
+    精确快照时抛 PointInTimeDataError，禁止静默运行伪时点回测。
     """
 
-    def __init__(self, cache_dir: str = os.path.join("data", "cache")):
+    def __init__(self, cache_dir: str = os.path.join("data", "cache"),
+                 strict_point_in_time: bool = True):
         self.cache_dir = cache_dir
+        self.strict_point_in_time = bool(strict_point_in_time)
         self._check_cache_dir()
 
         # ── 静态文件读取（带 lru_cache，每进程只读一次）──
@@ -214,19 +222,134 @@ class LocalDataProxy:
                     exchange: str = '',
                     list_status: str = 'L',
                     ts_code: str = '',
-                    fields: str = '') -> pd.DataFrame:
+                    fields: str = '',
+                    as_of_date: str = '',
+                    strict_point_in_time: Optional[bool] = None) -> pd.DataFrame:
         """
         股票基础信息。
         等价：pro.stock_basic(exchange='', list_status='L', fields=...)
+
+        as_of_date 优先读取 stock_basic_history/YYYYMMDD.parquet 精确快照。
+        缺少快照时，非严格模式仅用生命周期字段近似并附不可靠元数据；严格模式拒绝。
         """
-        df = self._read_static('stock_basic').copy()
+        strict = self.strict_point_in_time if strict_point_in_time is None else bool(strict_point_in_time)
+        cutoff = ''
+        exact_snapshot = False
+        if as_of_date:
+            cutoff = str(as_of_date).replace('-', '')[:8]
+            if len(cutoff) != 8 or not cutoff.isdigit():
+                raise ValueError(f"as_of_date 必须是 YYYYMMDD：{as_of_date}")
+            snapshot_name = os.path.join('stock_basic_history', cutoff)
+            if os.path.exists(self._static_path(snapshot_name)):
+                df = self._read_static(snapshot_name).copy()
+                exact_snapshot = not df.empty
+            else:
+                df = self._read_static('stock_basic').copy()
+        else:
+            df = self._read_static('stock_basic').copy()
         if df.empty:
+            if as_of_date and strict:
+                raise PointInTimeDataError(
+                    f"stock_basic 在 {cutoff} 没有可用数据；"
+                    "请提供 stock_basic_history/YYYYMMDD.parquet"
+                )
             return df
+
+        if exchange and 'exchange' in df.columns:
+            df = df[df['exchange'].astype(str) == str(exchange)]
+
+        audit_columns = []
+        if as_of_date:
+            has_lifecycle = {'list_date', 'delist_date', 'list_status'}.issubset(df.columns)
+            complete_scope = (
+                'basic_status_scope' in df.columns
+                and df['basic_status_scope'].astype(str).eq('L,D,P').all()
+            )
+            membership_reliable = bool(exact_snapshot and complete_scope)
+            if strict and not exact_snapshot:
+                raise PointInTimeDataError(
+                    f"stock_basic 缺少 {cutoff} 精确历史快照；"
+                    "请提供 stock_basic_history/YYYYMMDD.parquet"
+                )
+            if not has_lifecycle:
+                if strict:
+                    raise PointInTimeDataError("stock_basic 缺少 list_date/delist_date/list_status，无法还原历史上市范围")
+                logger.warning("[LocalDataProxy] stock_basic 生命周期字段不完整，历史股票范围不可靠")
+            else:
+                if exact_snapshot:
+                    if list_status:
+                        df = df[df['list_status'].astype(str) == str(list_status)].copy()
+                else:
+                    listed = df['list_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+                    delisted = df['delist_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+                    valid_list = listed.str.fullmatch(r'\d{8}', na=False)
+                    valid_delist = delisted.str.fullmatch(r'\d{8}', na=False)
+                    if list_status == 'L':
+                        df = df[valid_list & (listed <= cutoff) & (~valid_delist | (delisted > cutoff))].copy()
+                    elif list_status:
+                        # P 表示暂停上市，生命周期日期不能还原历史暂停状态；仅保留当前标签并标不可靠。
+                        df = df[df['list_status'].astype(str) == str(list_status)].copy()
+
+            if strict and not membership_reliable:
+                raise PointInTimeDataError("stock_basic 缓存未证明包含 L/D/P 全部状态，历史上市范围不可靠")
+
+            if exact_snapshot and 'basic_snapshot_date' in df.columns:
+                snapshots = df['basic_snapshot_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+                # 单次快照只能证明快照当日，既不能向过去回填，也不能证明未来未变更。
+                name_industry_reliable = snapshots.str.fullmatch(r'\d{8}', na=False) & (snapshots == cutoff)
+            else:
+                name_industry_reliable = pd.Series(False, index=df.index)
+
+            requested = {item.strip() for item in fields.split(',') if item.strip()} if fields else set(df.columns)
+            if strict and requested.intersection({'name', 'industry'}) and not name_industry_reliable.all():
+                raise PointInTimeDataError("stock_basic 名称/行业缺少历史时点证据，严格模式拒绝使用")
+            if requested.intersection({'name', 'industry'}) and not name_industry_reliable.all():
+                logger.warning(
+                    "[LocalDataProxy] stock_basic 名称/行业来自缓存快照，早于快照的历史截面不可靠；"
+                    "可启用 strict_point_in_time 拒绝使用"
+                )
+
+            df['membership_point_in_time_reliable'] = membership_reliable
+            df['name_industry_point_in_time_reliable'] = name_industry_reliable.astype(bool)
+            df['point_in_time_as_of_date'] = cutoff
+            df['point_in_time_source'] = 'exact_snapshot' if exact_snapshot else 'current_static_fallback'
+            audit_columns = [
+                'membership_point_in_time_reliable',
+                'name_industry_point_in_time_reliable',
+                'point_in_time_as_of_date',
+                'point_in_time_source',
+            ]
+        elif list_status and 'list_status' in df.columns:
+            df = df[df['list_status'].astype(str) == str(list_status)].copy()
+            complete_scope = (
+                'basic_status_scope' in df.columns
+                and df['basic_status_scope'].astype(str).eq('L,D,P').all()
+            )
+            if 'basic_snapshot_date' in df.columns:
+                snapshots = df['basic_snapshot_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+                valid_snapshots = snapshots.str.fullmatch(r'\d{8}', na=False)
+            else:
+                snapshots = pd.Series('', index=df.index, dtype='string')
+                valid_snapshots = pd.Series(False, index=df.index)
+            df['membership_point_in_time_reliable'] = bool(complete_scope)
+            df['name_industry_point_in_time_reliable'] = valid_snapshots.astype(bool)
+            df['point_in_time_as_of_date'] = snapshots.where(valid_snapshots, '')
+            df['point_in_time_source'] = 'current_static'
+            audit_columns = [
+                'membership_point_in_time_reliable',
+                'name_industry_point_in_time_reliable',
+                'point_in_time_as_of_date',
+                'point_in_time_source',
+            ]
 
         # 按 ts_code 过滤（批量分析时传入逗号分隔的代码列表）
         df = _filter_ts_codes(df, ts_code if ts_code else None)
-
-        return _select_fields(df, fields)
+        selected = _select_fields(df, fields)
+        if audit_columns:
+            selected = selected.copy()
+            for column in audit_columns:
+                selected[column] = df.loc[selected.index, column].values
+        return selected.reset_index(drop=True)
 
     def share_float(self,
                     start_date: str = '',
@@ -286,7 +409,7 @@ class LocalDataProxy:
         """
         财务指标（ROE、负债率）。
         等价：pro.fina_indicator(ts_code=..., fields=...)
-        注意：本地文件已预先保留每只股票最新一期数据。
+        注意：本地文件保留完整公告历史，下游按 ann_date 做截面过滤。
         """
         df = self._read_static('fina_indicator').copy()
         if df.empty:
@@ -301,7 +424,7 @@ class LocalDataProxy:
         """
         利润表（营收）。
         等价：pro.income(ts_code=..., fields=...)
-        注意：本地文件已预先保留每只股票近4期数据（用于同比计算）。
+        注意：本地文件保留完整公告历史（用于历史同比与截面计算）。
         """
         df = self._read_static('income').copy()
         if df.empty:

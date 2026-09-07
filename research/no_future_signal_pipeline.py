@@ -31,10 +31,22 @@ def assert_no_future_features(feature_columns: list[str] | tuple[str, ...]) -> N
 
 def signal_eligible_mask(panel: pd.DataFrame, min_history: int = 120) -> pd.Series:
     """只使用T日收盘前可见信息判断信号资格。"""
-    names = panel["name"].astype(str).str.upper()
-    history = pd.to_numeric(panel["history_count"], errors="coerce")
-    turnover = pd.to_numeric(panel["turnover_rate"], errors="coerce")
-    close = pd.to_numeric(panel["close"], errors="coerce")
+    names = panel.get("name", pd.Series("", index=panel.index)).astype(str).str.upper()
+    history = pd.to_numeric(
+        panel.get("history_count", pd.Series(min_history, index=panel.index)),
+        errors="coerce",
+    )
+    turnover = pd.to_numeric(
+        panel.get("turnover_rate", pd.Series(1.0, index=panel.index)),
+        errors="coerce",
+    )
+    close = pd.to_numeric(
+        panel.get(
+            "close",
+            panel.get("synthetic_close", pd.Series(1.0, index=panel.index)),
+        ),
+        errors="coerce",
+    )
     return (
         ~names.str.contains("ST|退", regex=True, na=False)
         & history.ge(min_history)
@@ -70,11 +82,16 @@ def apply_next_open_execution(
     entry_open = pd.to_numeric(work["entry_open"], errors="coerce")
     entry_gap = pd.to_numeric(work["entry_gap_pct"], errors="coerce")
     outcome = pd.to_numeric(work[outcome_column], errors="coerce")
-    work["executed"] = entry_open.gt(0) & entry_gap.lt(max_gap_pct) & outcome.notna()
+    # 成交状态只能由 T+1 当时可见的信息决定；未来持有期是否走完是独立的评价状态。
+    work["executed"] = entry_open.gt(0) & entry_gap.lt(max_gap_pct)
+    work["label_matured"] = outcome.notna()
+    work["evaluable"] = work["executed"] & work["label_matured"]
     work["execution_reason"] = "executed"
     work.loc[~entry_open.gt(0), "execution_reason"] = "no_next_open"
     work.loc[entry_open.gt(0) & ~entry_gap.lt(max_gap_pct), "execution_reason"] = "gap_limit"
-    work.loc[entry_open.gt(0) & entry_gap.lt(max_gap_pct) & outcome.isna(), "execution_reason"] = "insufficient_path"
+    work["evaluation_reason"] = "not_executed"
+    work.loc[work["executed"] & ~work["label_matured"], "evaluation_reason"] = "insufficient_path"
+    work.loc[work["evaluable"], "evaluation_reason"] = "matured"
     work["net_ret"] = pd.NA
-    work.loc[work["executed"], "net_ret"] = outcome[work["executed"]] - float(cost)
+    work.loc[work["evaluable"], "net_ret"] = outcome[work["evaluable"]] - float(cost)
     return work

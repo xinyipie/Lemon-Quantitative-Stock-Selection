@@ -11,6 +11,7 @@
   data/cache/
   ├── trade_cal.parquet
   ├── stock_basic.parquet
+  ├── stock_basic_history/ YYYYMMDD.parquet  ← L/D/P 三种状态的当日精确快照
   ├── share_float.parquet
   ├── stk_holdertrade.parquet
   ├── fina_indicator.parquet
@@ -37,6 +38,7 @@ import logging
 import argparse
 from datetime import datetime, timedelta
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -81,6 +83,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("downloader")
+CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 # ==================== 工具函数 ====================
@@ -88,8 +91,16 @@ logger = logging.getLogger("downloader")
 def _ensure_dirs():
     """创建所有需要的目录"""
     for sub in ["", "daily", "daily_basic", "moneyflow", "index_daily", "fund_daily",
-                "top_list", "top_inst", "margin_detail"]:
+                "top_list", "top_inst", "margin_detail", "stock_basic_history"]:
         os.makedirs(os.path.join(CACHE_DIR, sub), exist_ok=True)
+
+
+def _china_date(now: Optional[datetime] = None) -> str:
+    """按北京时间生成基础资料快照日期，避免UTC服务器跨日错档。"""
+    current = now or datetime.now(CHINA_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=CHINA_TZ)
+    return current.astimezone(CHINA_TZ).strftime('%Y%m%d')
 
 
 def _daily_path(sub: str, date: str) -> str:
@@ -127,6 +138,71 @@ def _save(df: pd.DataFrame, path: str):
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def _read_existing_cache(path: str) -> pd.DataFrame:
+    """读取已有缓存；损坏文件按空缓存处理并保留清楚日志。"""
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        return pd.read_parquet(path)
+    except Exception as e:
+        logger.warning(f"  已有缓存读取失败，将用新数据重建：{path} ({e})")
+        return pd.DataFrame()
+
+
+def _financial_increment_start(df: pd.DataFrame, column: str) -> str:
+    """取各股票最新公告水位中的最早值，避免落后股票被全局最大值跳过。"""
+    if df.empty or column not in df.columns:
+        return ''
+    work = df.copy()
+    work[column] = work[column].astype('string').str.replace(r'\.0$', '', regex=True)
+    work = work[work[column].str.fullmatch(r'\d{8}', na=False)]
+    if work.empty:
+        return ''
+    if 'ts_code' not in work.columns:
+        return str(work[column].max())
+    per_code_watermarks = work.groupby('ts_code', dropna=True)[column].max()
+    return str(per_code_watermarks.min()) if not per_code_watermarks.empty else ''
+
+
+def _merge_financial_history(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+    """合并财务增量并保留所有历史公告版本，新增记录覆盖同键旧值。"""
+    frames = [frame for frame in (existing, incoming) if frame is not None and not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    keys = [column for column in ('ts_code', 'ann_date', 'end_date') if column in combined.columns]
+    if keys:
+        for column in keys:
+            combined[column] = combined[column].astype('string').str.replace(r'\.0$', '', regex=True)
+        value_columns = [column for column in combined.columns if column not in keys]
+        if value_columns:
+            # 增量接口偶尔省略字段；同一公告键内用旧值补齐，避免部分响应抹掉有效历史。
+            combined[value_columns] = combined.groupby(
+                keys, dropna=False, sort=False
+            )[value_columns].ffill()
+        combined = combined.drop_duplicates(subset=keys, keep='last')
+    sort_columns = [column for column in ('ts_code', 'end_date', 'ann_date') if column in combined.columns]
+    if sort_columns:
+        combined = combined.sort_values(sort_columns, ascending=[True] + [False] * (len(sort_columns) - 1))
+    return combined.reset_index(drop=True)
+
+
+def _financial_query_groups(ts_codes: List[str], existing: pd.DataFrame,
+                            incremental_start: str) -> List[tuple[List[str], str]]:
+    """已有代码拉公告增量，缓存缺失代码单独拉全量，避免全局水位漏数。"""
+    if not incremental_start or existing.empty or 'ts_code' not in existing.columns:
+        return [(ts_codes, '')]
+    cached_codes = set(existing['ts_code'].dropna().astype(str))
+    incremental_codes = [code for code in ts_codes if code in cached_codes]
+    missing_codes = [code for code in ts_codes if code not in cached_codes]
+    groups = []
+    if incremental_codes:
+        groups.append((incremental_codes, incremental_start))
+    if missing_codes:
+        groups.append((missing_codes, ''))
+    return groups
 
 
 def _retry(fn, retries: int = 3, wait: float = 5.0):
@@ -286,20 +362,49 @@ def download_trade_cal(pro, start_date: str, end_date: str, force: bool = False)
 
 
 def download_stock_basic(pro, force: bool = False):
-    """A股基础信息：静态数据，按需更新"""
+    """下载全部上市状态，供历史截面按上市/退市日期还原股票范围。"""
     path = _static_path("stock_basic")
-    if not force and os.path.exists(path):
-        logger.info("  ↩ stock_basic 已存在，跳过（用 --force 强制更新）")
+    logger.info("  ↓ 下载 stock_basic...")
+    frames = []
+    completed_statuses = []
+    for status in ('L', 'D', 'P'):
+        df = _retry(lambda s=status: pro.stock_basic(
+            exchange='', list_status=s,
+            fields='ts_code,symbol,name,industry,list_date,delist_date,list_status'
+        ))
+        if df is None:
+            continue
+        completed_statuses.append(status)
+        if not df.empty:
+            df = df.copy()
+            if 'list_status' not in df.columns:
+                df['list_status'] = status
+            frames.append(df)
+
+    if not frames:
+        logger.warning("  stock_basic 所有状态均未返回数据，保留已有缓存")
         return
 
-    logger.info("  ↓ 下载 stock_basic...")
-    df = _retry(lambda: pro.stock_basic(
-        exchange='', list_status='L',
-        fields='ts_code,symbol,name,industry,list_date'
-    ))
-    if df is not None:
-        _save(df, path)
-        logger.info(f"  ✓ stock_basic：{len(df)} 只")
+    incoming = pd.concat(frames, ignore_index=True, sort=False)
+    incoming['basic_snapshot_date'] = _china_date()
+    incoming['basic_status_scope'] = ','.join(completed_statuses)
+    if completed_statuses == ['L', 'D', 'P']:
+        snapshot_path = os.path.join(
+            CACHE_DIR, 'stock_basic_history',
+            f"{incoming['basic_snapshot_date'].iloc[0]}.parquet",
+        )
+        _save(incoming, snapshot_path)
+    else:
+        logger.warning("  stock_basic 状态下载不完整，本次不生成历史时点快照")
+    existing = _read_existing_cache(path)
+    if completed_statuses == ['L', 'D', 'P']:
+        combined = incoming
+    else:
+        combined = pd.concat([existing, incoming], ignore_index=True, sort=False)
+    if 'ts_code' in combined.columns:
+        combined = combined.drop_duplicates(subset=['ts_code'], keep='last').reset_index(drop=True)
+    _save(combined, path)
+    logger.info(f"  ✓ stock_basic：{len(combined)} 只（状态范围：{','.join(completed_statuses)}）")
 
 
 def download_index_basic(force: bool = False):
@@ -562,11 +667,9 @@ def download_stk_holdertrade(pro, start_date: str, end_date: str, force: bool = 
 
 
 def download_fina_indicator(pro, force: bool = False):
-    """财务指标（ROE、负债率）：全量下载，较大，建议只下载在用的股票"""
+    """增量更新财务指标；依赖供应商支持逗号分隔代码批量查询。"""
     path = _static_path("fina_indicator")
-    if not force and os.path.exists(path):
-        logger.info("  ↩ fina_indicator 已存在，跳过（季度更新时用 --force）")
-        return
+    existing = _read_existing_cache(path)
 
     # 先拿股票列表
     stock_basic_path = _static_path("stock_basic")
@@ -577,44 +680,47 @@ def download_fina_indicator(pro, force: bool = False):
     stock_basic = pd.read_parquet(stock_basic_path)
     ts_codes = stock_basic['ts_code'].tolist()
 
-    logger.info(f"  ↓ 下载 fina_indicator（共{len(ts_codes)}只，按批次）...")
+    incremental_start = '' if force else _financial_increment_start(existing, 'ann_date')
+    mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
+    logger.info(f"  ↓ 下载 fina_indicator（共{len(ts_codes)}只，{mode}）...")
 
     batch_size = 50
     all_dfs = []
-    total_batches = (len(ts_codes) + batch_size - 1) // batch_size
+    query_groups = _financial_query_groups(ts_codes, existing, incremental_start)
+    total_batches = sum((len(codes) + batch_size - 1) // batch_size for codes, _ in query_groups)
+    batch_no = 0
+    for group_codes, group_start in query_groups:
+        for i in range(0, len(group_codes), batch_size):
+            batch = group_codes[i:i + batch_size]
+            batch_no += 1
+            if batch_no % 20 == 0:
+                logger.info(f"    进度：{batch_no}/{total_batches} 批...")
 
-    for i in range(0, len(ts_codes), batch_size):
-        batch = ts_codes[i:i + batch_size]
-        batch_no = i // batch_size + 1
-        if batch_no % 20 == 0:
-            logger.info(f"    进度：{batch_no}/{total_batches} 批...")
+            query = {
+                'ts_code': ",".join(batch),
+                'fields': 'ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy',
+            }
+            if group_start:
+                query['start_date'] = group_start
+            df = _retry(lambda q=query: pro.fina_indicator(**q), retries=3, wait=3.0)
 
-        df = _retry(lambda b=batch: pro.fina_indicator(
-            ts_code=",".join(b),
-            fields='ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy'
-        ), retries=3, wait=3.0)
+            if df is not None and not df.empty:
+                all_dfs.append(df)
+            time.sleep(0.5)
 
-        if df is not None and not df.empty:
-            all_dfs.append(df)
-        time.sleep(0.5)
-
-    combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
-    if not combined.empty:
-        # 每只股票保留最近8期（约2年的季报），兼顾回测早期日期的截面约束需求
-        combined = (combined
-                    .sort_values('end_date', ascending=False)
-                    .groupby('ts_code').head(8)
-                    .reset_index(drop=True))
+    incoming = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    if incoming.empty:
+        logger.warning("  fina_indicator 本次未返回数据，保留已有完整缓存")
+        return
+    combined = _merge_financial_history(existing, incoming)
     _save(combined, path)
     logger.info(f"  ✓ fina_indicator：{len(combined)} 条（{combined['ts_code'].nunique() if not combined.empty else 0} 只）")
 
 
 def download_income(pro, force: bool = False):
-    """利润表（营收）：全量下载，保留近几期用于同比计算"""
+    """增量更新利润表并保留完整公告历史；依赖供应商批量代码契约。"""
     path = _static_path("income")
-    if not force and os.path.exists(path):
-        logger.info("  ↩ income 已存在，跳过（季度更新时用 --force）")
-        return
+    existing = _read_existing_cache(path)
 
     stock_basic_path = _static_path("stock_basic")
     if not os.path.exists(stock_basic_path):
@@ -624,31 +730,39 @@ def download_income(pro, force: bool = False):
     stock_basic = pd.read_parquet(stock_basic_path)
     ts_codes = stock_basic['ts_code'].tolist()
 
-    logger.info(f"  ↓ 下载 income（共{len(ts_codes)}只，按批次）...")
+    incremental_start = '' if force else _financial_increment_start(existing, 'ann_date')
+    mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
+    logger.info(f"  ↓ 下载 income（共{len(ts_codes)}只，{mode}）...")
 
     batch_size = 50
     all_dfs = []
-    total_batches = (len(ts_codes) + batch_size - 1) // batch_size
+    query_groups = _financial_query_groups(ts_codes, existing, incremental_start)
+    total_batches = sum((len(codes) + batch_size - 1) // batch_size for codes, _ in query_groups)
+    batch_no = 0
+    for group_codes, group_start in query_groups:
+        for i in range(0, len(group_codes), batch_size):
+            batch = group_codes[i:i + batch_size]
+            batch_no += 1
+            if batch_no % 20 == 0:
+                logger.info(f"    进度：{batch_no}/{total_batches} 批...")
 
-    for i in range(0, len(ts_codes), batch_size):
-        batch = ts_codes[i:i + batch_size]
-        batch_no = i // batch_size + 1
-        if batch_no % 20 == 0:
-            logger.info(f"    进度：{batch_no}/{total_batches} 批...")
+            query = {
+                'ts_code': ",".join(batch),
+                'fields': 'ts_code,ann_date,end_date,revenue',
+            }
+            if group_start:
+                query['start_date'] = group_start
+            df = _retry(lambda q=query: pro.income(**q), retries=3, wait=3.0)
 
-        df = _retry(lambda b=batch: pro.income(
-            ts_code=",".join(b),
-            fields='ts_code,ann_date,end_date,revenue'
-        ), retries=3, wait=3.0)
+            if df is not None and not df.empty:
+                all_dfs.append(df)
+            time.sleep(0.5)
 
-        if df is not None and not df.empty:
-            # 每只股票只保留最近4期（够做两期同比）
-            df = df.sort_values('end_date', ascending=False)
-            df = df.groupby('ts_code').head(4).reset_index(drop=True)
-            all_dfs.append(df)
-        time.sleep(0.5)
-
-    combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    incoming = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    if incoming.empty:
+        logger.warning("  income 本次未返回数据，保留已有完整缓存")
+        return
+    combined = _merge_financial_history(existing, incoming)
     _save(combined, path)
     logger.info(f"  ✓ income：{len(combined)} 条")
 
@@ -773,7 +887,9 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
 
 def run_download(start_date: str, end_date: str, force: bool = False,
                  skip_financial: bool = False, only_new: bool = False,
-                 core_only: bool = False, market_core: bool = False):
+                 core_only: bool = False, market_core: bool = False,
+                 financial_only_force: bool = False,
+                 cache_dir: str | os.PathLike | None = None):
     """
     执行完整的数据下载流程
 
@@ -785,7 +901,12 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         only_new:        True=只下载新增的三个接口（top_list/top_inst/margin_detail），
                          已有的 daily/daily_basic/moneyflow/index_daily 全部跳过
         market_core:     True=十年验证核心行情模式：保留指数，跳过扩展日频和非必要静态数据
+        financial_only_force: True=仅财务接口全量刷新；保存时仍与已有历史合并
+        cache_dir:       显式缓存目录；日更与离线读取必须传同一目录
     """
+    global CACHE_DIR
+    if cache_dir is not None:
+        CACHE_DIR = os.fspath(cache_dir)
     import main as stock_main  # 复用已初始化的 pro 实例
     pro = stock_main.pro
 
@@ -816,9 +937,9 @@ def run_download(start_date: str, end_date: str, force: bool = False,
             logger.info(f"  -> {mode}：跳过 share_float / stk_holdertrade")
 
         if not skip_financial and not market_core:
-            download_fina_indicator(pro, force)
+            download_fina_indicator(pro, force or financial_only_force)
             time.sleep(0.5)
-            download_income(pro, force)
+            download_income(pro, force or financial_only_force)
             time.sleep(0.5)
         else:
             reason = "--market-core" if market_core else "--skip-financial"
@@ -890,6 +1011,10 @@ def main():
                         help='线上极速同步：只下载 daily/daily_basic/moneyflow/stock_basic，跳过指数、龙虎榜和融资融券')
     parser.add_argument('--market-core', action='store_true',
                         help='十年回测核心同步：下载 daily/daily_basic/moneyflow/index_daily/stock_basic，跳过财务、龙虎榜和融资融券')
+    parser.add_argument('--financial-only-force', action='store_true',
+                        help='仅对财务接口做全量刷新；旧财务历史仍会合并保留')
+    parser.add_argument('--cache-dir', type=str, default=CACHE_DIR,
+                        help='缓存目录，必须与后续 LocalDataProxy 使用的目录一致')
     args = parser.parse_args()
 
     run_download(
@@ -900,6 +1025,8 @@ def main():
         only_new=args.only_new,
         core_only=args.core_only,
         market_core=args.market_core,
+        financial_only_force=args.financial_only_force,
+        cache_dir=args.cache_dir,
     )
 
 

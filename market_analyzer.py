@@ -17,6 +17,9 @@ def get_market_decision(
     """
     综合判断市场环境，返回操作建议。
 
+    新闻采用非对称口径：只允许经过行业白名单验证的正面信号在 downtrend 中提供
+    轻仓观察机会；负面新闻不单独覆盖技术面档位。
+
     Args:
         market_state:       技术面状态 ('normal'/'rebound'/'downtrend')
         sentiment_data:     情绪数据 {sentiment, ratio, limit_up_count, limit_down_count}
@@ -40,9 +43,18 @@ def get_market_decision(
 
     # 消息面强度：AI板块加分最高值（单个板块）
     if sector_news_boosts:
-        max_sector_boost = max(sector_news_boosts.values()) if sector_news_boosts else 0
+        from news_analyzer import INDUSTRY_CONCEPT_KEYWORDS
+        verified_boosts = {
+            sector: value
+            for sector, value in sector_news_boosts.items()
+            if sector in INDUSTRY_CONCEPT_KEYWORDS
+        }
+        max_sector_boost = max(verified_boosts.values()) if verified_boosts else 0
+        ai_boost_total = sum(verified_boosts.values())
+        top_positive = [sector for sector in top_positive if sector in verified_boosts]
     else:
         max_sector_boost = 0
+        ai_boost_total = 0.0
 
     # 获取仓位策略
     position_map = market_config.POSITION_ADVICE[market_config.POSITION_STRATEGY]

@@ -29,9 +29,12 @@ EVENT_FEATURES = [
 ]
 
 
-def limit_threshold(ts_code: str) -> float:
+def limit_threshold(ts_code: str, trade_date: str | int | None = None) -> float:
     code = str(ts_code).split(".")[0]
-    if code.startswith(("300", "301", "688", "689")):
+    date = str(trade_date or "99999999").replace("-", "")[:8]
+    if code.startswith(("300", "301")):
+        return 18.5 if date >= "20200824" else 9.3
+    if code.startswith(("688", "689")):
         return 18.5
     if code.startswith(("4", "8", "92")):
         return 28.0
@@ -49,7 +52,10 @@ def add_limit_history(frame: pd.DataFrame, previous_tail: pd.DataFrame | None = 
         work = current
     work = work.sort_values(["ts_code", "trade_date"]).copy()
     pct = pd.to_numeric(work["pct_chg"], errors="coerce")
-    thresholds = work["ts_code"].map(limit_threshold)
+    thresholds = pd.Series(
+        [limit_threshold(code, date) for code, date in zip(work["ts_code"], work["trade_date"])],
+        index=work.index,
+    )
     work["is_limit_event"] = pct.ge(thresholds)
     work["prior_limit_count_20"] = work.groupby("ts_code")["is_limit_event"].transform(
         lambda values: values.shift(1).rolling(20, min_periods=1).sum()

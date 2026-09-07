@@ -23,6 +23,9 @@ def attach_history_price_context(
     conn = sqlite3.connect(history_db)
     conn.row_factory = sqlite3.Row
     try:
+        # 新建或尚未导入行情的数据库仍可展示信号，只跳过价格补充。
+        if conn.execute("select 1 from sqlite_master where type='table' and name='stock_daily'").fetchone() is None:
+            return
         rows = conn.execute(
             f"""
             select ts_code, trade_date, open, high, low, close

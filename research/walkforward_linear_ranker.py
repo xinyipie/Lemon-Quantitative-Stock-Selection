@@ -52,7 +52,6 @@ def phase_for_date(value: str | int) -> str:
 def load_candidates(path: str | Path) -> pd.DataFrame:
     raw = pd.read_csv(path, encoding="utf-8-sig")
     raw["trade_date"] = raw["trade_date"].astype(str).str.replace("-", "", regex=False).str[:8]
-    raw = raw[raw["tradeable"].astype(str).str.lower().isin({"true", "1"})].copy()
 
     members = pd.crosstab([raw["trade_date"], raw["ts_code"]], raw["engine"]).clip(upper=1)
     members = members.rename(columns={name: f"member_{name}" for name in members.columns}).reset_index()

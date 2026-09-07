@@ -33,7 +33,7 @@ def periods(start_year: int, end_year: int, end_period: str) -> list[str]:
 def normalize(frame: pd.DataFrame) -> pd.DataFrame:
     required = FIELDS.split(",")
     if frame is None or frame.empty:
-        return pd.DataFrame(columns=required)
+        return pd.DataFrame(columns=required + ["point_in_time_verified"])
     missing = [column for column in required if column not in frame.columns]
     if missing:
         raise ValueError(f"财务接口缺少字段: {missing}")
@@ -44,7 +44,10 @@ def normalize(frame: pd.DataFrame) -> pd.DataFrame:
         work["ann_date"].str.fullmatch(r"\d{8}", na=False)
         & work["end_date"].str.fullmatch(r"\d{8}", na=False)
     ]
-    return work.drop_duplicates(["ts_code", "ann_date", "end_date"], keep="last").reset_index(drop=True)
+    work = work.drop_duplicates(["ts_code", "ann_date", "end_date"], keep="last").reset_index(drop=True)
+    # 当前时点按报告期回拉不能证明字段值等于首次公告版本。
+    work["point_in_time_verified"] = False
+    return work
 
 
 def download(pro, requested: list[str], output_dir: Path, retries: int = 3, pause: float = 0.25) -> pd.DataFrame:

@@ -19,10 +19,11 @@ class TestAIConfig(unittest.TestCase):
         self.assertEqual(config.AI_CONFIG["fast_model"], "deepseek-v4-flash")
         self.assertEqual(config.AI_CONFIG["reasoning_model"], "deepseek-v4-pro")
 
-    def test_tushare_uses_project_relay_by_default(self):
+    def test_tushare_does_not_default_to_cleartext_relay(self):
         with patch.dict(os.environ, {}, clear=True):
             reloaded = importlib.reload(config)
-            self.assertEqual(reloaded.TUSHARE_CONFIG["http_url"], "http://14.nat0.cn:32817")
+            with self.assertRaises(ValueError):
+                reloaded.require_secure_tushare_url(reloaded.TUSHARE_CONFIG["http_url"])
         importlib.reload(config)
 
 
