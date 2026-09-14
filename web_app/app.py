@@ -984,8 +984,35 @@ def _select_longterm_result_view(result_context: dict, view: str) -> list[dict]:
     return result_context["completed"]
 
 
+def _build_longterm_daily_run_rows(rows: list[dict]) -> list[dict]:
+    """把同一交易日的 Watch/Elite 内部记录合并成用户可读的一行。"""
+    grouped: dict[str, dict] = {}
+    for item in rows:
+        trade_date = str(item.get("trade_date") or "")
+        daily = grouped.setdefault(trade_date, {
+            "trade_date": trade_date,
+            "watch_count": 0,
+            "elite_count": 0,
+            "created_at": item.get("created_at"),
+        })
+        count = int(item.get("signal_count") or 0)
+        if "elite" in str(item.get("profile") or "").lower():
+            daily["elite_count"] += count
+        else:
+            daily["watch_count"] += count
+        if str(item.get("created_at") or "") > str(daily.get("created_at") or ""):
+            daily["created_at"] = item.get("created_at")
+    result = []
+    for daily in grouped.values():
+        total = daily["watch_count"] + daily["elite_count"]
+        daily["result_label"] = f"发现 {total} 只候选" if total else "当日没有候选"
+        daily["result_tone"] = "ok" if total else "muted"
+        result.append(daily)
+    return sorted(result, key=lambda item: item["trade_date"], reverse=True)
+
+
 @app.get("/longterm")
-def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed",
+def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "all",
                   run_start: str = "", run_end: str = "", run_page: str = "1"):
     from datetime import datetime, timedelta
     from longterm_scan import get_latest_longterm_scan
@@ -1023,7 +1050,7 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             end=normalized_end or None,
         )
     result_context = _build_longterm_result_context(all_audit_samples)
-    selected_view = view if view in {"completed", "current", "outperform", "risk", "all"} else "completed"
+    selected_view = view if view in {"completed", "current", "outperform", "risk", "all"} else "all"
     visible_samples = _select_longterm_result_view(result_context, selected_view)
     sample_filters = {"start": normalized_start, "end": normalized_end, "sample_limit": sample_limit, "view": selected_view}
     sample_filter_summary = summarize_longterm_audit_sample_filter(visible_samples, sample_filters)
@@ -1046,7 +1073,7 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "run_funnel": run_funnel,
             "pool_status": pool_status,
             "scan_diagnostic": scan_diagnostic,
-            "run_rows": run_rows[:20],
+            "run_rows": _build_longterm_daily_run_rows(run_rows[:20]),
             "run_filters": run_filters,
             "run_date_error": run_date_error,
             "run_page_info": run_page_info,

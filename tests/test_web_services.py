@@ -32,6 +32,40 @@ from web_app.services.signal_service import (
 
 
 class WebServicesTest(unittest.TestCase):
+    def test_longterm_history_includes_recent_daily_admissions(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            signal_db = Path(tmp) / "signals.db"
+            conn = sqlite3.connect(signal_db)
+            try:
+                conn.execute(
+                    """
+                    create table pool_events (
+                        id integer primary key, event_date text, mode text, profile text,
+                        ts_code text, event_type text, old_state text, new_state text,
+                        old_score real, new_score real, message text, created_at text
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    insert into pool_events values
+                    (1, '20260911', 'longterm', 'longterm_watch', '000001.SZ',
+                     'NEW', null, 'active', null, 89.2, '新入池', '2026-09-14 15:50:13')
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            samples = get_longterm_audit_samples(signal_db, history_db=None, limit=100)
+
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0]["select_date"], "20260911")
+        self.assertEqual(samples[0]["sample_source"], "每日扫描")
+        self.assertEqual(samples[0]["stage_return_text"], "未满")
+
     def test_history_service_returns_db_status_and_stock_detail(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             history_db = Path(tmpdir) / "history.db"

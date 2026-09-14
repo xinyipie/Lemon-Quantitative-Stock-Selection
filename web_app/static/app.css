@@ -3620,7 +3620,7 @@ body[class*="page-"] .dense-table tbody tr:hover {
 
   .page-longterm #lifecycle,
   .page-longterm #history-audit {
-    grid-column: span 6;
+    grid-column: 1 / -1;
   }
 
   .page-longterm .funnel-grid {
@@ -4294,6 +4294,8 @@ body[class*="page-"] .dense-table tbody tr:hover {
 }
 
 .page-longterm .longterm-disclosure {
+  grid-column: 1 / -1;
+  width: 100%;
   padding: 0;
   overflow: hidden;
 }

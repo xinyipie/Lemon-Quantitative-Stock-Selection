@@ -431,6 +431,8 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("展开历史样本明细", response.text)
         self.assertNotIn("实时观察跟踪 · 全部进行中记录", response.text)
         self.assertNotIn("历史样本待满80日</strong>", response.text)
+        self.assertNotIn("<th>内部版本</th>", response.text)
+        self.assertNotIn("<th>策略版本</th><th>分数变化</th>", response.text)
 
     def test_longterm_page_accepts_sample_date_filters(self):
         response = self.client.get("/longterm?start=20260201&end=20260228")

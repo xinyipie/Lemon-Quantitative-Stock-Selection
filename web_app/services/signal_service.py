@@ -433,7 +433,47 @@ def get_longterm_audit_samples(
             """,
             params,
         ).fetchall()
-        samples = [_decorate_longterm_audit_sample(dict(row)) for row in rows]
+        samples = [_decorate_longterm_audit_sample({**dict(row), "sample_source": "历史回测"}) for row in rows]
+        if _tables_exist(conn, "pool_events"):
+            tracking_filters = ["mode = 'longterm'", "event_type = 'NEW'"]
+            tracking_params: list = []
+            if start:
+                tracking_filters.append("event_date >= ?")
+                tracking_params.append(str(start).replace("-", "")[:8])
+            if end:
+                tracking_filters.append("event_date <= ?")
+                tracking_params.append(str(end).replace("-", "")[:8])
+            tracking_params.append(limit)
+            tracking_rows = conn.execute(
+                f"""
+                select event_date as select_date, ts_code, profile,
+                       new_score as score
+                from pool_events
+                where {' and '.join(tracking_filters)}
+                order by event_date desc, id desc
+                limit ?
+                """,
+                tracking_params,
+            ).fetchall()
+            known = {(item.get("select_date"), item.get("ts_code")) for item in samples}
+            for row in tracking_rows:
+                item = dict(row)
+                key = (item.get("select_date"), item.get("ts_code"))
+                if key in known:
+                    continue
+                item.update({
+                    "name": None, "industry": None, "pool_type": "longterm_watch",
+                    "regime": None, "pool_rank_score": None, "industry_rs": None,
+                    "drawdown_from_high": None, "ret_10d": None, "ret_40d": None,
+                    "ret_80d": None, "mfe_80d": None, "mae_80d": None,
+                    "excess_ret_80d": None, "outperform_80d": None,
+                    "factor_json": None, "period": "每日跟踪", "sample_source": "每日扫描",
+                })
+                samples.append(_decorate_longterm_audit_sample(item))
+                known.add(key)
+        samples.sort(key=lambda item: (str(item.get("select_date") or ""), float(item.get("score") or 0)), reverse=True)
+        samples = samples[:limit]
+        _enrich_stock_identity(samples, history_db)
         _attach_longterm_current_paths(samples, history_db)
         _attach_longterm_lifecycle_labels(samples, conn)
         return samples
@@ -565,6 +605,13 @@ def _decorate_longterm_event(item: dict) -> dict:
     item["score_delta"] = _score_delta(item.get("old_score"), item.get("new_score"))
     item["state_path_label"] = _state_path_label(item.get("event_type"), item.get("old_state"), item.get("new_state"))
     item["event_tone"] = _event_tone(item.get("event_type"))
+    item["event_plain_text"] = {
+        "NEW": "加入观察池，之后每天更新表现",
+        "REMOVED": "已不在当前观察池，历史记录仍保留",
+        "UPGRADED": "趋势进一步确认，升级为强提醒",
+        "DOWNGRADED": "确认减弱，继续放在观察池",
+        "UPDATED": "仍在池内，评分已更新",
+    }.get(str(item.get("event_type") or ""), "观察状态发生变化")
     item["display_name"] = item.get("ts_code")
     item["display_code"] = item.get("ts_code")
     return item

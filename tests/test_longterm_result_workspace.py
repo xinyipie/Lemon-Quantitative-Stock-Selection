@@ -1,9 +1,22 @@
 import unittest
 
-from web_app.app import _build_longterm_result_context, _select_longterm_result_view
+from web_app.app import _build_longterm_daily_run_rows, _build_longterm_result_context, _select_longterm_result_view
 
 
 class LongtermResultWorkspaceTest(unittest.TestCase):
+    def test_daily_run_rows_hide_internal_profiles_and_merge_one_day(self):
+        rows = [
+            {"trade_date": "20260911", "profile": "longterm_watch", "signal_count": 12, "created_at": "15:50"},
+            {"trade_date": "20260911", "profile": "longterm_elite", "signal_count": 0, "created_at": "15:51"},
+        ]
+
+        result = _build_longterm_daily_run_rows(rows)
+
+        self.assertEqual(result, [{
+            "trade_date": "20260911", "watch_count": 12, "elite_count": 0,
+            "created_at": "15:51", "result_label": "发现 12 只候选", "result_tone": "ok",
+        }])
+
     def test_completed_sample_exposes_benchmark_path_and_verdict(self):
         samples = [{
             "display_name": "测试股票",
