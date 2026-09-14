@@ -29,8 +29,44 @@ def build_live_watchlists(
     elite_min_industry_rs: float = 8.0,
     elite_min_drawdown: float = 7.0,
     elite_max_drawdown: float = 15.0,
+    quality_pool: pd.DataFrame | None = None,
+    quality_top_n: int = 10,
 ) -> LongtermLiveWatchlists:
     """构建长线观察池；lookback_days 表示最近 N 个日历日。"""
+    if quality_pool is not None:
+        # 正式候选仍走原压缩及Elite条件，质量排序绝不能替代正式评分。
+        confirmed = build_live_watchlists(
+            longterm_pool, trade_date, history, max_watch, max_industry, lookback_days,
+            elite_min_score, elite_min_industry_rs, elite_min_drawdown, elite_max_drawdown)
+        watch = confirmed.watchlist.copy()
+        if not watch.empty:
+            watch['trend_confirmed'] = True
+            watch['observation_reason'] = '已通过原v18趋势确认；仍需人工研究'
+        quality = _normalize_live_pool(quality_pool, trade_date)
+        if not quality.empty:
+            used = set(watch['ts_code']) if not watch.empty else set()
+            quality = quality[~quality.ts_code.isin(used)].sort_values(
+                ['quality_score', 'ts_code'], ascending=[False, True])
+            quality['trend_confirmed'] = False
+            quality['pool_type'] = 'longterm_watch'
+            quality['alert_tier'] = 'watch'
+            quality['elite_alert'] = False
+            quality['compression_score'] = quality['quality_score']
+            quality['score_basis'] = '质量排序分（非趋势确认评分）'
+            industry_counts = watch.industry.value_counts().to_dict() if not watch.empty else {}
+            selected = []
+            for index, row in quality.iterrows():
+                industry = row.get('industry', '')
+                if len(watch) + len(selected) >= max(quality_top_n, len(watch)):
+                    break
+                if industry_counts.get(industry, 0) >= max_industry:
+                    continue
+                selected.append(index)
+                industry_counts[industry] = industry_counts.get(industry, 0) + 1
+            watch = pd.concat([watch, quality.loc[selected]], ignore_index=True)
+        if not watch.empty:
+            watch['snapshot_rank'] = range(1, len(watch) + 1)
+        return LongtermLiveWatchlists(watchlist=watch, elite=confirmed.elite)
     current = _normalize_live_pool(longterm_pool, trade_date)
     if current.empty:
         empty = pd.DataFrame()

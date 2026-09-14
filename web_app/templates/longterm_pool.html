@@ -5,7 +5,7 @@
   <div>
     <div class="eyebrow">Long-Term Lifecycle Pool</div>
     <h1>长线观察池</h1>
-    <p>长线不是每日强推清单，而是严格入池、持续观察、降级移出的生命周期池。</p>
+    <p>质量观察持续寻找值得跟踪的公司；趋势确认与 Elite 提醒沿用严格规则。观察入池不代表买入信号。</p>
   </div>
 </header>
 
@@ -17,12 +17,45 @@
 
 {% include "partials/update_status_panel.html" %}
 
+{% if scan_diagnostic %}
+<section class="panel attention-panel">
+  <div class="panel-head"><div>
+    <h2>质量扫描漏斗</h2>
+    <p>扫描时间 {{ scan_diagnostic.scanned_at }} · 行情日期 {{ scan_diagnostic.trade_date|fmt_date }}。
+      {% if scan_diagnostic.status == 'failed' %}本次扫描失败；下方候选保留上次有效结果，并非本次新入池。
+      {% else %}质量排序分仅用于观察优先级，与原策略评分及胜率无关。{% endif %}
+    </p>
+  </div></div>
+  {% if scan_diagnostic.status == 'failed' %}
+    <p class="notice">{{ scan_diagnostic.reason }}</p>
+  {% else %}
+  <div class="funnel-grid">
+    {% for label, key in [('基础候选', 'input_count'), ('财务数据缺失', 'missing_financial_count'), ('质量条件未通过', 'quality_rejected_count'), ('质量达标', 'quality_count'), ('原规则趋势确认', 'confirmed_count'), ('展示观察股', 'watch_count'), ('Elite提醒', 'elite_count')] %}
+    <div class="funnel-step"><span>{{ label }}</span><strong>{{ scan_diagnostic.get(key, 0) }}</strong></div>
+    {% endfor %}
+  </div>
+  <p>{{ scan_diagnostic.confirmation_reason }}</p>
+  {% if scan_diagnostic.confirmation_funnel %}
+  <details><summary>查看原趋势规则过滤原因</summary>
+    <p>{{ scan_diagnostic.confirmation_funnel.reason }}</p>
+    <div class="funnel-grid">
+    {% for label, key in [('技术数据缺失', 'missing_technical_count'), ('均线趋势不符', 'trend_rejected_count'), ('动量不符', 'momentum_rejected_count'), ('回调不符', 'drawdown_rejected_count'), ('行业不符', 'industry_rejected_count'), ('原财务条件不符', 'financial_rejected_count'), ('支撑距离不符', 'support_rejected_count'), ('评分前剩余', 'before_score_count')] %}
+      {% if key in scan_diagnostic.confirmation_funnel %}<div class="funnel-step"><span>{{ label }}</span><strong>{{ scan_diagnostic.confirmation_funnel[key] }}</strong></div>{% endif %}
+    {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+  <p class="muted">基础候选已通过流动性与风险事件检查；财务缺失与质量不达标分别统计。质量观察和原规则趋势确认并行筛选；展示上限与行业限额只控制列表长度。</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="status-strip">
   <div class="status-cell"><span>Active合计</span><strong>{{ pool|length }}</strong></div>
   <div class="status-cell"><span>Elite提醒</span><strong>{{ buckets.elite|length }}</strong></div>
   <div class="status-cell"><span>Watch观察</span><strong>{{ buckets.watch|length }}</strong></div>
-  <div class="status-cell"><span>最近运行日</span><strong>{{ runs[0].trade_date|fmt_date if runs else 'NA' }}</strong></div>
-  <div class="status-cell"><span>最近运行状态</span><strong>{{ runs[0].status_label if runs else '未运行' }}</strong></div>
+  <div class="status-cell"><span>最近运行日</span><strong>{{ scan_diagnostic.trade_date|fmt_date if scan_diagnostic else (runs[0].trade_date|fmt_date if runs else 'NA') }}</strong></div>
+  <div class="status-cell"><span>最近运行状态</span><strong>{% if scan_diagnostic %}{{ {'completed_with_results': '质量扫描完成', 'completed_empty': '扫描完成，无质量候选', 'failed': '扫描失败，保留旧池'}.get(scan_diagnostic.status, '状态待核对') }}{% else %}{{ runs[0].status_label if runs else '未运行' }}{% endif %}</strong></div>
 </section>
 
 <section id="current-pool" class="longterm-state-card {{ pool_status.tone if pool_status else 'neutral' }}">
@@ -38,8 +71,8 @@
 <section class="panel attention-panel compact-attention">
   <div class="panel-head">
     <div>
-      <h2>空仓不是异常</h2>
-      <p>如果最近运行状态是“无入池标的”，说明脚本已执行但 v18 规则没有放行股票。下方历史验证用于复盘规则质量，不等于当前仍可买。</p>
+      <h2>暂无有效观察标的</h2>
+      <p>请先核对扫描时间、行情日期和过滤原因。旧记录中的零入池也可能是市场门槛跳过扫描，不能据此判断所有股票均不合格。</p>
     </div>
   </div>
   <div class="hint-list">
@@ -51,12 +84,12 @@
 </section>
 {% endif %}
 
-{% if run_funnel %}
+{% if run_funnel and not scan_diagnostic %}
 <section class="panel">
   <div class="panel-head">
     <div>
       <h2>长线运行漏斗</h2>
-      <p>这是当前已入库的运行层级摘要；逐层过滤候选数还需要 main.py 后续写入 telemetry。</p>
+      <p>运行记录摘要；新版质量筛选数量和趋势确认原因见上方扫描诊断。</p>
     </div>
   </div>
   <div class="funnel-grid">
@@ -79,6 +112,7 @@
     <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+      <small>原规则趋势确认 · Elite条件通过</small>
       <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
     </a>
     {% else %}
@@ -91,6 +125,8 @@
     <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
       <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
       <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
+      <small>{% if item.trend_confirmed == true %}原规则趋势已确认{% elif item.trend_confirmed == false %}未确认，仅观察{% else %}历史记录，确认状态未记录{% endif %} · {{ item.score_basis or '原策略评分' }}</small>
+      <small>{{ item.observation_reason or item.last_reason or '' }}</small>
       <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
     </a>
     {% else %}
@@ -116,7 +152,7 @@
   <div class="panel-head">
     <div>
       <h2>最近运行</h2>
-      <p>只把最近扫描作为状态确认；连续 0 入池是规则未放行，不是页面漏数。</p>
+      <p>运行记录中的 0 表示未写入候选；是否真正完成扫描，请结合上方诊断与行情日期判断。</p>
     </div>
   </div>
   {% if runs %}

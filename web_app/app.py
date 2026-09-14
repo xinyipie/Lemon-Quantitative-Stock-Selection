@@ -986,6 +986,8 @@ def _select_longterm_result_view(result_context: dict, view: str) -> list[dict]:
 
 @app.get("/longterm")
 def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed"):
+    from longterm_scan import get_latest_longterm_scan
+    scan_diagnostic = get_latest_longterm_scan(DEFAULT_SIGNAL_DB_PATH)
     pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
     buckets = split_longterm_pool(pool)
     runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=12)
@@ -1027,6 +1029,7 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "page_info": page_info,
             "run_funnel": run_funnel,
             "pool_status": pool_status,
+            "scan_diagnostic": scan_diagnostic,
             "page_time": build_page_time_context(runs[0].get("trade_date") if runs else None),
             "filters": sample_filters,
             "date_error": date_error,

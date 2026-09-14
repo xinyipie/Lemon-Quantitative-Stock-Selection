@@ -1886,7 +1886,8 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
                    min_turnover: float = None, max_turnover: float = None,
                    min_volume_ratio: float = 1.5,
                    trade_date: str = None,
-                   strict_point_in_time: Optional[bool] = None) -> Tuple[pd.DataFrame, str, int]:
+                   strict_point_in_time: Optional[bool] = None,
+                   require_positive_flow: bool = True) -> Tuple[pd.DataFrame, str, int]:
     """
     全市场选股。参数默认取 config，可由调用方覆盖（长线用更宽的过滤范围）。
     daily_basic volume_ratio 无效时自动回退到前一交易日，data_date 标注来源。
@@ -2099,7 +2100,7 @@ def get_all_stocks(min_change: float = None, max_change: float = None,
             (df['amount'] >= config.MIN_STOCK_AMOUNT) &
             (df['change'] >= min_change) &
             (df['change'] <= max_change) &
-            mf_ok
+            (mf_ok if require_positive_flow else True)
         )
         # 有 daily_basic 数据且字段有效时才加量比和换手率过滤
         if has_basic_data and has_vol_ratio_data and min_volume_ratio > 0:
@@ -3902,6 +3903,103 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
     return df_pool
 
 
+def select_longterm_quality_pool(stocks, financial_dict, profit_growth_dict, trade_date):
+    """独立质量观察：沿用生命周期财务边界，择时条件不作为观察准入。"""
+    import math
+    diagnostic = dict(input_count=len(stocks), missing_financial_count=0,
+                      quality_rejected_count=0, quality_count=0)
+    records = []
+    for _, row in stocks.iterrows():
+        code = str(row['code'])
+        fin = financial_dict.get(code, {})
+        values = {key: _safe_optional_float(row.get(key))
+                  for key in ('total_mv', 'pb', 'pe_ttm', 'ps_ttm', 'close', 'amount')}
+        values.update(roe=_safe_optional_float(fin.get('roe')),
+                      debt_ratio=_safe_optional_float(fin.get('debt_ratio')),
+                      netprofit_yoy=_safe_optional_float(profit_growth_dict.get(code, {}).get('netprofit_yoy')))
+        if any(value is None or not math.isfinite(value) for value in values.values()):
+            diagnostic['missing_financial_count'] += 1
+            continue
+        large = values['total_mv'] >= 800000
+        # 大市值使用原防御质量边界，中小市值使用原弹性质量边界；不设大市值上限。
+        rejected = (
+            values['total_mv'] < 300000 or values['close'] <= 0
+            or values['amount'] < config.MIN_STOCK_AMOUNT
+            or values['roe'] < (7 if large else 5) or values['netprofit_yoy'] < 0
+            or not 0 <= values['debt_ratio'] <= min(config.MAX_DEBT_RATIO, 65 if large else 75)
+            or not 0 < values['pb'] <= (3.5 if large else 6.5)
+            or not 0 < values['pe_ttm'] <= (55 if large else 120)
+            or not 0 < values['ps_ttm'] <= (4 if large else 8)
+        )
+        if rejected:
+            diagnostic['quality_rejected_count'] += 1
+            continue
+        records.append({**row.to_dict(), **values, 'ts_code': format_code(code),
+                        'select_date': trade_date, 'trend_confirmed': False,
+                        'quality_branch': 'defensive' if large else 'elastic',
+                        'observation_version': 'quality_observation_v1',
+                        'observation_reason': '财务质量达标；趋势尚未确认，仅供跟踪'})
+    pool = pd.DataFrame(records)
+    if not pool.empty:
+        # 分位排序只用于展示优先级，不设分数准入线，也不解释为胜率或正式策略评分。
+        value_rank = sum(pool[key].rank(pct=True, ascending=False) for key in ('pb', 'pe_ttm', 'ps_ttm')) / 3
+        pool['quality_score'] = (100 * (0.4 * pool.roe.rank(pct=True)
+                                + 0.3 * pool.netprofit_yoy.rank(pct=True) + 0.3 * value_rank)).round(1)
+        pool = pool.sort_values(['quality_score', 'ts_code'], ascending=[False, True]).reset_index(drop=True)
+    diagnostic['quality_count'] = len(pool)
+    diagnostic['status'] = 'completed_with_results' if len(pool) else 'completed_empty'
+    return pool, diagnostic
+
+
+def attach_longterm_quality_observation(selection, *, target_date=None):
+    """对正式选股结果追加独立观察，不改变短线和长线趋势确认结果。"""
+    from market_data_clock import require_update_freshness
+    trade_date = selection['trade_date']
+    target_date = target_date or datetime.now().strftime('%Y%m%d')
+    require_update_freshness(target_date, trade_date, 'data/cache')
+    stocks, actual_date, _, _ = get_all_stocks(
+        min_change=-100, max_change=100, min_turnover=0, max_turnover=100,
+        min_volume_ratio=0, trade_date=trade_date, require_positive_flow=False)
+    if actual_date != trade_date or stocks.empty:
+        raise ValueError('长线观察基础行情缺失或日期错位，保留上次观察池')
+    financial = get_financial_data_batch(stocks['code'].tolist(), trade_date=trade_date)
+    growth = get_net_profit_growth_batch(stocks['code'].tolist(), trade_date=trade_date)
+    pool, diagnostic = select_longterm_quality_pool(stocks, financial, growth, trade_date)
+    if diagnostic['missing_financial_count'] == diagnostic['input_count']:
+        raise ValueError('长线观察财务数据全部缺失，保留上次观察池')
+    regime = selection.get('regime', 'DATA_UNAVAILABLE')
+    confirmed = selection.get('longterm_pool', pd.DataFrame())
+    diagnostic.update(trade_date=trade_date, confirmed_count=len(confirmed),
+                      observation_version='quality_observation_v1',
+                      confirmation_profile=config.get_official_longterm_profile())
+    if regime not in ('BULL_TREND', 'BULL_PULLBACK'):
+        reason = f'市场状态 {regime} 未通过趋势确认；质量观察仍继续'
+    elif selection.get('operation_mode') == 'stop':
+        reason = '综合市场模式暂停正式选股；质量观察仍继续'
+    else:
+        macro = selection.get('macro_data') or {}
+        missing = [key for key in ('idx_ret_60d', 'idx_ret_120d', 'ma100_slope_pct', 'price_vs_ma100')
+                   if _safe_optional_float(macro.get(key)) is None]
+        failed = []
+        for key, threshold, label in (
+            ('idx_ret_60d', 5, '指数60日涨幅需≥5%'), ('idx_ret_120d', 5, '指数120日涨幅需≥5%'),
+            ('ma100_slope_pct', 0.15, 'MA100斜率需≥0.15')):
+            value = _safe_optional_float(macro.get(key))
+            if value is not None and value < threshold:
+                failed.append(f'{label}（实际{value:.2f}）')
+        if _safe_optional_float(macro.get('price_vs_ma100')) is not None and macro['price_vs_ma100'] <= 0:
+            failed.append('指数尚未站上MA100')
+        reason = ('趋势确认指标缺失：' + '、'.join(missing)) if missing else '；'.join(failed)
+        reason = reason or (f'原v18规则确认{len(confirmed)}只；未确认股票继续观察')
+    diagnostic['confirmation_reason'] = reason
+    diagnostic['confirmation_funnel'] = selection.get('longterm_confirmation_diagnostics') or {}
+    if not pool.empty:
+        pool['observation_reason'] = '财务质量达标；' + reason
+    selection['longterm_quality_pool'] = pool
+    selection['longterm_diagnostics'] = diagnostic
+    return selection
+
+
 def select_longterm_pool(
     stocks: pd.DataFrame,
     ma_dict: Dict,
@@ -3918,6 +4016,7 @@ def select_longterm_pool(
     macro_mode: str = None,
     regime_data: Dict = None,
     apply_market_gates: bool = True,
+    diagnostics: Dict = None,
 ) -> pd.DataFrame:
     """
     波段选股 v4.1（中长线，持仓无固定时限，以技术信号为准）。
@@ -3957,6 +4056,8 @@ def select_longterm_pool(
     if stocks.empty:
         return pd.DataFrame()
 
+    if diagnostics is not None:
+        diagnostics.update(input_count=len(stocks), status='not_triggered', reason='市场机制未通过')
     # 波段策略只在持续牛市状态开仓（不含 Override——Override是单日应急机制，不适合60天波段仓）
     if apply_market_gates and regime not in ('BULL_TREND', 'BULL_PULLBACK'):
         logger.info(f"📊 波段选股跳过（当前机制：{regime}，仅持续牛市执行）")
@@ -4054,6 +4155,8 @@ def select_longterm_pool(
             and price_vs_ma100_v16 > 0.0
         )
         if use_v18_market_sync and not market_sync_ok:
+            if diagnostics is not None:
+                diagnostics['reason'] = 'v18市场同步门槛未通过，尚未执行个股趋势筛选'
             logger.info(
                 "longterm v18 skip: market sync not ready "
                 f"(idx_ret_60d={idx_ret_60d_v16:+.1f}%, idx_ret_120d={idx_ret_120d_v16:+.1f}%, "
@@ -5036,6 +5139,14 @@ def select_longterm_pool(
                 ascending=[False, False]
             ).head(20).reset_index(drop=True)
 
+    if diagnostics is not None:
+        diagnostics.update(
+            status='completed_with_results' if len(df_pool) else 'completed_empty',
+            reason='已完成原规则个股筛选', missing_technical_count=cnt_no_ma,
+            trend_rejected_count=cnt_trend, momentum_rejected_count=cnt_momentum,
+            drawdown_rejected_count=cnt_drawdown, industry_rejected_count=cnt_industry,
+            financial_rejected_count=cnt_fin, support_rejected_count=cnt_support,
+            before_score_count=len(valid_stocks), confirmed_count=len(df_pool))
     logger.info(
         f"✅ 波段选股v4.0完成：{len(df_pool)}只 | "
         f"（数据{trade_date} | 过滤：无MA={cnt_no_ma}, "
@@ -5914,6 +6025,7 @@ def run_daily_selection(
             actual_date,
         )
 
+        result['longterm_confirmation_diagnostics'] = {}
         longterm_pool = select_longterm_pool(
             lt_stocks, ma_dict_lt, actual_date,
             financial_dict=longterm_financial_dict,
@@ -5926,6 +6038,7 @@ def run_daily_selection(
             longterm_profile=longterm_profile,
             macro_data=macro_data,
             apply_market_gates=apply_market_gates,
+            diagnostics=result['longterm_confirmation_diagnostics'],
         )
         result['longterm_pool'] = longterm_pool
     elif include_longterm:
@@ -5968,7 +6081,16 @@ def main():
     longterm_watch_pool = longterm_pool
     longterm_elite_pool = pd.DataFrame()
 
-    if include_longterm and not longterm_pool.empty:
+    if include_longterm:
+        # 观察失败中断本次发布，保留上次有效池；不可用空表伪装扫描成功。
+        try:
+            attach_longterm_quality_observation(sel)
+        except Exception as exc:
+            from longterm_scan import publish_longterm_scan
+            publish_longterm_scan(trade_date, {'status': 'failed', 'reason': str(exc)}, None)
+            raise
+
+    if include_longterm:
         live_lists = build_live_watchlists(
             longterm_pool,
             trade_date=trade_date,
@@ -5978,6 +6100,8 @@ def main():
             elite_min_industry_rs=getattr(config, 'LONGTERM_ELITE_MIN_INDUSTRY_RS', 8),
             elite_min_drawdown=getattr(config, 'LONGTERM_ELITE_DRAWDOWN_MIN', 7),
             elite_max_drawdown=getattr(config, 'LONGTERM_ELITE_DRAWDOWN_MAX', 15),
+            quality_pool=sel.get('longterm_quality_pool'),
+            quality_top_n=config.LONGTERM_QUALITY_TOPN,
         )
         longterm_watch_pool = live_lists.watchlist
         longterm_elite_pool = live_lists.elite
@@ -6047,8 +6171,11 @@ def main():
             item['accel_score']       = qdata.get('accel_score', '-')
             item['atr_14']            = qdata.get('atr_14', '-')
 
-    if not longterm_watch_pool.empty:
-        ai_longterm = ai_analyze_longterm(longterm_watch_pool, shared_ai_context)
+    confirmed_ai_pool = longterm_watch_pool
+    if 'trend_confirmed' in confirmed_ai_pool.columns:
+        confirmed_ai_pool = confirmed_ai_pool[confirmed_ai_pool['trend_confirmed'].eq(True)]
+    if not confirmed_ai_pool.empty:
+        ai_longterm = ai_analyze_longterm(confirmed_ai_pool, shared_ai_context)
         quant_map_lt = longterm_watch_pool.set_index('code').to_dict('index')
         price_map_lt = dict(zip(longterm_watch_pool['code'].astype(str), longterm_watch_pool['close']))
         buy_map_lt   = dict(zip(longterm_watch_pool['code'].astype(str),
@@ -6175,15 +6302,20 @@ def main():
     logger.info(f"\n===== 🎯 完成 | 耗时：{elapsed:.1f}秒 =====")
 
     # 保存实盘选股记录（用于事后IC验证）
-    _save_live_selections(trade_date, stock_pool, longterm_watch_pool, sel.get('regime', 'BULL_TREND'))
+    _save_live_selections(trade_date, stock_pool, confirmed_ai_pool, sel.get('regime', 'BULL_TREND'))
     _save_short_observation_log(trade_date, sel.get('short_observation_pool', stock_pool))
     _persist_signal_snapshot(
         trade_date,
         stock_pool,
         sel.get('short_observe_pool'),
-        longterm_watch_pool if include_longterm else None,
-        longterm_elite_pool if include_longterm else None,
+        None,
+        None,
     )
+    if include_longterm:
+        from longterm_scan import publish_longterm_scan
+        from longterm_live_pipeline import LongtermLiveWatchlists
+        publish_longterm_scan(trade_date, sel['longterm_diagnostics'],
+                             LongtermLiveWatchlists(longterm_watch_pool, longterm_elite_pool))
     _persist_main_ai_observations(
         trade_date,
         ai_analysis,
@@ -6416,7 +6548,7 @@ def _signal_records_from_df(df: pd.DataFrame, pool_type: str, score_col: str) ->
                 rank=int(row.get("snapshot_rank", idx + 1) or idx + 1),
                 score=_safe_optional_float(score),
                 pool_type=pool_type,
-                reason=str(row.get("pool_type", pool_type)),
+                reason=str(row.get("observation_reason") or row.get("pool_type", pool_type)),
                 factors=_signal_factor_payload(row),
             )
         )
@@ -6486,6 +6618,10 @@ def _signal_factor_payload(row: pd.Series) -> Dict:
         "observation_action",
         "observation_reason",
         "observation_version",
+        "quality_score",
+        "quality_branch",
+        "trend_confirmed",
+        "score_basis",
     ]
     payload = {}
     for col in keep_cols:
@@ -6516,6 +6652,10 @@ def _looks_like_short_signal_payload(row: pd.Series, payload: Dict) -> bool:
 
 def _signal_rule_reason_payload(row: pd.Series) -> Dict:
     """把入选逻辑保存为结构化原因，供Web端和AI解释复用。"""
+    if row.get('observation_version') == 'quality_observation_v1':
+        return {'rule_reasons': [str(row.get('observation_reason') or '质量观察')],
+                'risk_reasons': ['质量观察不代表趋势确认'],
+                'action_hint': '仅供持续跟踪，不作为买入信号'}
     if not any(col in row.index for col in ("factor_inflow", "factor_sector", "factor_pattern", "volume_ratio")):
         return {}
 

@@ -23,6 +23,8 @@ def build_selection_snapshot(
     regime = str(selection.get("regime") or "")
     if not include_longterm:
         longterm_status = "disabled"
+    elif selection.get('longterm_diagnostics'):
+        longterm_status = selection['longterm_diagnostics']['status']
     elif regime not in ALLOWED_LONGTERM_REGIMES:
         longterm_status = "not_triggered"
     elif longterm_raw_count:
@@ -47,6 +49,7 @@ def build_selection_snapshot(
             "observe_count": observe_count,
         },
         "longterm_scan": {
+            **_json_safe(selection.get('longterm_diagnostics') or {}),
             "status": longterm_status,
             "raw_count": longterm_raw_count,
             "watch_count": int(longterm_watch_count),

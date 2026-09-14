@@ -192,6 +192,12 @@ def get_active_longterm_pool(signal_db: str | Path = DEFAULT_DB_PATH) -> list[di
                    entry_score, latest_score, highest_score,
                    days_in_pool, last_reason,
                    (
+                       select p.factor_json from signal_pool p
+                       where p.ts_code = pool_state.ts_code and p.mode = 'longterm'
+                         and p.profile = pool_state.profile
+                       order by p.trade_date desc, p.id desc limit 1
+                   ) as factor_json,
+                   (
                        select p.trade_date
                        from signal_pool p
                        where p.ts_code = pool_state.ts_code and p.mode = 'longterm'
@@ -204,6 +210,16 @@ def get_active_longterm_pool(signal_db: str | Path = DEFAULT_DB_PATH) -> list[di
             """
         ).fetchall()
         pool = [dict(row) for row in rows]
+        for item in pool:
+            factors = json.loads(item.pop('factor_json') or '{}')
+            for key in ('trend_confirmed', 'quality_score', 'quality_branch', 'score_basis', 'observation_reason'):
+                item[key] = factors.get(key)
+        # 同一股票可同时存在观察和Elite记录；当前池展示按股票去重，保留明确的Elite身份。
+        unique = {}
+        for item in pool:
+            if item['ts_code'] not in unique or 'elite' in item['profile']:
+                unique[item['ts_code']] = item
+        pool = list(unique.values())
         _attach_explanation_status(pool, conn)
         return pool
     finally:
@@ -454,7 +470,7 @@ def build_longterm_pool_status(pool: list[dict], runs: list[dict]) -> dict:
         return {
             "title": "当前长线池：空仓",
             "subtitle": f"最新扫描 {latest_date or 'NA'}，{latest_run.get('status_label') or '无入池标的'}",
-            "description": "脚本已运行，但 v18 规则未放行标的。长线池为空时，系统价值是提醒不要为了持仓而硬买。",
+            "description": "暂无有效观察标的。可能是规则未放行、扫描未触发或数据不足，请结合最新扫描诊断核对，不能仅凭空池判断市场。",
             "tone": "neutral",
         }
     return {
@@ -509,7 +525,7 @@ def split_longterm_pool(pool: list[dict]) -> dict[str, list[dict]]:
     for item in pool:
         profile = str(item.get("profile") or "").lower()
         score = item.get("latest_score") or 0
-        if "elite" in profile or score >= 85:
+        if "elite" in profile:
             buckets["elite"].append(item)
         elif "watch" in profile or "longterm" in profile:
             buckets["watch"].append(item)

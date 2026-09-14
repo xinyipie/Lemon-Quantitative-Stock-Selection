@@ -137,6 +137,7 @@ SHORT_LIVE_OBSERVE_TOPN = 2
 ENABLE_LONGTERM_LIVE = True  # Web看板经营期启用长线观察池扫描；只记录池状态，不做交易执行
 LONGTERM_LIVE_PROFILE = "longterm_quality_lifecycle_v18_market_sync"  # 长线实盘启用时使用当前验证的市场同步观察池
 LONGTERM_LIVE_TOPN = 3
+LONGTERM_QUALITY_TOPN = 10  # 独立质量观察展示上限，原趋势确认仍最多3只
 LONGTERM_LIVE_MAX_INDUSTRY_PER_DAY = 2
 LONGTERM_ALERT_COOLDOWN_DAYS = 80
 LONGTERM_ELITE_MIN_COMPRESSION_SCORE = 80
