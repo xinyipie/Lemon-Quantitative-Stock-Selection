@@ -4325,6 +4325,22 @@ body[class*="page-"] .dense-table tbody tr:hover {
 .page-longterm .longterm-disclosure.nested { margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; }
 .page-longterm .longterm-detail-section + .longterm-detail-section { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 
+.page-longterm .longterm-active-panel,
+.page-longterm .longterm-tracking-panel { grid-column: 1 / -1; width: 100%; }
+.page-longterm .longterm-active-table a,
+.page-longterm .longterm-tracking-panel td a { color: inherit; text-decoration: none; }
+.page-longterm .longterm-active-table td a:hover strong,
+.page-longterm .longterm-tracking-panel td a:hover strong { color: var(--blue); text-decoration: underline; }
+.page-longterm .longterm-active-table td small,
+.page-longterm .longterm-tracking-panel td small { display: block; margin-top: 3px; color: var(--muted); }
+.page-longterm .tracking-counts { display: flex; gap: 10px; }
+.page-longterm .tracking-counts span { padding: 7px 10px; border-radius: 9px; background: #f1f5f9; color: var(--muted); }
+.page-longterm .tracking-counts strong { margin-left: 4px; color: var(--ink); }
+.page-longterm .longterm-segmented { display: inline-flex; gap: 4px; margin: 4px 0 14px; padding: 4px; border-radius: 10px; background: #eef2f7; }
+.page-longterm .longterm-segmented button { padding: 7px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
+.page-longterm .longterm-segmented button.active { background: #fff; color: var(--blue); box-shadow: 0 1px 4px rgb(15 23 42 / 12%); font-weight: 700; }
+.page-longterm [data-tracking-state="removed"] { background: #fff8f8; }
+
 .page-longterm .longterm-result-summary-grid article {
   padding: 14px 16px;
   border: 1px solid var(--line);

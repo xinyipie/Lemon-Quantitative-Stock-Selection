@@ -64,6 +64,7 @@ from web_app.services.signal_service import (
     get_longterm_audit_summary,
     get_longterm_events,
     get_longterm_runs,
+    get_longterm_tracking_samples,
     get_recent_signals,
     get_short_live_push_history,
     get_signal_runs,
@@ -1057,6 +1058,11 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
     audit_samples, page_info = paginate_items(visible_samples, page, page_size=30)
     run_funnel = build_longterm_run_funnel(runs, pool)
     pool_status = build_longterm_pool_status(pool, runs)
+    tracking_samples = get_longterm_tracking_samples(
+        DEFAULT_SIGNAL_DB_PATH,
+        history_db=DEFAULT_HISTORY_DB_PATH,
+        limit=100,
+    )
     return templates.TemplateResponse(
         request,
         "longterm_pool.html",
@@ -1082,7 +1088,9 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "date_error": date_error,
             "sample_filter_summary": sample_filter_summary,
             "result_context": result_context,
-            "current_audit_samples": result_context["current"][:6],
+            "tracking_samples": tracking_samples,
+            "tracking_active_count": sum(1 for item in tracking_samples if item.get("tracking_state") == "active"),
+            "tracking_removed_count": sum(1 for item in tracking_samples if item.get("tracking_state") == "removed"),
             "selected_view": selected_view,
             "update_status": read_update_status(),
             "active_nav": "longterm",

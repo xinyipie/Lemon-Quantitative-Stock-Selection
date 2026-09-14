@@ -109,143 +109,60 @@
 <section class="panel compact-attention"><h2>实时观察跟踪 · 进行中（{{ pool|length }} 条）</h2>
 <p>这里是目前仍在观察的股票。Elite 是趋势已确认的强提醒，Watch 是质量达标但仍待趋势确认的观察股。</p></section>
 {% if pool %}
-<section class="pool-board full">
-  <div class="pool-column elite">
-    <div class="column-title">Elite</div>
-    {% for item in buckets.elite %}
-    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
-      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
-      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
-      <small>原规则趋势确认 · Elite条件通过</small>
-      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
-    </a>
-    {% else %}
-    <div class="empty-mini">暂无强提醒。Elite宁可少，不要凑。</div>
+<section class="panel longterm-active-panel">
+  <div class="table-shell"><table class="dense-table longterm-active-table">
+    <thead><tr><th>股票</th><th>当前层级</th><th>行业</th><th>观察分</th><th>已观察</th><th>当前结论</th></tr></thead>
+    <tbody>
+    {% for item in pool %}
+    <tr>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><small>{{ item.ts_code }}</small></a></td>
+      <td><span class="tag {{ 'ok' if 'elite' in item.profile|lower else '' }}">{{ 'Elite强提醒' if 'elite' in item.profile|lower else 'Watch观察' }}</span></td>
+      <td>{{ item.industry or '-' }}</td>
+      <td>{{ "%.1f"|format(item.latest_score or 0) }}</td>
+      <td>{{ item.days_in_pool }}天</td>
+      <td class="reason">{{ item.observation_reason or item.last_reason or '继续观察' }}</td>
+    </tr>
     {% endfor %}
-  </div>
-  <div class="pool-column watch">
-    <div class="column-title">Watch</div>
-    {% for item in buckets.watch %}
-    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
-      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
-      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
-      <small>{% if item.trend_confirmed == true %}原规则趋势已确认{% elif item.trend_confirmed == false %}未确认，仅观察{% else %}历史记录，确认状态未记录{% endif %} · {{ item.score_basis or '原策略评分' }}</small>
-      <small>{{ item.observation_reason or item.last_reason or '' }}</small>
-      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
-    </a>
-    {% else %}
-    <div class="empty-mini">暂无观察中标的。</div>
-    {% endfor %}
-  </div>
-  <div class="pool-column other">
-    <div class="column-title">Other Active</div>
-    {% for item in buckets.other %}
-    <a class="pool-row" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
-      <strong>{{ item.name or item.ts_code }}<small>{{ item.ts_code }}</small></strong>
-      <span>{{ item.industry or '-' }} · {{ "%.1f"|format(item.latest_score or 0) }} · {{ item.days_in_pool }}天</span>
-      <small class="ai-pool-view {{ item.ai_view.tone }}">{{ item.ai_view.source_label }}：{{ item.ai_view.style }} · {{ item.ai_view.summary }}</small>
-    </a>
-    {% else %}
-    <div class="empty-mini">暂无其他 active 状态。</div>
-    {% endfor %}
-  </div>
+    </tbody>
+  </table></div>
 </section>
 {% endif %}
 
-<details id="lifecycle" class="longterm-disclosure panel">
-  <summary><strong>运行与生命周期记录</strong><span>最近运行、入池、升级、降级和移出记录</span></summary>
-<section class="longterm-detail-section">
+<section class="panel longterm-tracking-panel" data-tracking-workspace>
   <div class="panel-head">
-    <div>
-      <h2>每天扫描结果</h2>
-      <p>一行代表一个交易日。Watch 是进入观察池的股票，Elite 是趋势进一步确认后的强提醒；两者都是研究候选。</p>
-    </div>
+    <div><h2>真实入池跟踪</h2><p>记录每日扫描真正加入过观察池的股票，与历史回测样本分开。</p></div>
+    <div class="tracking-counts"><span>进行中 <strong>{{ tracking_active_count }}</strong></span><span>已移出 <strong>{{ tracking_removed_count }}</strong></span></div>
   </div>
-  <form class="filter-bar compact-filter" action="{{ app_path(request, '/longterm') }}" method="get">
-    <input type="hidden" name="start" value="{{ filters.start }}">
-    <input type="hidden" name="end" value="{{ filters.end }}">
-    <input type="hidden" name="view" value="{{ selected_view }}">
-    <label>运行开始日 <input type="date" name="run_start" value="{{ run_filters.start|fmt_date_input }}"></label>
-    <label>运行结束日 <input type="date" name="run_end" value="{{ run_filters.end|fmt_date_input }}"></label>
-    <button type="submit">筛选运行日志</button>
-    <a href="{{ request.url.include_query_params(run_start='', run_end='', run_page=1) }}">重置日志</a>
-  </form>
-  <p class="filter-summary">运行日志范围：{{ run_filters.start|fmt_date if run_filters.start else "最早" }} → {{ run_filters.end|fmt_date if run_filters.end else "最新" }}</p>
-  {% if run_date_error %}<p class="filter-summary warn" role="alert">{{ run_date_error }}</p>{% endif %}
+  <div class="longterm-segmented" role="group" aria-label="跟踪状态筛选">
+    <button class="active" type="button" data-tracking-filter="all">全部</button>
+    <button type="button" data-tracking-filter="active">进行中</button>
+    <button type="button" data-tracking-filter="removed">已移出</button>
+  </div>
   <div class="table-shell"><table class="dense-table">
-    <thead><tr><th>扫描日期</th><th>结果</th><th>Watch观察股</th><th>Elite强提醒</th><th>完成时间</th></tr></thead>
+    <thead><tr><th>股票</th><th>入池日期</th><th>状态</th><th>当前表现</th><th>状态说明</th></tr></thead>
     <tbody>
-    {% for item in run_rows %}
-    <tr><td>{{ item.trade_date|fmt_date }}</td><td><span class="tag {{ item.result_tone }}">{{ item.result_label }}</span></td>
-      <td>{{ item.watch_count }}</td><td>{{ item.elite_count }}</td><td>{{ item.created_at }}</td></tr>
-    {% else %}<tr><td colspan="5">当前日期范围内没有扫描记录。</td></tr>{% endfor %}
-    </tbody>
-  </table></div>
-  <nav class="pagination" aria-label="运行日志分页">
-    <span>第 {{ run_page_info.page }} 页 · 本页 {{ run_rows|length }} 条</span>
-    {% if run_page_info.page > 1 %}<a href="{{ request.url.include_query_params(run_page=run_page_info.page - 1) }}">上一页</a>{% endif %}
-    {% if run_page_info.has_next %}<a href="{{ request.url.include_query_params(run_page=run_page_info.page + 1) }}">下一页</a>{% endif %}
-  </nav>
-</section>
-
-<section class="longterm-detail-section">
-  <div class="panel-head">
-    <div>
-      <h2>候选变化记录</h2>
-      <p>这里只回答哪只股票何时进入、升级、降级或移出观察池。</p>
-    </div>
-  </div>
-  <div class="table-shell" role="region" aria-label="长线生命周期事件" tabindex="0"><table class="dense-table">
-    <thead><tr><th>日期</th><th>发生了什么</th><th>股票</th><th>含义</th></tr></thead>
-    <tbody>
-    {% for item in events %}
-    <tr>
-      <td>{{ item.event_date|fmt_date }}</td>
-      <td><span class="tag {{ item.event_tone }}">{{ item.event_type_label }}</span></td>
-      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><div class="muted">{{ item.display_code }}</div></a></td>
-      <td>{{ item.event_plain_text }}</td>
+    {% for item in tracking_samples %}
+    <tr data-tracking-state="{{ item.tracking_state }}">
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.display_name }}</strong><small>{{ item.display_code }} · {{ item.industry or '-' }}</small></a></td>
+      <td>{{ item.select_date|fmt_date }}</td>
+      <td><span class="tag {{ item.tracking_state_tone }}">{{ item.tracking_state_label }}</span></td>
+      <td class="{{ item.stage_return_tone }}"><strong>{{ item.stage_return_text }}</strong></td>
+      <td>{% if item.tracking_state == 'removed' %}{{ item.removed_date|fmt_date }} 移出，之后不再计入当前池{% else %}仍在当前池，每日随行情更新{% endif %}</td>
     </tr>
     {% else %}
-    <tr><td colspan="4">暂无候选变化记录。</td></tr>
+    <tr><td colspan="5">暂无真实入池记录。</td></tr>
     {% endfor %}
     </tbody>
   </table></div>
+  <p class="empty-state" data-tracking-empty hidden>这个状态下没有记录。</p>
 </section>
-</details>
-
-<details class="longterm-disclosure panel">
-  <summary><strong>历史分段表现</strong><span>查看策略在不同半年是否稳定有效</span></summary>
-  <div class="panel-head">
-    <div>
-      <h2>不同市场阶段的历史回测</h2>
-      <p>每行代表一个半年，回答当时选出的股票在80个交易日后平均赚亏多少。没有样本的阶段不展示。</p>
-      <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
-    </div>
-  </div>
-  <div class="table-shell" role="region" aria-label="历史长线池验证" tabindex="0"><table class="dense-table">
-    <thead><tr><th>半年</th><th>选出股票数</th><th>80日平均收益</th><th>赚钱比例</th><th>跑赢沪深300</th><th>结论</th></tr></thead>
-    <tbody>
-    {% for item in audit_summary.runs if item.sample_count %}
-    <tr>
-      <td>{{ item.period }}</td>
-      <td><strong>{{ item.sample_count }}</strong></td>
-      <td class="{{ 'market-up' if item.avg_ret_80d and item.avg_ret_80d > 0 else 'market-down' if item.avg_ret_80d and item.avg_ret_80d < 0 else 'muted-cell' }}">{{ item.avg_ret_80d_text }}</td>
-      <td>{{ item.win_rate_80d_text }}</td>
-      <td>{{ item.outperform_rate_80d_text }}</td>
-      <td>{% if item.avg_ret_80d and item.avg_ret_80d > 0 and item.win_rate_80d and item.win_rate_80d >= 0.5 %}<span class="tag ok">该阶段有效</span>{% elif item.avg_ret_80d and item.avg_ret_80d < 0 %}<span class="tag bad">该阶段失效</span>{% else %}<span class="tag warn">表现不稳定</span>{% endif %}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="6">暂无可用的历史分段样本。</td></tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-</details>
 
 <section id="history-audit" class="panel">
   <div class="panel-head">
     <div>
-      <h2>历史表现</h2>
-      <p>用于判断历史候选在80个交易日后的整体表现；当前进行中的候选只在上方显示。</p>
+      <h2>策略历史回测</h2>
+      <p>这里只评价策略过去选股的80日表现，不代表当前池状态。真实入池和移出记录在上方单独展示。</p>
+      <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
     </div>
   </div>
   <div class="longterm-result-summary-grid">
@@ -259,22 +176,6 @@
   <div class="longterm-result-extremes">
     <span>最佳：<b>{{ result_context.best.display_name }}</b> <strong class="market-up">{{ result_context.best.ret_80d_text }}</strong></span>
     <span>最差：<b>{{ result_context.worst.display_name }}</b> <strong class="market-down">{{ result_context.worst.ret_80d_text }}</strong></span>
-  </div>
-  {% endif %}
-
-  {% if current_audit_samples %}
-  <div class="longterm-current-head">
-    <div><strong>最近入池与观察中的股票</strong><span>包含每日扫描补齐的记录，收益随最新行情继续更新。</span></div>
-    <a href="{{ request.url.include_query_params(view='current', page=1) }}#history-audit">查看全部观察中</a>
-  </div>
-  <div class="longterm-current-grid">
-    {% for item in current_audit_samples %}
-    <a class="longterm-current-card {{ item.watch_risk_tone }}" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
-      <div><strong>{{ item.display_name }}</strong><span>{{ item.display_code }} · {{ item.select_date|fmt_date }}入池</span></div>
-      <b class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</b>
-      <small>{{ item.sample_source or '历史样本' }} · {{ item.lifecycle_label }}</small>
-    </a>
-    {% endfor %}
   </div>
   {% endif %}
 
@@ -294,13 +195,6 @@
     <a class="ghost-button" href="{{ request.url.include_query_params(start='', end='', view='all', page=1) }}">重置</a>
   </form>
   <p class="filter-summary warn" role="alert" data-date-range-error {% if not date_error %}hidden{% endif %}>{{ date_error }}</p>
-  <nav class="longterm-view-tabs" aria-label="长线样本快捷筛选">
-    <a class="{{ 'active' if selected_view == 'completed' else '' }}" href="{{ request.url.include_query_params(view='completed', page=1) }}">已完成</a>
-    <a class="{{ 'active' if selected_view == 'current' else '' }}" href="{{ request.url.include_query_params(view='current', page=1) }}">待满80日</a>
-    <a class="{{ 'active' if selected_view == 'outperform' else '' }}" href="{{ request.url.include_query_params(view='outperform', page=1) }}">跑赢基准</a>
-    <a class="{{ 'active' if selected_view == 'risk' else '' }}" href="{{ request.url.include_query_params(view='risk', page=1) }}">高风险</a>
-    <a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ request.url.include_query_params(view='all', page=1) }}">全部历史样本</a>
-  </nav>
   <div class="filter-summary">
     当前明细筛选：
     {% if sample_filter_summary and sample_filter_summary.is_filtered %}
@@ -348,6 +242,24 @@
 
 <script>
 (() => {
+  const workspace = document.querySelector("[data-tracking-workspace]");
+  if (workspace) {
+    const buttons = workspace.querySelectorAll("[data-tracking-filter]");
+    const rows = workspace.querySelectorAll("[data-tracking-state]");
+    const empty = workspace.querySelector("[data-tracking-empty]");
+    buttons.forEach((button) => button.addEventListener("click", () => {
+      const filter = button.dataset.trackingFilter;
+      let visible = 0;
+      buttons.forEach((item) => item.classList.toggle("active", item === button));
+      rows.forEach((row) => {
+        const show = filter === "all" || row.dataset.trackingState === filter;
+        row.hidden = !show;
+        if (show) visible += 1;
+      });
+      if (empty) empty.hidden = visible > 0;
+    }));
+  }
+
   const form = document.querySelector("[data-date-range-form]");
   const errorBox = document.querySelector("[data-date-range-error]");
   if (!form || !errorBox) return;

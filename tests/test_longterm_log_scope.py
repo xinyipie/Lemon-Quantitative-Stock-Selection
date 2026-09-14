@@ -47,7 +47,6 @@ def test_page_separates_history_and_run_filters():
         response = TestClient(app).get('/longterm?view=all&start=20260101&run_start=20260801&run_end=20260820&run_page=2')
     assert response.status_code == 200
     assert runs.call_args.kwargs == {'limit': 21, 'offset': 20, 'start': '20260801', 'end': '20260820'}
-    assert '全部历史样本' in response.text
     assert '默认读取最新100条' in response.text
     assert '最多读取1000条' in response.text
     assert '实时观察跟踪 · 进行中' in response.text

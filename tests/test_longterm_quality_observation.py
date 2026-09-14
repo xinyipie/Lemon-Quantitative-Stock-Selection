@@ -148,7 +148,7 @@ def test_longterm_page_shows_scan_funnel_and_unconfirmed_quality(tmp_path, monke
     assert response.status_code == 200
     assert '质量扫描漏斗' in response.text
     assert '测试市场尚未确认' in response.text
-    assert '未确认，仅观察' in response.text
+    assert 'Watch观察' in response.text
     assert '财务数据缺失' in response.text
     assert '质量扫描完成' in response.text
     assert '候选漏斗未采集' not in response.text

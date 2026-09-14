@@ -434,48 +434,69 @@ def get_longterm_audit_samples(
             params,
         ).fetchall()
         samples = [_decorate_longterm_audit_sample({**dict(row), "sample_source": "历史回测"}) for row in rows]
-        if _tables_exist(conn, "pool_events"):
-            tracking_filters = ["mode = 'longterm'", "event_type = 'NEW'"]
-            tracking_params: list = []
-            if start:
-                tracking_filters.append("event_date >= ?")
-                tracking_params.append(str(start).replace("-", "")[:8])
-            if end:
-                tracking_filters.append("event_date <= ?")
-                tracking_params.append(str(end).replace("-", "")[:8])
-            tracking_params.append(limit)
-            tracking_rows = conn.execute(
-                f"""
-                select event_date as select_date, ts_code, profile,
-                       new_score as score
-                from pool_events
-                where {' and '.join(tracking_filters)}
-                order by event_date desc, id desc
-                limit ?
-                """,
-                tracking_params,
-            ).fetchall()
-            known = {(item.get("select_date"), item.get("ts_code")) for item in samples}
-            for row in tracking_rows:
-                item = dict(row)
-                key = (item.get("select_date"), item.get("ts_code"))
-                if key in known:
-                    continue
-                item.update({
-                    "name": None, "industry": None, "pool_type": "longterm_watch",
-                    "regime": None, "pool_rank_score": None, "industry_rs": None,
-                    "drawdown_from_high": None, "ret_10d": None, "ret_40d": None,
-                    "ret_80d": None, "mfe_80d": None, "mae_80d": None,
-                    "excess_ret_80d": None, "outperform_80d": None,
-                    "factor_json": None, "period": "每日跟踪", "sample_source": "每日扫描",
-                })
-                samples.append(_decorate_longterm_audit_sample(item))
-                known.add(key)
-        samples.sort(key=lambda item: (str(item.get("select_date") or ""), float(item.get("score") or 0)), reverse=True)
-        samples = samples[:limit]
         _enrich_stock_identity(samples, history_db)
         _attach_longterm_current_paths(samples, history_db)
         _attach_longterm_lifecycle_labels(samples, conn)
+        return samples
+    finally:
+        conn.close()
+
+
+def get_longterm_tracking_samples(
+    signal_db: str | Path = DEFAULT_DB_PATH,
+    history_db: str | Path | None = DEFAULT_HISTORY_DB_PATH,
+    limit: int = 100,
+) -> list[dict]:
+    """返回每日真实入池记录，并明确区分仍在观察和已经移出。"""
+    path = Path(signal_db)
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        if not _tables_exist(conn, "pool_events"):
+            return []
+        rows = conn.execute(
+            """
+            select admitted.id as admission_id, admitted.event_date as select_date,
+                   admitted.ts_code, admitted.profile, admitted.new_score as score,
+                   (
+                       select removed.event_date from pool_events removed
+                       where removed.mode = 'longterm'
+                         and removed.ts_code = admitted.ts_code
+                         and removed.event_type = 'REMOVED'
+                         and removed.id > admitted.id
+                       order by removed.id asc limit 1
+                   ) as removed_date
+            from pool_events admitted
+            where admitted.mode = 'longterm' and admitted.event_type = 'NEW'
+            order by admitted.event_date desc, admitted.id desc
+            limit ?
+            """,
+            (limit,),
+        ).fetchall()
+        samples = []
+        known: set[tuple[str, str]] = set()
+        for row in rows:
+            item = dict(row)
+            key = (str(item.get("select_date") or ""), str(item.get("ts_code") or ""))
+            if key in known:
+                continue
+            known.add(key)
+            item.update({
+                "name": None, "industry": None, "pool_type": "longterm_watch",
+                "regime": None, "pool_rank_score": None, "industry_rs": None,
+                "drawdown_from_high": None, "ret_10d": None, "ret_40d": None,
+                "ret_80d": None, "mfe_80d": None, "mae_80d": None,
+                "excess_ret_80d": None, "outperform_80d": None,
+                "factor_json": None, "period": "每日跟踪", "sample_source": "每日扫描",
+                "tracking_state": "removed" if item.get("removed_date") else "active",
+                "tracking_state_label": "已移出" if item.get("removed_date") else "进行中",
+                "tracking_state_tone": "bad" if item.get("removed_date") else "ok",
+            })
+            samples.append(_decorate_longterm_audit_sample(item))
+        _enrich_stock_identity(samples, history_db)
+        _attach_longterm_current_paths(samples, history_db)
         return samples
     finally:
         conn.close()

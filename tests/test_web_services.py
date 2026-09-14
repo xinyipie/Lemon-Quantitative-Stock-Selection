@@ -20,6 +20,7 @@ from web_app.services.signal_service import (
     build_strong_recommendation_card,
     get_active_longterm_pool,
     get_longterm_audit_samples,
+    get_longterm_tracking_samples,
     get_signal_runs,
     get_stock_signals,
     get_longterm_events,
@@ -59,12 +60,39 @@ class WebServicesTest(unittest.TestCase):
             finally:
                 conn.close()
 
-            samples = get_longterm_audit_samples(signal_db, history_db=None, limit=100)
+            samples = get_longterm_tracking_samples(signal_db, history_db=None, limit=100)
 
         self.assertEqual(len(samples), 1)
         self.assertEqual(samples[0]["select_date"], "20260911")
         self.assertEqual(samples[0]["sample_source"], "每日扫描")
         self.assertEqual(samples[0]["stage_return_text"], "未满")
+
+    def test_longterm_tracking_marks_a_later_removal(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as tmp:
+            signal_db = Path(tmp) / "signals.db"
+            conn = sqlite3.connect(signal_db)
+            try:
+                conn.execute(
+                    """create table pool_events (
+                    id integer primary key, event_date text, mode text, profile text,
+                    ts_code text, event_type text, old_state text, new_state text,
+                    old_score real, new_score real, message text, created_at text)"""
+                )
+                conn.executemany(
+                    "insert into pool_events values (?, ?, 'longterm', 'longterm_watch', '000001.SZ', ?, null, null, null, 80, '', '')",
+                    [(1, "20260901", "NEW"), (2, "20260910", "REMOVED")],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            sample = get_longterm_tracking_samples(signal_db, history_db=None, limit=10)[0]
+
+        self.assertEqual(sample["tracking_state"], "removed")
+        self.assertEqual(sample["tracking_state_label"], "已移出")
+        self.assertEqual(sample["removed_date"], "20260910")
 
     def test_history_service_returns_db_status_and_stock_detail(self):
         with tempfile.TemporaryDirectory() as tmpdir:
