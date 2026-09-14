@@ -410,8 +410,12 @@ def download_stock_basic(pro, force: bool = False):
 
     incoming = _normalize_stock_basic(pd.concat(frames, ignore_index=True, sort=False))
     # 返回中存在非法主键时拒绝本次替换，避免丢失已有股票或生成伪完整快照。
-    if ('ts_code' not in incoming.columns
-            or not incoming['ts_code'].str.fullmatch(r'\d{6}\.(?:SH|SZ|BJ)', na=False).all()):
+    if 'ts_code' not in incoming.columns:
+        raise ValueError("stock_basic 返回无效 ts_code，下载失败；已有缓存与历史快照保持不变")
+    regular_codes = incoming['ts_code'].str.fullmatch(r'\d{6}\.(?:SH|SZ|BJ)', na=False)
+    # 中转的退市主数据含 T600018.SH 等独立历史标识，不能去掉 T 与现存股票合并。
+    retired_codes = incoming['ts_code'].str.fullmatch(r'T\d{6}\.(?:SH|SZ|BJ)', na=False) & incoming['list_status'].eq('D').fillna(False)
+    if not (regular_codes | retired_codes).all():
         raise ValueError("stock_basic 返回无效 ts_code，下载失败；已有缓存与历史快照保持不变")
     incoming['basic_snapshot_date'] = _china_date()
     incoming['basic_status_scope'] = ','.join(completed_statuses)

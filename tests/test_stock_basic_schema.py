@@ -46,6 +46,20 @@ def test_mixed_symbols_round_trip_to_real_parquet(cache):
         assert pd.isna(saved.loc['000003.SZ', 'list_date'])
 
 
+def test_retired_legacy_code_keeps_identity_separate_from_current_stock(cache):
+    run_download({'L': pd.DataFrame([{'ts_code': '600018.SH', 'symbol': '600018'}]),
+                  'D': pd.DataFrame([{'ts_code': 'T600018.SH', 'symbol': None}])})
+    saved = pd.read_parquet(cache / 'stock_basic.parquet').set_index('ts_code')
+    assert set(saved.index) == {'600018.SH', 'T600018.SH'}
+    assert saved.loc['T600018.SH', 'list_status'] == 'D'
+    assert pd.isna(saved.loc['T600018.SH', 'symbol'])
+
+
+def test_legacy_code_is_not_accepted_as_current_listing(cache):
+    with pytest.raises(ValueError, match='ts_code'):
+        run_download({'L': pd.DataFrame([{'ts_code': 'T600018.SH'}])})
+
+
 def test_partial_status_normalizes_old_cache_without_new_history(cache):
     pd.DataFrame([{'ts_code': '000004.SZ', 'symbol': 4.0, 'list_status': 'D',
                    'list_date': 19910114.0, 'basic_snapshot_date': 20260901.0,
