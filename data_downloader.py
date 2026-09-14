@@ -196,15 +196,47 @@ def _financial_query_groups(ts_codes: List[str], existing: pd.DataFrame,
     """已有代码拉公告增量，缓存缺失代码单独拉全量，避免全局水位漏数。"""
     if not incremental_start or existing.empty or 'ts_code' not in existing.columns:
         return [(ts_codes, '')]
-    cached_codes = set(existing['ts_code'].dropna().astype(str))
-    incremental_codes = [code for code in ts_codes if code in cached_codes]
-    missing_codes = [code for code in ts_codes if code not in cached_codes]
+    dates = existing['ann_date'].astype('string').str.replace(r'\.0$', '', regex=True)
+    valid = pd.to_datetime(dates, format='%Y%m%d', errors='coerce').notna()
+    watermarks = existing.assign(ann_date=dates).loc[valid].groupby('ts_code')['ann_date'].max().to_dict()
+    missing_codes = [code for code in ts_codes if code not in watermarks]
+    # 同年公告水位归一批，旧股票不会拖累所有当前股票反复下载数十年。
+    year_groups = {}
+    for code in ts_codes:
+        if code in watermarks:
+            year_groups.setdefault(watermarks[code][:4], []).append(code)
     groups = []
-    if incremental_codes:
-        groups.append((incremental_codes, incremental_start))
+    for year in sorted(year_groups):
+        codes = year_groups[year]
+        groups.append((codes, min(watermarks[code] for code in codes)))
     if missing_codes:
         groups.append((missing_codes, ''))
     return groups
+
+
+def _download_financial_batches(pro, ts_codes, existing, incremental_start, endpoint, fields):
+    """批量拉取财务增量，显式限制每段日期且失败时不发布部分缓存。"""
+    all_dfs = []
+    finish = datetime.strptime(_china_date(), '%Y%m%d')
+    for codes, group_start in _financial_query_groups(ts_codes, existing, incremental_start):
+        windows = [{}]
+        if group_start:
+            windows = []
+            cursor = datetime.strptime(group_start, '%Y%m%d')
+            while cursor <= finish:
+                end = min(cursor + timedelta(days=2999), finish)
+                windows.append({'start_date': cursor.strftime('%Y%m%d'), 'end_date': end.strftime('%Y%m%d')})
+                cursor = end + timedelta(days=1)
+        for i in range(0, len(codes), 50):
+            for window in windows:
+                query = {'ts_code': ','.join(codes[i:i + 50]), 'fields': fields, **window}
+                df = _retry(lambda q=query: getattr(pro, endpoint)(**q), retries=3, wait=3.0)
+                if df is None:
+                    raise RuntimeError(f'财务 {endpoint} 批次请求失败，保留原缓存；本次更新未完成')
+                if not df.empty:
+                    all_dfs.append(df)
+                time.sleep(0.5)
+    return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
 
 def _retry(fn, retries: int = 3, wait: float = 5.0):
@@ -718,31 +750,9 @@ def download_fina_indicator(pro, force: bool = False):
     mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
     logger.info(f"  ↓ 下载 fina_indicator（共{len(ts_codes)}只，{mode}）...")
 
-    batch_size = 50
-    all_dfs = []
-    query_groups = _financial_query_groups(ts_codes, existing, incremental_start)
-    total_batches = sum((len(codes) + batch_size - 1) // batch_size for codes, _ in query_groups)
-    batch_no = 0
-    for group_codes, group_start in query_groups:
-        for i in range(0, len(group_codes), batch_size):
-            batch = group_codes[i:i + batch_size]
-            batch_no += 1
-            if batch_no % 20 == 0:
-                logger.info(f"    进度：{batch_no}/{total_batches} 批...")
-
-            query = {
-                'ts_code': ",".join(batch),
-                'fields': 'ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy',
-            }
-            if group_start:
-                query['start_date'] = group_start
-            df = _retry(lambda q=query: pro.fina_indicator(**q), retries=3, wait=3.0)
-
-            if df is not None and not df.empty:
-                all_dfs.append(df)
-            time.sleep(0.5)
-
-    incoming = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    incoming = _download_financial_batches(
+        pro, ts_codes, existing, incremental_start, 'fina_indicator',
+        'ts_code,ann_date,end_date,roe,debt_to_assets,netprofit_yoy')
     if incoming.empty:
         logger.warning("  fina_indicator 本次未返回数据，保留已有完整缓存")
         return
@@ -768,31 +778,9 @@ def download_income(pro, force: bool = False):
     mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
     logger.info(f"  ↓ 下载 income（共{len(ts_codes)}只，{mode}）...")
 
-    batch_size = 50
-    all_dfs = []
-    query_groups = _financial_query_groups(ts_codes, existing, incremental_start)
-    total_batches = sum((len(codes) + batch_size - 1) // batch_size for codes, _ in query_groups)
-    batch_no = 0
-    for group_codes, group_start in query_groups:
-        for i in range(0, len(group_codes), batch_size):
-            batch = group_codes[i:i + batch_size]
-            batch_no += 1
-            if batch_no % 20 == 0:
-                logger.info(f"    进度：{batch_no}/{total_batches} 批...")
-
-            query = {
-                'ts_code': ",".join(batch),
-                'fields': 'ts_code,ann_date,end_date,revenue',
-            }
-            if group_start:
-                query['start_date'] = group_start
-            df = _retry(lambda q=query: pro.income(**q), retries=3, wait=3.0)
-
-            if df is not None and not df.empty:
-                all_dfs.append(df)
-            time.sleep(0.5)
-
-    incoming = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    incoming = _download_financial_batches(
+        pro, ts_codes, existing, incremental_start, 'income',
+        'ts_code,ann_date,end_date,revenue')
     if incoming.empty:
         logger.warning("  income 本次未返回数据，保留已有完整缓存")
         return
