@@ -63,7 +63,7 @@ def _valid_document():
         "core_judgement": {"text": "市场仍以结构分化为主，持续性需要后续成交承接确认。", "evidence_ids": ["market:state"], "entity_refs": []},
         "market_context": {"text": "银行方向保持趋势延续，但行业扩散范围仍需观察。", "evidence_ids": ["sector:银行:healthy"], "entity_refs": ["industry:银行"]},
         "focus": {"text": "平安银行同时出现在两个独立观察视角中，短期波动可能放大。", "evidence_ids": ["stock:000001.SZ:short_formal", "stock:000001.SZ:market_radar"], "entity_refs": ["stock:000001.SZ"], "risk_refs": ["stock:000001.SZ:risk:0"]},
-        "performance_risk": {"text": "近期成熟样本共12个，结果只能用于描述历史表现。", "evidence_ids": ["performance:short:recent"], "entity_refs": []},
+        "performance_risk": {"text": "历史回测区间未记录，样本共12个，尚未按当前版本重新验证，结果只能用于描述历史表现。", "evidence_ids": ["performance:short:recent"], "entity_refs": []},
         "watch_points": {"text": "后续重点看行业扩散和成交承接能否延续。", "evidence_ids": ["stock:000001.SZ:market_radar"], "entity_refs": ["stock:000001.SZ"], "validation_refs": ["stock:000001.SZ:validation:0"]},
     }
     return {
@@ -181,3 +181,72 @@ class DailyReportPublicationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_snapshot_rejects_unsafe_urls_and_raw_payload():
+    from daily_report.publication import build_evidence_snapshot
+    document = {"sections": [{"paragraphs": [{"evidence_ids": ["event:1"]}]}]}
+    for url in ("javascript:alert(1)", "https://user:password@example.com/", "//example.com"):
+        public = {"evidence": {"event:1": {"label": "公开事件", "values": ["公开摘要"], "payload": {"api_key": "secret"}}}, "events": [{"evidence_id": "event:1", "source_url": url, "publish_time": "2026-09-11"}]}
+        item = build_evidence_snapshot(document, public)["event:1"]
+        assert item["source_url"] == ""
+        assert item["text"] == "公开摘要"
+        assert "secret" not in str(item)
+
+
+def test_historical_performance_has_explicit_scope_and_no_market_inference():
+    from daily_report.publication import build_public_facts
+    from daily_report.writer import build_deterministic_report_document
+    facts = {"performance": {"short": {"closed_count": 12, "avg_ret_5d": -0.456789, "date_start": "20230101", "date_end": "20231231"}}, "evidence_index": {"performance:short:recent": {"label": "历史回测", "values": []}}}
+    public = build_public_facts(facts)
+    assert public["performance"]["short_cycle"]["source"] == "backtest_ic_short"
+    assert public["performance"]["short_cycle"]["average_return"] == -0.46
+    text = str(build_deterministic_report_document(public))
+    assert "20230101" in text and "20231231" in text
+    assert "历史回测" in text and "当前版本" in text
+    assert "说明市场活跃度" not in text
+
+
+def test_history_cannot_be_used_to_explain_current_market():
+    facts = _facts()
+    public = build_public_facts(facts)
+    document = _valid_document()
+    document["sections"][3]["paragraphs"][0]["text"] = "历史回测说明当前市场兑现能力不足。"
+    assert any("historical" in error for error in validate_report(document, facts, public))
+
+
+def test_malformed_text_is_rejected():
+    facts = _facts()
+    document = _valid_document()
+    document["sections"][0]["paragraphs"][0]["text"] = {"unexpected": "value"}
+    assert validate_report(document, facts, build_public_facts(facts))
+
+
+def test_chinese_adjacent_unsupported_number_is_rejected():
+    facts = _facts()
+    document = _valid_document()
+    document["sections"][0]["paragraphs"][0]["text"] = "今日涨幅达到98765.43%，市场表现稳定。"
+    assert any("untraceable numeric" in error for error in validate_report(document, facts, build_public_facts(facts)))
+
+
+def test_heading_language_and_numbers_are_validated():
+    facts = _facts()
+    for heading in ("建议满仓买入，明天必涨999%", "市场涨幅达到98765.43%"):
+        document = _valid_document()
+        document["sections"][0]["heading"] = heading
+        assert validate_report(document, facts, build_public_facts(facts))
+
+
+def test_historical_validation_cannot_be_asserted_complete():
+    facts = _facts()
+    for text in ("历史回测区间与样本已通过当前版本验证。", "历史回测区间和样本验证已完成，当前版本验证有效。"):
+        document = _valid_document()
+        document["sections"][3]["paragraphs"][0]["text"] = text
+        assert any("historical" in error for error in validate_report(document, facts, build_public_facts(facts)))
+
+
+def test_missing_source_time_is_not_replaced_by_market_cutoff():
+    from daily_report.publication import build_evidence_snapshot
+    public = {"evidence": {"event:1": {"values": ["公开摘要"]}}, "events": [{"evidence_id": "event:1"}], "cutoffs": {"data": "2026-09-11 15:00"}}
+    document = {"sections": [{"paragraphs": [{"evidence_ids": ["event:1"]}]}]}
+    assert build_evidence_snapshot(document, public)["event:1"]["published_at"] == ""

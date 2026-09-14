@@ -5,7 +5,7 @@
   <div>
     <div class="eyebrow">Market Radar</div>
     <h1>市场雷达</h1>
-    <p>行业口径热度追踪，用来判断市场主线、过热风险和板块内候选观察名单。</p>
+    <p>追踪事件、行业主线与个股证据。综合阅读见市场日报；这里的观察名单不等同于短线正式入选。</p>
   </div>
   <div class="radar-header-actions">
     <form class="command-search" action="{{ app_path(request, '/sectors') }}" method="get">
@@ -113,7 +113,7 @@
     </a>
     <a class="radar-situation-card risk" href="#risk-sectors">
       <div class="radar-situation-metric"><span>风险变化</span><b>{{ situation_risk_count }}</b></div>
-      <strong>{{ decision.avoid_industries|join("、") if decision.avoid_industries else "暂无明确扩散风险" }}</strong>
+      <strong>{{ '数据不足，风险待核验' if freshness.overall_status != 'fresh' else (decision.avoid_industries|join("、") if decision.avoid_industries else "暂无明确扩散风险") }}</strong>
       <small>利空只作风险提示，不作为推荐</small>
     </a>
   </div>
@@ -268,9 +268,9 @@
   <div class="risk-blocker {{ brief.risk_blocker.tone }}">
     <div>
       <span>风险阻断</span>
-      <strong>{{ brief.risk_blocker.level }}</strong>
+      <strong>{{ '数据不足，暂停判断' if freshness.overall_status != 'fresh' and brief.risk_blocker.level == '可研究' else brief.risk_blocker.level }}</strong>
     </div>
-    <p>{{ brief.risk_blocker.reason }}</p>
+    <p>{{ freshness.summary if freshness.overall_status != 'fresh' and brief.risk_blocker.level == '可研究' else brief.risk_blocker.reason }}</p>
     <small>{{ brief.risk_blocker.research_guardrail }}</small>
   </div>
   {% endif %}
@@ -286,7 +286,7 @@
       <p>有效事件，最高等级 {{ brief.event_summary.top_materiality if brief.event_summary else "-" }}</p>
     </div>
     <div>
-      <span>行业 thesis</span>
+      <span>行业研判</span>
       <strong>{{ brief.snapshot_summary.thesis_count if brief.snapshot_summary else 0 }}</strong>
       <p>按事件、量价、风险综合审计</p>
     </div>
@@ -317,6 +317,8 @@
       <div><span>消息面结论</span><strong>{{ ai_news_brief.summary }}</strong></div>
       <small>内容生成于 {{ ai_news_brief.generated_at }}{% if ai_news_brief.last_checked_at and ai_news_brief.last_checked_at != ai_news_brief.generated_at %} · 最近检查 {{ ai_news_brief.last_checked_at }}{% endif %} · AI仅作独立研究判断</small>
     </div>
+    <details class="radar-secondary">
+      <summary>展开消息驱动、风险和个股明细</summary>
     <div class="ai-news-driver-grid">
       <div>
         <strong>主要驱动</strong>
@@ -373,6 +375,7 @@
         {% else %}<div class="empty-state soft">当前没有形成可验证的个股消息研判。</div>{% endif %}
       </section>
     </div>
+    </details>
   {% else %}
     <div class="ai-news-unavailable">
       <strong>本次未形成可靠 AI 研判</strong>
@@ -726,7 +729,8 @@ document.addEventListener("DOMContentLoaded", function () {
     </div>
     {% if decision.data_alignment %}
       <div class="filter-summary {{ decision.data_alignment.tone }}">
-        {{ decision.data_alignment.message }}
+        {{ freshness.summary if freshness.overall_status != 'fresh' else decision.data_alignment.message }}
+        {% if freshness.overall_status != 'fresh' and not decision.data_alignment.aligned %}{{ decision.data_alignment.message }}{% endif %}
         行业 {{ decision.data_alignment.sector_date|fmt_date if decision.data_alignment.sector_date else "-" }}；
         新闻 {{ decision.data_alignment.news_date|fmt_date if decision.data_alignment.news_date else "-" }}；
         概念 {{ decision.data_alignment.concept_date|fmt_date if decision.data_alignment.concept_date else "-" }}
@@ -1104,7 +1108,7 @@ document.addEventListener("DOMContentLoaded", function () {
     </tbody>
   </table>
   {% else %}
-    <div class="empty-state soft">暂无明显过热或退潮板块。</div>
+    <div class="empty-state soft">{{ '数据不足，无法判断是否存在过热或退潮风险。' if freshness.overall_status != 'fresh' else '暂无明显过热或退潮板块。' }}</div>
   {% endif %}
 </section>
 {% endblock %}

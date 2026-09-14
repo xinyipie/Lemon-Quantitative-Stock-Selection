@@ -262,7 +262,11 @@ def refresh_core_history_data(py: str, args: argparse.Namespace, target_start: s
             args.dry_run,
         )
 
-    return target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
+    actual = target_end if args.dry_run else latest_history_trade_date(args.history_db)
+    if not args.dry_run:
+        from market_data_clock import require_update_freshness
+        require_update_freshness(target_end, actual, args.cache_dir)
+    return actual
 
 
 def run_update(args: argparse.Namespace) -> None:
@@ -332,7 +336,10 @@ def run_update(args: argparse.Namespace) -> None:
                 args.dry_run,
             )
 
-    effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db) or target_end
+    effective_end = target_end if args.dry_run else latest_history_trade_date(args.history_db)
+    if not args.dry_run:
+        from market_data_clock import require_update_freshness
+        require_update_freshness(target_end, effective_end, args.cache_dir)
     print(f"\n有效最新交易日：{effective_end}")
 
     if effective_end != target_end:
@@ -560,6 +567,8 @@ def _generate_leadership_report(
         str(args.history_db),
         "--slot",
         slot,
+        "--cache-dir",
+        str(args.cache_dir),
     ]
     if retry_if_missing:
         command.append("--retry-if-missing")

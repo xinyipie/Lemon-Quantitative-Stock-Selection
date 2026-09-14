@@ -149,6 +149,15 @@ def build_daily_report_facts(
         adapters.longterm_audit_summary, signal_db, limit=12, half_year_only=True, default={}
     )
 
+    short_performance = dict(short_performance or {})
+    sample_dates = sorted(_date(row.get("trade_date")) for row in review_signals or [] if row.get("trade_date") and (row.get("performance") or {}).get("ret_5d") is not None)
+    short_performance.update(source="backtest_ic_short", date_start=sample_dates[0] if sample_dates else "", date_end=sample_dates[-1] if sample_dates else "")
+    longterm_audit = dict(longterm_audit or {})
+    runs = longterm_audit.get("runs") or []
+    starts = sorted(str(run["date_start"]) for run in runs if run.get("date_start"))
+    ends = sorted(str(run["date_end"]) for run in runs if run.get("date_end"))
+    longterm_audit.update(source="backtest_longterm", date_start=starts[0] if starts else "", date_end=ends[-1] if ends else "")
+
     optional_errors = {
         "short_formal": formal_error,
         "short_auxiliary": observe_error,
@@ -228,9 +237,9 @@ def build_daily_report_facts(
     for index, event in enumerate((concept_news or {}).get("reading_events") or [], 1):
         evidence_index[f"event:{index}"] = _evidence(str(event.get("title") or f"事件{index}"), event)
     if (short_performance or {}).get("closed_count"):
-        evidence_index["performance:short:recent"] = _evidence("近期成熟短周期样本", short_performance)
+        evidence_index["performance:short:recent"] = _evidence("历史回测短周期样本", short_performance)
     if (longterm_audit or {}).get("total_samples"):
-        evidence_index["performance:longterm:completed"] = _evidence("已完成中期样本", longterm_audit)
+        evidence_index["performance:longterm:completed"] = _evidence("历史回测中期样本", longterm_audit)
 
     critical_states = [short_scan.get("status"), longterm_scan.get("status")]
     snapshot_valid = bool(snapshot) and snapshot.get("trade_date") == market_date

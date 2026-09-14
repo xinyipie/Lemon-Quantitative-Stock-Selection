@@ -13,22 +13,44 @@
   <header class="research-report__header">
     <p class="eyebrow">A股市场研究日报</p>
     <h1>{{ report.title }}</h1>
-    {% if report.document.ai_model == "deepseek-v4-pro" %}
-    <p class="report-meta">研判方式：DeepSeek V4 Pro 深度研判</p>
-    {% elif report.document.generation_mode %}
-    <p class="report-meta">研判方式：历史研判</p>
-    {% endif %}
     <p class="report-meta">报告日期：{{ report.report_date|fmt_date }} · 行情截至：{{ report.market_date|fmt_date }}</p>
     <p class="report-meta">数据截至：{{ report.data_cutoff }} · 消息截至：{{ report.news_cutoff }}</p>
+    <p class="report-meta">报告生成时间与行情日期分别展示；快照保存时间不代表行情已更新。</p>
   </header>
+  {% if is_historical_report or report_warning %}
+  <aside class="report-integrity-note" role="note">
+    <strong>{{ '历史研究记录' if is_historical_report else '数据时效提醒' }}</strong>
+    <p>正文保留发布时的判断，不代表当前市场；请结合上方行情日期阅读。</p>
+    {% if report_warning %}<p>{{ report_warning }}</p>{% endif %}
+  </aside>
+  {% endif %}
+  {% if not has_evidence_snapshot %}
+  <p class="report-meta">此历史版本未保存可展示的来源快照，不能逐段核验依据。</p>
+  {% endif %}
+  <nav class="page-section-nav" aria-label="日报章节">
+    {% for section in report.document.sections %}<a href="#{{ section.key }}">{{ section.heading }}</a>{% endfor %}
+  </nav>
   {% for section in report.document.sections %}
   <section class="research-report__section" id="{{ section.key }}">
     <h2>{{ section.heading }}</h2>
     {% for paragraph in section.paragraphs %}
     <p>{{ paragraph.text }}</p>
+    {% if paragraph.display_evidence %}
+    <details class="report-evidence">
+      <summary>查看本段依据（{{ paragraph.display_evidence|length }}）</summary>
+      {% for evidence in paragraph.display_evidence %}
+      <div class="report-evidence-item">
+        <strong>{{ evidence.label }}</strong>
+        {% if evidence.published_at %}<small>来源时间：{{ evidence.published_at }}</small>{% endif %}
+        {% if evidence.text %}<p>{{ evidence.text }}</p>{% endif %}
+        {% if evidence.source_url %}<a href="{{ evidence.source_url }}" target="_blank" rel="noopener noreferrer">查看原始来源</a>{% endif %}
+      </div>
+      {% endfor %}
+    </details>
+    {% endif %}
     {% endfor %}
   </section>
   {% endfor %}
-  <footer>本文基于公开市场数据进行研究整理，仅供内部研究参考。</footer>
+  <footer>本文基于公开市场数据进行研究整理。历史回测与观察样本不代表当日实际推荐成绩；未重新验证的结果仅供历史研究参考。</footer>
 </article>
 {% endblock %}

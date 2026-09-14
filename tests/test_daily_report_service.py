@@ -53,6 +53,7 @@ class DailyReportServiceTest(unittest.TestCase):
     def generate(self, **kwargs):
         return generate_daily_report(
             "20260723", "20260722", self.signal_db, self.history_db,
+            freshness_checker=lambda *args: None,
             facts_builder=kwargs.pop("facts_builder", lambda *args: _facts()),
             writer=kwargs.pop("writer", lambda public: _document()),
             reviser=kwargs.pop("reviser", lambda public, document, errors: None),
@@ -77,18 +78,39 @@ class DailyReportServiceTest(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(get_report(self.signal_db, "20260723")["title"], _document()["title"])
 
-    def test_generated_ai_document_is_published_without_content_validation(self):
+    def test_invalid_document_is_revised_then_rejected(self):
         calls = []
         result = self.generate(
             writer=lambda public: _document("bad"),
             reviser=lambda public, document, errors: calls.append("reviser"),
             fallback_builder=lambda public: calls.append("fallback"),
         )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(calls, ["reviser", "fallback"])
+        self.assertIsNone(get_report(self.signal_db, "20260723"))
+
+    def test_revision_passes_validation(self):
+        result = self.generate(writer=lambda public: _document("bad"), reviser=lambda *args: _document())
         self.assertEqual(result["status"], "published")
-        self.assertEqual(calls, [])
-        report = get_report(self.signal_db, "20260723")
-        self.assertEqual(report["title"], "bad")
-        self.assertEqual(report["document"]["generation_mode"], "pro_reasoning")
+
+    def test_malformed_references_reach_fallback(self):
+        document = _document()
+        document["sections"][0]["paragraphs"][0]["evidence_ids"] = [{}]
+        result = self.generate(writer=lambda public: document, fallback_builder=build_deterministic_report_document)
+        self.assertEqual(result["status"], "published")
+
+    def test_invalid_fallback_keeps_previous_version(self):
+        self.generate()
+        old = get_report(self.signal_db, "20260723")
+        result = self.generate(force=True, writer=lambda public: None, fallback_builder=lambda public: _document("bad"))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(get_report(self.signal_db, "20260723"), old)
+
+    def test_public_snapshot_is_saved(self):
+        self.generate()
+        snapshot = get_report(self.signal_db, "20260723")["document"]["evidence_snapshot"]
+        self.assertEqual(set(snapshot), {"market:state"})
+        self.assertEqual(set(snapshot["market:state"]), {"label", "text", "source_url", "published_at"})
 
     def test_missing_ai_document_uses_deterministic_fallback(self):
         result = self.generate(

@@ -9,6 +9,7 @@ from pathlib import Path
 from daily_report.facts import build_daily_report_facts
 from daily_report.publication import (
     build_public_facts,
+    build_evidence_snapshot,
     extract_search_keywords,
     report_to_plain_text,
     validate_report,
@@ -37,8 +38,10 @@ def generate_daily_report(
     writer=generate_report_document,
     reviser=revise_report_document,
     fallback_builder=build_deterministic_report_document,
+    freshness_checker=None,
+    cache_dir: str | Path | None = None,
 ) -> dict:
-    """优先发布可解析的 AI 稿件；仅在 AI 无法成稿时使用确定性降级稿。"""
+    """校验初稿、一次修订与降级稿，仅发布符合事实边界的文章。"""
     if not begin_generation(signal_db, report_date, slot, retry_if_missing, force):
         return {
             "status": "skipped",
@@ -46,6 +49,12 @@ def generate_daily_report(
             "reason": "already_published_or_running",
         }
     try:
+        from market_data_clock import require_report_freshness
+
+        if freshness_checker:
+            freshness_result = freshness_checker(report_date, market_date, history_db)
+        else:
+            freshness_result = require_report_freshness(report_date, market_date, history_db, cache_dir=cache_dir)
         facts = facts_builder(report_date, market_date, signal_db, history_db)
         if not facts.get("completeness", {}).get("can_publish"):
             raise ReportGenerationError("critical facts incomplete")
@@ -54,25 +63,26 @@ def generate_daily_report(
                 json.dumps(facts, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
             ).hexdigest()
         public_facts = build_public_facts(facts)
-        document = writer(public_facts)
-        ai_document_ready = (
-            isinstance(document, dict)
-            and bool(str(document.get("title") or "").strip())
-            and isinstance(document.get("sections"), list)
-        )
-        if ai_document_ready:
-            document.setdefault("generation_mode", "pro_reasoning")
-        else:
+        try:
+            document = writer(public_facts)
+        except Exception:
+            document = None
+        errors = validate_report(document, facts, public_facts)
+        if errors:
+            try:
+                document = reviser(public_facts, document, errors) if reviser else None
+            except Exception:
+                document = None
+            errors = validate_report(document, facts, public_facts)
+        if errors:
             document = fallback_builder(public_facts) if fallback_builder else None
-            fallback_ready = (
-                isinstance(document, dict)
-                and bool(str(document.get("title") or "").strip())
-                and isinstance(document.get("sections"), list)
-            )
-            if not fallback_ready:
-                raise ReportGenerationError(
-                    "AI returned no renderable document and deterministic fallback also failed"
-                )
+            errors = validate_report(document, facts, public_facts)
+        if errors:
+            raise ReportGenerationError("report validation failed: " + "; ".join(errors))
+        document.setdefault("generation_mode", "pro_reasoning")
+        document["evidence_snapshot"] = build_evidence_snapshot(document, public_facts)
+        if isinstance(freshness_result, dict):
+            document['data_freshness'] = freshness_result
         body_text = report_to_plain_text(document)
         keywords = extract_search_keywords(document, public_facts)
         version_id = publish_report(

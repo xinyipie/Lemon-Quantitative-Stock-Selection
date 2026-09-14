@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 
 REQUIRED_SECTIONS = (
@@ -187,22 +188,26 @@ def build_public_facts(facts: dict) -> dict:
     short = (facts.get("performance") or {}).get("short") or {}
     if short.get("closed_count"):
         performance["short_cycle"] = {
+            **_performance_scope(short, "backtest_ic_short"),
             "sample_count": short.get("closed_count"),
-            "win_rate": short.get("win_rate"),
-            "average_return": short.get("avg_ret_5d"),
-            "average_upside": short.get("avg_mfe"),
-            "average_drawdown": short.get("avg_mae"),
+            "win_rate": _rounded(short.get("win_rate")),
+            "average_return": _rounded(short.get("avg_ret_5d")),
+            "average_upside": _rounded(short.get("avg_mfe")),
+            "average_drawdown": _rounded(short.get("avg_mae")),
             "evidence_id": "performance:short:recent",
         }
     longterm = (facts.get("performance") or {}).get("longterm") or {}
     if longterm.get("total_samples"):
         performance["medium_cycle"] = {
+            **_performance_scope(longterm, "backtest_longterm"),
             "sample_count": longterm.get("total_samples"),
             "completed_periods": [
                 {
                     "period": run.get("period"),
                     "sample_count": run.get("sample_count"),
-                    "average_return": run.get("avg_ret_40d"),
+                    "average_return": _rounded(run.get("avg_ret_40d")),
+                    "date_start": run.get("date_start"),
+                    "date_end": run.get("date_end"),
                 }
                 for run in (longterm.get("runs") or [])[:6]
             ],
@@ -252,6 +257,8 @@ def validate_report(document: dict, facts: dict, public_facts: dict) -> list[str
     errors: list[str] = []
     if not isinstance(document, dict):
         return ["document must be an object"]
+    if not isinstance(document.get("title"), str):
+        errors.append("title must be a string")
     title = str(document.get("title") or "").strip()
     visible_title = re.sub(r"\s+", "", title)
     if not 12 <= len(visible_title) <= 24:
@@ -260,6 +267,8 @@ def validate_report(document: dict, facts: dict, public_facts: dict) -> list[str
         errors.append("title contains marketing language")
     errors.extend(_language_errors(title, "title"))
 
+    if not isinstance(document.get("keywords", []), list):
+        errors.append("keywords must be a list")
     sections = document.get("sections")
     if not isinstance(sections, list):
         return errors + ["sections must be a list"]
@@ -272,13 +281,35 @@ def validate_report(document: dict, facts: dict, public_facts: dict) -> list[str
     allowed_validations = set(public_facts.get("allowed_validation_refs") or [])
     allowed_codes = {str(code).split(".")[0] for code in public_facts.get("allowed_stock_codes") or []}
     public_evidence = public_facts.get("evidence") or {}
-    internal_evidence = facts.get("evidence_index") or {}
+
+    def heading_evidence(items):
+        resolved = []
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get("paragraphs"), list):
+                continue
+            for paragraph in item["paragraphs"]:
+                if not isinstance(paragraph, dict) or not isinstance(paragraph.get("evidence_ids"), list):
+                    continue
+                for ref in paragraph["evidence_ids"]:
+                    if isinstance(ref, str) and _public_evidence_id(ref) in public_evidence:
+                        resolved.append(public_evidence[_public_evidence_id(ref)])
+        return resolved
+
+    errors.extend(_numeric_errors(title, heading_evidence(sections), facts))
 
     for section in sections:
         if not isinstance(section, dict):
             errors.append("section must be an object")
             continue
         section_key = str(section.get("key") or "")
+        heading = section.get("heading", "")
+        if not isinstance(heading, str):
+            errors.append("section heading must be a string")
+        else:
+            errors.extend(_language_errors(heading, "heading"))
+            errors.extend(_numeric_errors(heading, heading_evidence([section]), facts))
+            if section_key == "performance_risk" and "验证" in heading:
+                errors.extend(_historical_validation_errors(heading))
         paragraphs = section.get("paragraphs")
         if not isinstance(paragraphs, list) or not paragraphs:
             errors.append(f"section has no paragraphs: {section_key}")
@@ -287,20 +318,30 @@ def validate_report(document: dict, facts: dict, public_facts: dict) -> list[str
             if not isinstance(paragraph, dict):
                 errors.append(f"paragraph must be an object: {section_key}")
                 continue
+            if not isinstance(paragraph.get("text"), str):
+                errors.append("paragraph text must be a string")
+                continue
             text = str(paragraph.get("text") or "").strip()
             if not text:
                 errors.append(f"empty paragraph: {section_key}")
                 continue
             errors.extend(_language_errors(text, section_key))
+            malformed = False
+            for field in ("evidence_ids", "entity_refs", "risk_refs", "validation_refs", "gap_refs"):
+                refs = paragraph.get(field, [])
+                if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
+                    errors.append(f"{field} must be a list of strings: {section_key}")
+                    malformed = True
+            if malformed:
+                continue
             evidence_ids = paragraph.get("evidence_ids") or []
             if not evidence_ids:
                 errors.append(f"paragraph lacks evidence: {section_key}")
             resolved_evidence = []
             for evidence_id in evidence_ids:
-                if evidence_id in public_evidence:
-                    resolved_evidence.append(public_evidence[evidence_id])
-                elif evidence_id in internal_evidence:
-                    resolved_evidence.append(internal_evidence[evidence_id])
+                alias = _public_evidence_id(evidence_id)
+                if alias in public_evidence:
+                    resolved_evidence.append(public_evidence[alias])
                 else:
                     errors.append(f"unknown evidence id: {evidence_id}")
             for entity_ref in paragraph.get("entity_refs") or []:
@@ -310,6 +351,12 @@ def validate_report(document: dict, facts: dict, public_facts: dict) -> list[str
                 if code not in allowed_codes:
                     errors.append(f"unapproved stock code: {code}")
             errors.extend(_numeric_errors(text, resolved_evidence, facts))
+            if any(ref.startswith("performance:") for ref in evidence_ids):
+                if not all(term in text for term in ("历史回测", "区间", "样本", "验证")):
+                    errors.append("historical performance must state source, period, sample and validation limits")
+                errors.extend(_historical_validation_errors(text))
+                if re.search(r"(?:说明|表明|证明|意味着).{0,15}(?:当前|今日|市场活跃度)", text):
+                    errors.append("historical performance cannot explain current market")
             if section_key == "focus" and any(
                 str(ref).startswith("stock:") for ref in paragraph.get("entity_refs") or []
             ):
@@ -447,10 +494,10 @@ def _public_evidence_values(evidence_id: str, evidence: dict, facts: dict) -> li
         return _safe_values(values) if any(value is not None for value in values) else _safe_values(evidence.get("values") or [])
     if evidence_id == "performance:short:recent":
         short = (facts.get("performance") or {}).get("short") or {}
-        return _safe_values([short.get("closed_count"), short.get("win_rate"), short.get("avg_ret_5d"), short.get("avg_mfe"), short.get("avg_mae")])
+        return list(_performance_scope(short, "backtest_ic_short").values()) + _safe_values([short.get("closed_count"), _rounded(short.get("win_rate")), _rounded(short.get("avg_ret_5d")), _rounded(short.get("avg_mfe")), short.get("avg_mae")])
     if evidence_id == "performance:longterm:completed":
         longterm = (facts.get("performance") or {}).get("longterm") or {}
-        values = [longterm.get("total_samples")]
+        values = list(_performance_scope(longterm, "backtest_longterm").values()) + [longterm.get("total_samples")]
         for run in (longterm.get("runs") or [])[:6]:
             values.extend([run.get("period"), run.get("sample_count"), run.get("avg_ret_40d")])
         return _safe_values(values)
@@ -477,7 +524,7 @@ def _language_errors(text: str, location: str) -> list[str]:
 
 
 def _numeric_errors(text: str, evidence: list[dict], facts: dict) -> list[str]:
-    tokens = set(re.findall(r"(?<![\w.])[-+]?\d+(?:\.\d+)?%?", text))
+    tokens = set(re.findall(r"(?<![a-zA-Z0-9_.])[-+]?\d+(?:\.\d+)?%?", text))
     if not tokens:
         return []
     allowed_text = []
@@ -512,3 +559,62 @@ def _numeric_errors(text: str, evidence: list[dict], facts: dict) -> list[str]:
             pass
         errors.append(f"untraceable numeric token: {token}")
     return errors
+
+
+def safe_source_url(value: str) -> str:
+    """公开链接仅允许不含凭据的 HTTP(S) 地址。"""
+    value = str(value or "").strip()
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return ""
+        if parsed.username is not None or parsed.password is not None or any(ord(c) < 32 for c in value):
+            return ""
+        return value
+    except ValueError:
+        return ""
+
+
+def build_evidence_snapshot(document: dict, public_facts: dict) -> dict:
+    """只保存本次文章引用的公开投影，禁止复制内部原始对象。"""
+    evidence = public_facts.get("evidence") or {}
+    events = {item["evidence_id"]: item for item in public_facts.get("events") or []}
+    snapshot = {}
+    for section in document["sections"]:
+        for paragraph in section["paragraphs"]:
+            for ref in paragraph["evidence_ids"]:
+                item = evidence.get(_public_evidence_id(ref))
+                if not item:
+                    continue
+                event = events.get(ref, {})
+                snapshot[ref] = {
+                    "label": str(item.get("label") or "事实依据")[:120],
+                    "text": "；".join(str(value) for value in item.get("values") or [] if isinstance(value, (str, int, float)))[:800],
+                    "source_url": safe_source_url(event.get("source_url")),
+                    "published_at": str(event.get("publish_time") or "")[:80],
+                }
+    return snapshot
+
+
+def _rounded(value):
+    return round(value, 2) if isinstance(value, (int, float)) else value
+
+
+def _performance_scope(performance: dict, source: str) -> dict:
+    return {
+        "source": source,
+        "source_label": "短周期历史回测" if source == "backtest_ic_short" else "中期历史回测",
+        "date_start": str(performance.get("date_start") or "未记录"),
+        "date_end": str(performance.get("date_end") or "未记录"),
+        "validation_limit": "历史回测尚未按当前版本重新验证，不代表当前行情或实盘成绩，不能推断当前市场兑现能力",
+        "period_scope": "日期区间仅覆盖已加载的回测记录；总样本量可能包含其他历史批次" if source == "backtest_longterm" else "日期区间为本次已成熟样本的信号日期",
+    }
+
+
+def _historical_validation_errors(text: str) -> list[str]:
+    """历史绩效固定为未重跑状态，要求明确保留该状态而非推测验证结论。"""
+    if "尚未按当前版本重新验证" not in text:
+        return ["historical performance must retain unverified current-version status"]
+    if re.search(r"(?:已|已经|现已)(?:通过|完成).{0,12}验证|验证(?:已|已经)(?:通过|完成|有效)", text):
+        return ["historical performance cannot claim completed validation"]
+    return []

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import sqlite3
 import tempfile
@@ -1106,6 +1106,8 @@ class SectorWebTest(unittest.TestCase):
             "theme_filter": {"items": []},
         }
 
+        concept_news["news"]["source_date"] = "20260616"
+        concept_news["concepts"]["source_date"] = "20260616"
         decision = build_market_radar_decision(radar, concept_news)
 
         self.assertEqual(decision["alignment"], "主线共振")
@@ -1235,6 +1237,8 @@ class SectorWebTest(unittest.TestCase):
             "theme_filter": {"items": []},
         }
 
+        concept_news["news"]["source_date"] = "20260616"
+        concept_news["concepts"]["source_date"] = "20260616"
         decision = build_market_radar_decision(radar, concept_news)
 
         self.assertEqual(decision["review_loop"]["closing_judgement"], "主线已验证")

@@ -9,9 +9,11 @@ from collections.abc import Callable
 ANALYST_SYSTEM = """你是A股研究组的内部分析员。只使用输入事实和evidence_id工作。
 找出最重要的市场矛盾、跨来源印证、冲突、证据缺口和已成熟表现。
 空结果必须保持原来源状态，不能用其他来源补位。
+历史回测仅用于研究阅读，必须标注来源、日期区间、样本量和当前版本尚未重新验证的限制，不得据此推断当前行情或实盘成绩。数值最多保留两位小数。
 不得创造股票、行业、事件、数字或因果关系。只返回合法JSON。"""
 
 EDITOR_SYSTEM = """你是一名严谨的中文市场研究编辑。把事实和内部分析整理成一篇自然、简洁、信息密度高的文章。
+历史回测必须注明来源、日期区间、样本量，并保留原句“尚未按当前版本重新验证”；不能推断当前市场；数值最多两位小数。
 只写证据支持的内容，不创造事实；不出现技术实现、系统、算法或内部规则用语；不提供买卖、仓位、目标价格或收益承诺。
 语言要像经验丰富的研究员写给管理层，口语化但专业，删掉套话、总结腔和机械连接词。没有最低字数要求。
 个股段落必须同时写清风险、分歧或后续验证条件；证据不足时直接省略该个股。只返回合法JSON。"""
@@ -201,14 +203,15 @@ def build_deterministic_report_document(public_facts: dict) -> dict | None:
         ))
 
     performance_risk = []
-    short_cycle = performance.get("short_cycle") or {}
-    short_id = short_cycle.get("evidence_id")
-    if short_id in evidence:
-        average_return = short_cycle.get("average_return")
-        return_text = "平均收益仍为负" if isinstance(average_return, (int, float)) and average_return < 0 else "平均收益保持为正"
+    for cycle in performance.values():
+        performance_id = cycle.get("evidence_id")
+        if performance_id not in evidence:
+            continue
+        average = cycle.get("average_return")
+        result_text = f"，平均收益为{average:.2f}%" if isinstance(average, (int, float)) else ""
         performance_risk.append(paragraph(
-            f"近期短周期样本{return_text}，上行机会与回撤同时存在，说明市场活跃度尚未稳定转化为兑现能力。",
-            [short_id],
+            f"历史回测来源：{cycle.get('source_label') or '历史回测'}；区间{cycle.get('date_start') or '未记录'}至{cycle.get('date_end') or '未记录'}；样本量{cycle.get('sample_count') or '未记录'}{result_text}。{cycle.get('period_scope') or ''}。历史回测尚未按当前版本重新验证，不代表当前行情或实盘成绩，不能推断当前市场兑现能力。",
+            [performance_id],
         ))
     if risky:
         performance_risk.append(paragraph(

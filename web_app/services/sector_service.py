@@ -314,7 +314,8 @@ def _market_data_alignment(radar: dict, concept_news: dict) -> dict:
     concept_date = _date_key(concepts.get("source_date"))
     theme_date = _date_key(theme_filter.get("source_date"))
     dates = [date for date in [sector_date, news_date, concept_date, theme_date] if date]
-    aligned = len(set(dates)) <= 1
+    missing = not all([sector_date, news_date, concept_date])
+    aligned = not missing and len(set(dates)) == 1
     return {
         "aligned": aligned,
         "tone": "ok" if aligned else "warn",
@@ -322,7 +323,7 @@ def _market_data_alignment(radar: dict, concept_news: dict) -> dict:
         "news_date": news_date,
         "concept_date": concept_date,
         "theme_date": theme_date,
-        "message": "数据日期已对齐。" if aligned else "行业热度与消息/概念日期不一致，共振结论只作参考。",
+        "message": "数据日期已对齐。" if aligned else "缺少行业、消息或概念的有效日期，无法确认数据对齐。" if missing else "行业热度与消息/概念日期不一致，共振结论只作参考。",
     }
 
 

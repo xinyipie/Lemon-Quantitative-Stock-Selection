@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--market-date", help="行情有效日期 YYYYMMDD，默认历史库最新交易日")
     parser.add_argument("--signal-db", default=str(DEFAULT_DB_PATH), help="信号与报告数据库")
     parser.add_argument("--history-db", default=str(DEFAULT_HISTORY_DB_PATH), help="历史行情数据库")
+    parser.add_argument("--cache-dir", help="交易日历缓存目录，默认历史库相邻的 cache 目录")
     parser.add_argument("--slot", choices=("night", "morning", "manual"), default="manual", help="生成时段")
     parser.add_argument("--retry-if-missing", action="store_true", help="仅在当日没有有效报告时补偿生成")
     parser.add_argument("--force", action="store_true", help="人工强制生成新版本")
@@ -57,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         slot=args.slot,
         retry_if_missing=args.retry_if_missing,
         force=args.force,
+        cache_dir=args.cache_dir,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 1 if result.get("status") == "failed" else 0

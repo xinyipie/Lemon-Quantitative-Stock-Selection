@@ -1,3 +1,4 @@
+import pandas as pd
 import argparse
 import unittest
 from pathlib import Path
@@ -32,6 +33,24 @@ def _args(mode: str) -> argparse.Namespace:
 
 
 class DailyWebUpdateModeTest(unittest.TestCase):
+    def setUp(self):
+        dates = pd.date_range("2026-06-01", "2026-07-31")
+        frame = pd.DataFrame({"cal_date": dates.strftime("%Y%m%d"), "is_open": [int(d.weekday() < 5) for d in dates]})
+        clock = patch("market_data_clock._calendar", return_value=frame)
+        clock.start()
+        self.addCleanup(clock.stop)
+        pass
+
+    def test_stale_radar_does_not_publish_or_claim_success(self):
+        with (
+            patch.object(daily_web_update, "latest_history_trade_date", return_value="20260601"),
+            patch.object(daily_web_update, "run_command"),
+            patch.object(daily_web_update, "refresh_market_radar_snapshot") as refresh,
+        ):
+            with self.assertRaisesRegex(ValueError, "滞后|日历"):
+                daily_web_update.run_update(_args("radar"))
+        refresh.assert_not_called()
+
     def test_dragon_mode_updates_core_history_before_refreshing_dragon_pool(self):
         calls = []
 

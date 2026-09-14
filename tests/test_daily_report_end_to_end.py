@@ -4,6 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+import pandas as pd
+
 from daily_report.facts import FactSources, build_daily_report_facts
 from daily_report.selection_snapshot import build_selection_snapshot, get_selection_snapshot, save_selection_snapshot
 from daily_report.service import generate_daily_report
@@ -27,6 +29,9 @@ class DailyReportEndToEndTest(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             signal_db = Path(tmp) / "signals.db"
             history_db = Path(tmp) / "history.db"
+            calendar_dir = Path(tmp) / "cache"
+            calendar_dir.mkdir()
+            pd.DataFrame({"cal_date": ["20260722", "20260723"], "is_open": [1, 1]}).to_parquet(calendar_dir / "trade_cal.parquet", index=False)
             snapshot = build_selection_snapshot(
                 {
                     "trade_date": "20260722",

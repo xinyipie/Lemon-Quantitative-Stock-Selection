@@ -5054,3 +5054,19 @@ body[class*="page-"] .dense-table tbody tr:hover {
   .page-sectors .radar-situation-state { align-items: flex-start; flex-direction: column; text-align: left; }
   .page-sectors .radar-situation-grid { grid-template-columns: 1fr; }
 }
+
+.report-integrity-note {
+  padding: 16px 20px;
+  margin: 18px 0;
+  border-left: 4px solid #b7791f;
+  background: #fff8e8;
+  color: #59401c;
+}
+.report-integrity-note p { margin: 8px 0 0; }
+.report-evidence { margin: 8px 0 24px; padding: 12px 16px; background: #f5f7fa; border-radius: 8px; }
+.report-evidence summary, .radar-secondary summary { cursor: pointer; font-weight: 600; }
+.report-evidence-item { padding: 12px 0; overflow-wrap: anywhere; }
+.report-evidence-item + .report-evidence-item { border-top: 1px solid #dce2e9; }
+.report-evidence-item small { display: block; margin-top: 4px; }
+.report-evidence-item p { font-size: 14px; margin: 8px 0; }
+.radar-secondary > summary { padding: 12px 0; }

@@ -363,6 +363,28 @@ def download_trade_cal(pro, start_date: str, end_date: str, force: bool = False)
         logger.info(f"  ✓ trade_cal：{len(df)} 条")
 
 
+def _normalize_stock_basic(frame: pd.DataFrame) -> pd.DataFrame:
+    """仅规范股票主数据字段，保留缺失值与其他数值列的类型。"""
+    result = frame.copy()
+    for column in ('ts_code', 'symbol', 'name', 'industry', 'list_status',
+                   'basic_status_scope', 'list_date', 'delist_date', 'basic_snapshot_date'):
+        if column in result.columns:
+            values = result[column].astype('string').str.strip()
+            result[column] = values.mask(values.eq(''))
+    if 'symbol' in result.columns:
+        symbols = result['symbol'].str.replace(r'\.0+$', '', regex=True)
+        result['symbol'] = symbols.where(symbols.str.fullmatch(r'\d{1,6}', na=False)).str.zfill(6)
+    for column in ('list_date', 'delist_date', 'basic_snapshot_date'):
+        if column in result.columns:
+            values = result[column].str.replace(r'\.0+$', '', regex=True)
+            # 兼容旧缓存的时间戳表示；无效日期保持缺失，不伪造生命周期。
+            iso_dates = values.str.fullmatch(r'\d{4}-\d{2}-\d{2}(?:[ T]00:00:00)?', na=False)
+            values = values.where(~iso_dates, values.str[:10].str.replace('-', '', regex=False))
+            values = values.where(values.str.fullmatch(r'\d{8}', na=False))
+            result[column] = pd.to_datetime(values, format='%Y%m%d', errors='coerce').dt.strftime('%Y%m%d').astype('string')
+    return result
+
+
 def download_stock_basic(pro, force: bool = False):
     """下载全部上市状态，供历史截面按上市/退市日期还原股票范围。"""
     path = _static_path("stock_basic")
@@ -384,10 +406,13 @@ def download_stock_basic(pro, force: bool = False):
             frames.append(df)
 
     if not frames:
-        logger.warning("  stock_basic 所有状态均未返回数据，保留已有缓存")
-        return
+        raise RuntimeError("stock_basic 所有状态均未返回数据，下载失败；已有缓存保持不变")
 
-    incoming = pd.concat(frames, ignore_index=True, sort=False)
+    incoming = _normalize_stock_basic(pd.concat(frames, ignore_index=True, sort=False))
+    # 返回中存在非法主键时拒绝本次替换，避免丢失已有股票或生成伪完整快照。
+    if ('ts_code' not in incoming.columns
+            or not incoming['ts_code'].str.fullmatch(r'\d{6}\.(?:SH|SZ|BJ)', na=False).all()):
+        raise ValueError("stock_basic 返回无效 ts_code，下载失败；已有缓存与历史快照保持不变")
     incoming['basic_snapshot_date'] = _china_date()
     incoming['basic_status_scope'] = ','.join(completed_statuses)
     if completed_statuses == ['L', 'D', 'P']:
@@ -398,7 +423,7 @@ def download_stock_basic(pro, force: bool = False):
         _save(incoming, snapshot_path)
     else:
         logger.warning("  stock_basic 状态下载不完整，本次不生成历史时点快照")
-    existing = _read_existing_cache(path)
+    existing = _normalize_stock_basic(_read_existing_cache(path))
     if completed_statuses == ['L', 'D', 'P']:
         combined = incoming
     else:
@@ -406,7 +431,10 @@ def download_stock_basic(pro, force: bool = False):
     if 'ts_code' in combined.columns:
         combined = combined.drop_duplicates(subset=['ts_code'], keep='last').reset_index(drop=True)
     _save(combined, path)
-    logger.info(f"  ✓ stock_basic：{len(combined)} 只（状态范围：{','.join(completed_statuses)}）")
+    if completed_statuses == ['L', 'D', 'P']:
+        logger.info(f"  ✓ stock_basic：{len(combined)} 只（状态范围：{','.join(completed_statuses)}）")
+    else:
+        logger.warning(f"  stock_basic 仅部分状态更新：{','.join(completed_statuses)}，合并缓存 {len(combined)} 只；不是完整主数据快照")
 
 
 def download_index_basic(force: bool = False):

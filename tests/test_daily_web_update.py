@@ -1,4 +1,5 @@
-﻿import unittest
+import pandas as pd
+import unittest
 from argparse import Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,6 +19,11 @@ from daily_web_update import (
 
 class DailyWebUpdateTest(unittest.TestCase):
     def setUp(self):
+        dates = pd.date_range("2026-06-01", "2026-07-31")
+        frame = pd.DataFrame({"cal_date": dates.strftime("%Y%m%d"), "is_open": [int(d.weekday() < 5) for d in dates]})
+        clock = patch("market_data_clock._calendar", return_value=frame)
+        clock.start()
+        self.addCleanup(clock.stop)
         # 编排用例只检查调用契约，不访问真实雷达数据库或新闻服务。
         radar = patch("daily_web_update.refresh_market_radar_snapshot")
         radar.start()
@@ -148,7 +154,7 @@ class DailyWebUpdateTest(unittest.TestCase):
         )
 
         with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
-            "daily_web_update.latest_history_trade_date", side_effect=["20260615", "20260617"]
+            "daily_web_update.latest_history_trade_date", side_effect=["20260615", "20260622"]
         ):
             run_update(args)
 
@@ -156,7 +162,7 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertTrue(any("data_downloader.py --start 20260616 --end 20260622" in text for text in command_texts))
         self.assertTrue(any("history_db_importer.py" in text and "--start 20260616 --end 20260622" in text for text in command_texts))
 
-    def test_market_context_uses_effective_history_date_when_history_lags(self):
+    def test_market_context_is_blocked_when_history_lags(self):
         calls = []
         args = Namespace(
             end="20260622",
@@ -182,11 +188,10 @@ class DailyWebUpdateTest(unittest.TestCase):
         with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
             "daily_web_update.latest_history_trade_date", return_value="20260617"
         ):
-            run_update(args)
+            with self.assertRaisesRegex(ValueError, "滞后"):
+                run_update(args)
 
-        command_texts = [" ".join(command) for command in calls]
-        self.assertTrue(any("market_context_snapshot.py --date 20260617" in text for text in command_texts))
-        self.assertFalse(any("market_context_snapshot.py --date 20260622" in text for text in command_texts))
+        self.assertEqual(calls, [])
 
     def test_daily_mode_backfills_today_ai_explanations_after_main(self):
         calls = []
@@ -255,13 +260,13 @@ class DailyWebUpdateTest(unittest.TestCase):
         )
 
         with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
-            "daily_web_update.latest_history_trade_date", return_value="20260623"
+            "daily_web_update.latest_history_trade_date", return_value="20260624"
         ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar:
             run_update(args)
 
         command_texts = [" ".join(command) for command in calls]
         self.assertTrue(any("main.py" in text for text in command_texts))
-        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
+        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260624", dry_run=False)
 
     def test_fast_daily_mode_uses_core_download_and_skips_heavy_context_layers(self):
         calls = []
@@ -398,7 +403,7 @@ class DailyWebUpdateTest(unittest.TestCase):
         )
 
         with patch("daily_web_update.run_command", side_effect=lambda command, dry_run=False: calls.append(command)), patch(
-            "daily_web_update.latest_history_trade_date", return_value="20260623"
+            "daily_web_update.latest_history_trade_date", return_value="20260624"
         ), patch("daily_web_update.refresh_market_radar_snapshot") as refresh_radar, patch(
             "daily_web_update._dragon_limit_pool_collector_path"
         ) as dragon_path:
@@ -409,12 +414,12 @@ class DailyWebUpdateTest(unittest.TestCase):
         self.assertIn("data_downloader.py --start 20260624 --end 20260624 --core-only", command_texts[0])
         self.assertIn("history_db_importer.py", command_texts[1])
         self.assertIn("daily daily_basic moneyflow stock_basic", command_texts[1])
-        self.assertIn("market_context_snapshot.py --date 20260623", command_texts[2])
+        self.assertIn("market_context_snapshot.py --date 20260624", command_texts[2])
         self.assertIn("daily_research_report.py", command_texts[3])
         self.assertIn("--slot morning", command_texts[3])
         self.assertIn("--retry-if-missing", command_texts[3])
         self.assertFalse(any("main.py" in text for text in command_texts))
-        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260623", dry_run=False)
+        refresh_radar.assert_called_once_with(args.history_db, args.signal_db, "20260624", dry_run=False)
         dragon_path.assert_not_called()
 
     def test_daily_mode_refreshes_dragon_limit_pool_after_main_when_research_tree_exists(self):
