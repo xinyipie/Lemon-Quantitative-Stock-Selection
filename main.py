@@ -2478,7 +2478,7 @@ def get_net_profit_growth_batch(
     return result
 
 
-def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str, Dict]:
+def get_financial_data_batch(codes: List[str], trade_date: str = '', *, include_income: bool = True) -> Dict[str, Dict]:
     """
     批量获取财务数据（ROE、营收增长率、资产负债率）。
     使用截至 trade_date 已公告的最新一期财报数据。
@@ -2542,7 +2542,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
 
         # 批量获取利润表（营收增长率）
         all_income_dfs = []
-        if is_offline:
+        if is_offline and include_income:
             try:
                 df = pro.income(
                     ts_code='',
@@ -2552,7 +2552,7 @@ def get_financial_data_batch(codes: List[str], trade_date: str = '') -> Dict[str
                     all_income_dfs.append(df)
             except Exception as e:
                 logger.warning(f"离线income读取失败：{e}")
-        else:
+        elif include_income:
             for i in range(0, len(ts_codes), batch_size):
                 batch = ts_codes[i:i + batch_size]
                 if i > 0:
@@ -3906,7 +3906,7 @@ def select_stock_pool(stocks: pd.DataFrame, ma_dict: Dict, trade_date: str, fina
 def select_longterm_quality_pool(stocks, financial_dict, profit_growth_dict, trade_date):
     """独立质量观察：沿用生命周期财务边界，择时条件不作为观察准入。"""
     import math
-    diagnostic = dict(input_count=len(stocks), missing_financial_count=0,
+    diagnostic = dict(input_count=len(stocks), missing_financial_count=0, missing_financial_codes=[],
                       quality_rejected_count=0, quality_count=0)
     records = []
     for _, row in stocks.iterrows():
@@ -3919,6 +3919,7 @@ def select_longterm_quality_pool(stocks, financial_dict, profit_growth_dict, tra
                       netprofit_yoy=_safe_optional_float(profit_growth_dict.get(code, {}).get('netprofit_yoy')))
         if any(value is None or not math.isfinite(value) for value in values.values()):
             diagnostic['missing_financial_count'] += 1
+            diagnostic['missing_financial_codes'].append(format_code(code))
             continue
         large = values['total_mv'] >= 800000
         # 大市值使用原防御质量边界，中小市值使用原弹性质量边界；不设大市值上限。
@@ -3962,8 +3963,9 @@ def attach_longterm_quality_observation(selection, *, target_date=None):
         min_volume_ratio=0, trade_date=trade_date, require_positive_flow=False)
     if actual_date != trade_date or stocks.empty:
         raise ValueError('长线观察基础行情缺失或日期错位，保留上次观察池')
-    financial = get_financial_data_batch(stocks['code'].tolist(), trade_date=trade_date)
-    growth = get_net_profit_growth_batch(stocks['code'].tolist(), trade_date=trade_date)
+    financial = get_financial_data_batch(stocks['code'].tolist(), trade_date=trade_date, include_income=False)
+    # 同一次已公告财报提供ROE和利润同比，避免重复请求及两次数据口径不一致。
+    growth = {code: {'netprofit_yoy': values.get('netprofit_yoy')} for code, values in financial.items()}
     pool, diagnostic = select_longterm_quality_pool(stocks, financial, growth, trade_date)
     if diagnostic['missing_financial_count'] == diagnostic['input_count']:
         raise ValueError('长线观察财务数据全部缺失，保留上次观察池')
@@ -6115,6 +6117,13 @@ def main():
             f"观察{len(longterm_watch_pool)}只，精英提醒{len(longterm_elite_pool)}只"
         )
 
+    if include_longterm:
+        from longterm_scan import publish_longterm_scan
+        from longterm_live_pipeline import LongtermLiveWatchlists
+        scan_details = publish_longterm_scan(trade_date, sel['longterm_diagnostics'],
+                             LongtermLiveWatchlists(longterm_watch_pool, longterm_elite_pool))
+        if scan_details['status'] == 'failed':
+            raise ValueError(scan_details['reason'])
     _persist_daily_selection_snapshot(
         sel,
         include_longterm=include_longterm,
@@ -6311,11 +6320,6 @@ def main():
         None,
         None,
     )
-    if include_longterm:
-        from longterm_scan import publish_longterm_scan
-        from longterm_live_pipeline import LongtermLiveWatchlists
-        publish_longterm_scan(trade_date, sel['longterm_diagnostics'],
-                             LongtermLiveWatchlists(longterm_watch_pool, longterm_elite_pool))
     _persist_main_ai_observations(
         trade_date,
         ai_analysis,

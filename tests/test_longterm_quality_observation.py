@@ -18,6 +18,8 @@ def inputs():
                  '000001': {'roe': float('nan'), 'debt_ratio': 40},
                  '000002': {'roe': -1, 'debt_ratio': 40}}
     growth = {code: {'netprofit_yoy': 20} for code in stocks.code}
+    for code in financial:
+        financial[code]['netprofit_yoy'] = growth[code]['netprofit_yoy']
     return stocks, financial, growth
 
 
@@ -183,3 +185,45 @@ def test_formal_sync_failure_is_not_reported_as_individual_stock_failure():
         longterm_profile='longterm_quality_lifecycle_v18_market_sync', diagnostics=diagnostic)
     assert diagnostic['status'] == 'not_triggered'
     assert '市场同步' in diagnostic['reason']
+
+
+def test_missing_active_financial_data_does_not_remove_old_observation(tmp_path):
+    from longterm_scan import publish_longterm_scan, get_latest_longterm_scan
+    from web_app.services.signal_service import get_active_longterm_pool
+    stocks, financial, growth = inputs()
+    pool, diagnostic = stock_main.select_longterm_quality_pool(stocks, financial, growth, '20260911')
+    db = tmp_path / 'signals.db'
+    publish_longterm_scan('20260911', diagnostic,
+                         build_live_watchlists(pd.DataFrame(), '20260911', quality_pool=pool), db_path=db)
+    diagnostic = {'status': 'completed_empty', 'missing_financial_codes': ['600001.SH']}
+    details = publish_longterm_scan('20260914', diagnostic,
+                                   build_live_watchlists(pd.DataFrame(), '20260914'), db_path=db)
+    assert details['status'] == 'failed'
+    assert get_active_longterm_pool(db)[0]['last_seen_date'] == '20260911'
+
+
+def test_formal_elite_keeps_confirmation_after_storage_dedup(tmp_path):
+    from longterm_scan import publish_longterm_scan
+    from web_app.services.signal_service import get_active_longterm_pool
+    formal = pd.DataFrame([dict(code='600001', name='确认样本', industry='制造',
+        longterm_score=99, industry_rs=15, drawdown_from_high=10,
+        price_vs_ma60=8, turnover=2, pb=2, close=20)])
+    lists = build_live_watchlists(formal, '20260911', quality_pool=pd.DataFrame())
+    assert len(lists.elite) == 1
+    db = tmp_path / 'signals.db'
+    publish_longterm_scan('20260911', {'status': 'completed_with_results'}, lists, db_path=db)
+    assert get_active_longterm_pool(db)[0]['trend_confirmed'] is True
+
+
+def test_quality_financial_fetch_can_skip_income_and_keep_same_report_growth(monkeypatch):
+    import inspect
+    assert 'include_income' in inspect.signature(stock_main.get_financial_data_batch).parameters
+    class FinancialPro:
+        def fina_indicator(self, **kwargs):
+            return pd.DataFrame([dict(ts_code='600001.SH', ann_date='20260820', end_date='20260630',
+                                     roe=12, debt_to_assets=40, netprofit_yoy=25)])
+        def income(self, **kwargs):
+            raise AssertionError('质量观察无需另拉利润表')
+    monkeypatch.setattr(stock_main, 'pro', FinancialPro())
+    data = stock_main.get_financial_data_batch(['600001'], '20260911', include_income=False)
+    assert data['600001']['netprofit_yoy'] == 25

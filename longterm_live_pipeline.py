@@ -42,6 +42,9 @@ def build_live_watchlists(
         if not watch.empty:
             watch['trend_confirmed'] = True
             watch['observation_reason'] = '已通过原v18趋势确认；仍需人工研究'
+        if not confirmed.elite.empty:
+            confirmed.elite['trend_confirmed'] = True
+            confirmed.elite['observation_reason'] = '已通过原v18趋势确认与Elite条件；仍需人工研究'
         quality = _normalize_live_pool(quality_pool, trade_date)
         if not quality.empty:
             used = set(watch['ts_code']) if not watch.empty else set()

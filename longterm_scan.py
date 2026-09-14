@@ -26,6 +26,14 @@ def publish_longterm_scan(trade_date, diagnostic, lists, *, db_path='data/stock_
                'scanned_at': datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(timespec='seconds')}
     store = SignalStore(db_path)
     try:
+        missing = set(details.get('missing_financial_codes') or [])
+        active = {row[0] for row in store.conn.execute(
+            "select ts_code from pool_state where mode='longterm' and profile='longterm_watch' and state='active'")}
+        retained = set(lists.watchlist['ts_code']) if lists is not None and not lists.watchlist.empty else set()
+        missing_active = sorted((missing & active) - retained)
+        if missing_active:
+            details.update(status='failed', missing_active_codes=missing_active,
+                           reason='原观察股财务缺失，保留旧池：' + '、'.join(missing_active))
         # 失败只写诊断，绝不把上次有效候选当成本次全部退出。
         if lists is not None and str(details.get('status', '')).startswith('completed_'):
             for profile, frame in [('longterm_watch', lists.watchlist), ('longterm_elite', lists.elite)]:
@@ -73,6 +81,8 @@ def run_scan(target_date=None):
         lists.watchlist, lists.elite = stock_main._apply_longterm_elite_cooldown(
             lists.watchlist, lists.elite, trade_date)
         details = publish_longterm_scan(trade_date, selection['longterm_diagnostics'], lists)
+        if details['status'] == 'failed':
+            raise ValueError(details['reason'])
         print(json.dumps(details, ensure_ascii=False))
         if not lists.watchlist.empty:
             print(lists.watchlist[['ts_code', 'name', 'industry', 'trend_confirmed']].to_string(index=False))
