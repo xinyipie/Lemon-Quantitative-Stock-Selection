@@ -128,6 +128,16 @@ def _index_cache_min_rows() -> int:
     return min(20, len(INDEX_CODES))
 
 
+def _has_benchmark_buffer(path, date):
+    """历史预热只检查两项基准；不据此宣称申万行业数据齐全。"""
+    frame = _read_existing_cache(path)
+    if not {'ts_code', 'trade_date', 'close'}.issubset(frame.columns):
+        return False
+    valid = frame.loc[(frame['trade_date'].astype(str) == date)
+                      & (pd.to_numeric(frame['close'], errors='coerce') > 0)]
+    return {'000001.SH', '000300.SH'}.issubset(set(valid['ts_code']))
+
+
 def _save(df: pd.DataFrame, path: str):
     """先写同目录临时文件再原子替换，避免直接覆盖异属主缓存失败。"""
     target_path = os.path.abspath(os.fspath(path))
@@ -218,6 +228,7 @@ def _download_financial_batches(pro, ts_codes, existing, incremental_start, endp
     """批量拉取财务增量，显式限制每段日期且失败时不发布部分缓存。"""
     all_dfs = []
     finish = datetime.strptime(_china_date(), '%Y%m%d')
+    requests_done = 0
     for codes, group_start in _financial_query_groups(ts_codes, existing, incremental_start):
         windows = [{}]
         if group_start:
@@ -235,6 +246,9 @@ def _download_financial_batches(pro, ts_codes, existing, incremental_start, endp
                     raise RuntimeError(f'财务 {endpoint} 批次请求失败，保留原缓存；本次更新未完成')
                 if not df.empty:
                     all_dfs.append(df)
+                requests_done += 1
+                if requests_done % 20 == 0:
+                    logger.info(f'  财务 {endpoint} 已完成 {requests_done} 个分段批次')
                 time.sleep(0.5)
     return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
@@ -793,7 +807,7 @@ def download_income(pro, force: bool = False):
 
 def download_daily_range(pro, trade_dates: List[str], force: bool = False,
                          only_new: bool = False, core_only: bool = False,
-                         market_core: bool = False):
+                         market_core: bool = False, refresh_start: str | None = None):
     """
     批量下载每日数据。
     only_new=True 时只下载新增的三个接口（top_list/top_inst/margin_detail），
@@ -847,6 +861,10 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
             # index_daily
             if not core_only:
                 need_idx = force or not _cache_has_rows(_daily_path("index_daily", date), min_rows=_index_cache_min_rows())
+                if (need_idx and not force and refresh_start and date < refresh_start
+                        and _has_benchmark_buffer(_daily_path('index_daily', date), date)):
+                    logger.info(f'  ↩ {date} 复用历史基准预热；行业指数不足仍按缺失处理')
+                    need_idx = False
                 if need_idx:
                     if download_index_daily_one_date(pro, date, force):
                         index_ok += 1
@@ -991,6 +1009,7 @@ def run_download(start_date: str, end_date: str, force: bool = False,
         only_new=only_new,
         core_only=core_only,
         market_core=market_core,
+        refresh_start=start_date,
     )
     daily_ok, basic_ok, mf_ok, idx_ok, fund_ok, tl_ok, ti_ok, mg_ok = results
     if not only_new:

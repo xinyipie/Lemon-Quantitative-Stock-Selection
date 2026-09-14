@@ -985,12 +985,28 @@ def _select_longterm_result_view(result_context: dict, view: str) -> list[dict]:
 
 
 @app.get("/longterm")
-def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed"):
+def longterm_pool(request: Request, start: str = "", end: str = "", page: str = "1", view: str = "completed",
+                  run_start: str = "", run_end: str = "", run_page: str = "1"):
+    from datetime import datetime, timedelta
     from longterm_scan import get_latest_longterm_scan
     scan_diagnostic = get_latest_longterm_scan(DEFAULT_SIGNAL_DB_PATH)
     pool = get_active_longterm_pool(DEFAULT_SIGNAL_DB_PATH)
     buckets = split_longterm_pool(pool)
-    runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=12)
+    runs = get_longterm_runs(DEFAULT_SIGNAL_DB_PATH, limit=20)
+    run_date_error = validate_date_range(run_start, run_end)
+    run_filters = {"start": normalize_date_input(run_start), "end": normalize_date_input(run_end)}
+    if not run_start and not run_end:
+        today = datetime.now().date()
+        run_filters = {"start": (today - timedelta(days=29)).strftime("%Y%m%d"), "end": today.strftime("%Y%m%d")}
+    try:
+        run_page_number = max(1, int(run_page))
+    except (ValueError, TypeError):
+        run_page_number = 1
+    run_rows = [] if run_date_error else get_longterm_runs(
+        DEFAULT_SIGNAL_DB_PATH, limit=21, offset=(run_page_number - 1) * 20,
+        start=run_filters["start"] or None, end=run_filters["end"] or None,
+    )
+    run_page_info = {"page": run_page_number, "has_next": len(run_rows) > 20}
     events = get_longterm_events(DEFAULT_SIGNAL_DB_PATH, history_db=DEFAULT_HISTORY_DB_PATH, limit=30)
     audit_summary = get_longterm_audit_summary(DEFAULT_SIGNAL_DB_PATH, limit=12)
     normalized_start = normalize_date_input(start)
@@ -1030,6 +1046,10 @@ def longterm_pool(request: Request, start: str = "", end: str = "", page: str = 
             "run_funnel": run_funnel,
             "pool_status": pool_status,
             "scan_diagnostic": scan_diagnostic,
+            "run_rows": run_rows[:20],
+            "run_filters": run_filters,
+            "run_date_error": run_date_error,
+            "run_page_info": run_page_info,
             "page_time": build_page_time_context(runs[0].get("trade_date") if runs else None),
             "filters": sample_filters,
             "date_error": date_error,

@@ -9,7 +9,7 @@ class ScheduledUpdateTest(unittest.TestCase):
         self.assertIn("web_app.services.update_worker", script)
         self.assertIn("data/web_update_status.json", script)
         self.assertIn("logs/daily_full_update.log", script)
-        self.assertIn('daily_web_update.py", "--mode", "full"', script)
+        self.assertIn('daily_web_update.py", "--mode", "daily"', script)
         self.assertIn('"--skip-daily-report"', script)
 
     def test_market_radar_update_persists_worker_output(self):
@@ -20,7 +20,7 @@ class ScheduledUpdateTest(unittest.TestCase):
 
     def test_full_retry_only_runs_when_today_full_update_is_not_finished(self):
         script = Path("deploy/stock-daily-full-retry").read_text(encoding="utf-8")
-        self.assertIn('needs_full_update_retry()', script)
+        self.assertIn('needs_daily_update_retry()', script)
         self.assertIn("/usr/local/sbin/stock-daily-full-update", script)
 
     def test_daily_report_has_independent_status_and_log(self):

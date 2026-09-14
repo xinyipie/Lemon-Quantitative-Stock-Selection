@@ -10,5 +10,30 @@
       <div class="filter-summary" data-update-message>当前状态：尚未运行一键更新。</div>
     {% endif %}
     <pre class="update-error" data-update-error hidden></pre>
+    {% if update_status.mode_statuses %}
+    <p>下面按任务分别显示执行状态。某项成功不代表其他任务已完成；未记录不等于未执行。</p>
+    <div class="table-shell"><table class="dense-table">
+      <thead><tr><th>任务</th><th>执行状态</th><th>最近启动</th><th>最近结束</th></tr></thead>
+      <tbody>{% for mode, item in update_status.mode_statuses.items() %}
+      <tr><td>{{ item.mode_label }}</td><td>{{ item.status_label }}</td><td>{{ item.started_at or '—' }}</td><td>{{ item.finished_at or '—' }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% if update_status.schedule %}
+    <details><summary>每天如何更新 · 下次计划（北京时间）</summary>
+      <p>以下为已核验的服务器计划；重试仅在需要时执行。实际是否成功请看任务状态。</p>
+      <div class="table-shell"><table class="dense-table"><thead><tr><th>任务</th><th>频率</th><th>下次计划</th></tr></thead><tbody>
+      {% for item in update_status.schedule %}<tr><td>{{ item.label }}</td><td>{{ item.frequency }}</td><td>{{ item.next_run }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+    {% endif %}
+    {% if update_status.history %}
+    <details><summary>任务执行记录 · 最近20次</summary>
+      <p>记录任务成功与失败；与下方按行情日期统计的选股记录不同。</p>
+      <div class="table-shell"><table class="dense-table"><thead><tr><th>任务</th><th>开始</th><th>结束</th><th>结果</th></tr></thead><tbody>
+      {% for item in update_status.history %}<tr><td>{{ {'full':'完整重算','daily':'日常更新','radar':'市场雷达','dragon':'行情与龙头池'}.get(item.mode, item.mode) }}</td><td>{{ item.started_at or '—' }}</td><td>{{ item.finished_at or '—' }}</td><td>{{ '成功' if item.state == 'finished' else '失败' }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+    {% endif %}
   </div>
 </section>

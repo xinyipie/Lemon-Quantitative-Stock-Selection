@@ -10,9 +10,9 @@
 </header>
 
 <nav class="page-section-nav" aria-label="长线池页面分区">
-  <a href="#current-pool">当前池</a>
+  <a href="#current-pool">实时观察跟踪</a>
   <a href="#lifecycle">生命周期</a>
-  <a href="#history-audit">历史验证</a>
+  <a href="#history-audit">历史策略验证</a>
 </nav>
 
 {% include "partials/update_status_panel.html" %}
@@ -104,6 +104,8 @@
 </section>
 {% endif %}
 
+<section class="panel"><h2>实时观察跟踪 · 进行中（{{ pool|length }} 条）</h2>
+<p>范围：当前生命周期池内的 active 记录，不受历史样本日期与状态筛选影响。已退出记录请查看生命周期事件；这里不提供完整退出档案。</p></section>
 {% if pool %}
 <section class="pool-board full">
   <div class="pool-column elite">
@@ -149,51 +151,71 @@
 {% endif %}
 
 <section class="panel">
+  <div class="panel-head"><h2>实时观察跟踪 · 全部进行中记录</h2></div>
+  {% if pool %}
+  <div class="table-shell" role="region" aria-label="实时观察跟踪 · 全部进行中记录" tabindex="0"><table class="dense-table">
+    <thead><tr><th>股票</th><th>行业</th><th>策略版本</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
+    <tbody>
+    {% for item in pool %}
+    <tr>
+      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
+      <td>{{ item.industry or '-' }}</td>
+      <td>{{ item.profile }}</td>
+      <td>{{ item.first_seen_date|fmt_date }}</td>
+      <td>{{ item.last_seen_date|fmt_date }}</td>
+      <td>{{ "%.1f"|format(item.latest_score or 0) }}</td>
+      <td>{{ "%.1f"|format(item.highest_score or 0) }}</td>
+      <td>{{ item.days_in_pool }}</td>
+      <td class="reason">{{ item.last_reason or '-' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
+  {% endif %}
+</section>
+
+<section class="panel">
   <div class="panel-head">
     <div>
-      <h2>最近运行</h2>
-      <p>运行记录中的 0 表示未写入候选；是否真正完成扫描，请结合上方诊断与行情日期判断。</p>
+      <h2>运行日志</h2>
+      <p>默认最近30个自然日，按运行交易日筛选，每页最多20条记录（不是20个交易日）；同一交易日、同一策略版本仅保留最后一次运行。本表仅保存成功写入的策略记录；任务失败看上方状态。0仅表示未写入候选；是否成功完成扫描请看扫描诊断。</p>
     </div>
   </div>
-  {% if runs %}
-  <div class="timeline-list compact-timeline">
-    {% for item in runs[:5] %}
-    <div class="timeline-item {{ 'ok' if item.signal_count else 'muted' }}">
-      <strong>{{ item.trade_date|fmt_date }}</strong>
-      <span>{{ item.profile_label }} · {{ item.status_label }}{% if item.signal_count %} {{ item.signal_count }} 只{% endif %}</span>
-      <small>{{ item.source }}{% if item.label %} / {{ item.label }}{% endif %} · {{ item.created_at }}</small>
-    </div>
-    {% endfor %}
-  </div>
-  <details class="detail-fold">
-    <summary>查看完整运行日志</summary>
-    <table class="dense-table">
-      <thead><tr><th>运行日</th><th>策略层级</th><th>内部版本</th><th>来源</th><th>入池数</th><th>状态</th><th>创建时间</th></tr></thead>
-      <tbody>
-      {% for item in runs %}
-      <tr>
-        <td>{{ item.trade_date|fmt_date }}</td>
-        <td>{{ item.profile_label }}</td>
-        <td>{{ item.profile }}</td>
-        <td>{{ item.source }}{% if item.label %} / {{ item.label }}{% endif %}</td>
-        <td><strong>{{ item.signal_count }}</strong></td>
-        <td><span class="tag {{ 'ok' if item.signal_count else '' }}">{{ item.status_label }}</span></td>
-        <td>{{ item.created_at }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </details>
-  {% else %}
-  <div class="empty-state soft">暂无长线运行记录。</div>
-  {% endif %}
+  <form class="filter-bar compact-filter" action="{{ app_path(request, '/longterm') }}" method="get">
+    <input type="hidden" name="start" value="{{ filters.start }}">
+    <input type="hidden" name="end" value="{{ filters.end }}">
+    <input type="hidden" name="view" value="{{ selected_view }}">
+    <label>运行开始日 <input type="date" name="run_start" value="{{ run_filters.start|fmt_date_input }}"></label>
+    <label>运行结束日 <input type="date" name="run_end" value="{{ run_filters.end|fmt_date_input }}"></label>
+    <button type="submit">筛选运行日志</button>
+    <a href="{{ request.url.include_query_params(run_start='', run_end='', run_page=1) }}">重置日志</a>
+  </form>
+  <p class="filter-summary">运行日志范围：{{ run_filters.start|fmt_date if run_filters.start else "最早" }} → {{ run_filters.end|fmt_date if run_filters.end else "最新" }}</p>
+  {% if run_date_error %}<p class="filter-summary warn" role="alert">{{ run_date_error }}</p>{% endif %}
+  <div class="table-shell"><table class="dense-table">
+    <thead><tr><th>运行日</th><th>策略层级</th><th>内部版本</th><th>来源</th><th>写入候选数</th><th>状态</th><th>创建时间</th></tr></thead>
+    <tbody>
+    {% for item in run_rows %}
+    <tr><td>{{ item.trade_date|fmt_date }}</td><td>{{ item.profile_label }}</td><td>{{ item.profile }}</td>
+      <td>{{ item.source }}{% if item.label %} / {{ item.label }}{% endif %}</td>
+      <td>{{ item.signal_count }}</td><td>{{ item.status_label }}</td><td>{{ item.created_at }}</td></tr>
+    {% else %}<tr><td colspan="7">当前运行日期范围与页码下暂无记录。</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <nav class="pagination" aria-label="运行日志分页">
+    <span>第 {{ run_page_info.page }} 页 · 本页 {{ run_rows|length }} 条</span>
+    {% if run_page_info.page > 1 %}<a href="{{ request.url.include_query_params(run_page=run_page_info.page - 1) }}">上一页</a>{% endif %}
+    {% if run_page_info.has_next %}<a href="{{ request.url.include_query_params(run_page=run_page_info.page + 1) }}">下一页</a>{% endif %}
+  </nav>
 </section>
 
 <section id="lifecycle" class="panel">
   <div class="panel-head">
     <div>
       <h2>生命周期事件</h2>
-      <p>记录股票何时新入池、升级强提醒、降级观察或移出池。这里解释池子为什么变多、变少或变空。</p>
+      <p>显示最近30条事件，记录新入池、升级强提醒、降级观察或移出池，不是完整已退出档案。</p>
     </div>
   </div>
   <div class="table-shell" role="region" aria-label="长线生命周期事件" tabindex="0"><table class="dense-table">
@@ -219,7 +241,7 @@
 <section id="history-audit" class="panel">
   <div class="panel-head">
     <div>
-      <h2>历史长线池验证</h2>
+      <h2>历史策略验证 · 半年度总览</h2>
       <p>这里是半年度总览，不受下方入池日期筛选影响；用于判断长线池规则在不同阶段的整体质量。</p>
       <p class="filter-summary warn">历史统计尚未按本次修复重算，仅供复盘参考。</p>
     </div>
@@ -248,12 +270,12 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>长线收益结果</h2>
-      <p>先看最终赚了多少、是否跑赢沪深300、过程中承受了多大回撤，再展开10/40/80日收益路径。</p>
+      <h2>历史策略验证 · 长线收益结果</h2>
+      <p>范围：导入的历史策略验证样本，不含上方实时 active 观察记录。“待满80日”表示历史样本尚无80日收益，不代表仍在实时池。默认读取最新100条；指定入池日期时最多读取1000条，再按结果筛选与分页，统计仅覆盖已读取样本。</p>
     </div>
   </div>
   <div class="longterm-result-summary-grid">
-    <article><span>80日完成样本</span><strong>{{ result_context.completed_count }}</strong><small>当前观察 {{ result_context.current_count }} 条</small></article>
+    <article><span>80日完成样本</span><strong>{{ result_context.completed_count }}</strong><small>历史待满80日 {{ result_context.current_count }} 条</small></article>
     <article><span>80日平均收益</span><strong class="{{ result_context.avg_ret_tone }}">{{ result_context.avg_ret_text }}</strong><small>最终绝对收益</small></article>
     <article><span>80日胜率</span><strong>{{ result_context.win_rate_text }}</strong><small>最终收益大于0</small></article>
     <article><span>跑赢沪深300</span><strong>{{ result_context.outperform_rate_text }}</strong><small>超额收益大于0</small></article>
@@ -268,8 +290,8 @@
 
   {% if current_audit_samples %}
   <div class="longterm-current-head">
-    <div><strong>当前仍在观察</strong><span>这些样本尚未走满80个交易日，收益会继续变化。</span></div>
-    <a href="{{ request.url.include_query_params(view='current', page=1) }}">查看全部进行中</a>
+    <div><strong>历史样本待满80日</strong><span>这些样本尚未走满80个交易日，收益会继续变化。</span></div>
+    <a href="{{ request.url.include_query_params(view='current', page=1) }}">查看历史待满80日</a>
   </div>
   <div class="longterm-current-grid">
     {% for item in current_audit_samples %}
@@ -287,16 +309,19 @@
     <input id="longterm-start" type="date" name="start" value="{{ (filters.get('start', '') if filters else '')|fmt_date_input }}">
     <input id="longterm-end" type="date" name="end" value="{{ (filters.get('end', '') if filters else '')|fmt_date_input }}">
     <input type="hidden" name="view" value="{{ selected_view }}">
+    <input type="hidden" name="run_start" value="{{ run_filters.start }}">
+    <input type="hidden" name="run_end" value="{{ run_filters.end }}">
+    <input type="hidden" name="run_page" value="{{ run_page_info.page }}">
     <button type="submit">筛选</button>
-    <a class="ghost-button" href="{{ app_path(request, '/longterm') }}">重置</a>
+    <a class="ghost-button" href="{{ request.url.include_query_params(start='', end='', view='completed', page=1) }}">重置</a>
   </form>
   <p class="filter-summary warn" role="alert" data-date-range-error {% if not date_error %}hidden{% endif %}>{{ date_error }}</p>
   <nav class="longterm-view-tabs" aria-label="长线样本快捷筛选">
     <a class="{{ 'active' if selected_view == 'completed' else '' }}" href="{{ request.url.include_query_params(view='completed', page=1) }}">已完成</a>
-    <a class="{{ 'active' if selected_view == 'current' else '' }}" href="{{ request.url.include_query_params(view='current', page=1) }}">进行中</a>
+    <a class="{{ 'active' if selected_view == 'current' else '' }}" href="{{ request.url.include_query_params(view='current', page=1) }}">待满80日</a>
     <a class="{{ 'active' if selected_view == 'outperform' else '' }}" href="{{ request.url.include_query_params(view='outperform', page=1) }}">跑赢基准</a>
     <a class="{{ 'active' if selected_view == 'risk' else '' }}" href="{{ request.url.include_query_params(view='risk', page=1) }}">高风险</a>
-    <a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ request.url.include_query_params(view='all', page=1) }}">全部</a>
+    <a class="{{ 'active' if selected_view == 'all' else '' }}" href="{{ request.url.include_query_params(view='all', page=1) }}">全部历史样本</a>
   </nav>
   <div class="filter-summary">
     当前明细筛选：
@@ -341,31 +366,7 @@
   </nav>
 </section>
 
-<section class="panel">
-  <div class="panel-head"><h2>全部 active 长线记录</h2></div>
-  {% if pool %}
-  <div class="table-shell" role="region" aria-label="全部 active 长线记录" tabindex="0"><table class="dense-table">
-    <thead><tr><th>股票</th><th>行业</th><th>策略版本</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
-    <tbody>
-    {% for item in pool %}
-    <tr>
-      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
-      <td>{{ item.industry or '-' }}</td>
-      <td>{{ item.profile }}</td>
-      <td>{{ item.first_seen_date|fmt_date }}</td>
-      <td>{{ item.last_seen_date|fmt_date }}</td>
-      <td>{{ "%.1f"|format(item.latest_score or 0) }}</td>
-      <td>{{ "%.1f"|format(item.highest_score or 0) }}</td>
-      <td>{{ item.days_in_pool }}</td>
-      <td class="reason">{{ item.last_reason or '-' }}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-  {% else %}
-  <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
-  {% endif %}
-</section>
+
 <script>
 (() => {
   const form = document.querySelector("[data-date-range-form]");

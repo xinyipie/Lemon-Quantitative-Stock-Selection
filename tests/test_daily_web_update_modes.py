@@ -33,6 +33,19 @@ def _args(mode: str) -> argparse.Namespace:
 
 
 class DailyWebUpdateModeTest(unittest.TestCase):
+    def test_daily_mode_refreshes_existing_outcomes_without_research_backtests(self):
+        args = _args('daily')
+        args.dry_run = True
+        args.skip_short_review = False
+        args.skip_longterm_audit = False
+        with patch.object(daily_web_update, 'run_command') as run:
+            daily_web_update.run_update(args)
+        scripts = [call.args[0][1] for call in run.call_args_list]
+        self.assertIn('short_signal_outcome_refresher.py', scripts)
+        self.assertIn('longterm_outcome_refresher.py', scripts)
+        self.assertNotIn('test.py', scripts)
+        self.assertNotIn('longterm_pool_quality_audit.py', scripts)
+
     def setUp(self):
         dates = pd.date_range("2026-06-01", "2026-07-31")
         frame = pd.DataFrame({"cal_date": dates.strftime("%Y%m%d"), "is_open": [int(d.weekday() < 5) for d in dates]})

@@ -287,7 +287,10 @@ def build_default_signal_start(latest_trade_date: str | None, days: int = 100) -
     return (latest - timedelta(days=max(days, 0))).strftime("%Y%m%d")
 
 
-def get_longterm_runs(signal_db: str | Path = DEFAULT_DB_PATH, limit: int = 20) -> list[dict]:
+def get_longterm_runs(
+    signal_db: str | Path = DEFAULT_DB_PATH, limit: int = 20,
+    start: str | None = None, end: str | None = None, offset: int = 0,
+) -> list[dict]:
     path = Path(signal_db)
     if not path.exists():
         return []
@@ -303,6 +306,8 @@ def get_longterm_runs(signal_db: str | Path = DEFAULT_DB_PATH, limit: int = 20) 
             from signal_runs r
             left join signal_pool p on p.run_id = r.run_id
             where r.mode = 'longterm'
+              and (? is null or r.trade_date >= ?)
+              and (? is null or r.trade_date <= ?)
               and r.run_id in (
                   select max(run_id)
                   from signal_runs
@@ -311,9 +316,9 @@ def get_longterm_runs(signal_db: str | Path = DEFAULT_DB_PATH, limit: int = 20) 
               )
             group by r.run_id, r.trade_date, r.profile, r.source, r.label, r.created_at
             order by r.trade_date desc, r.run_id desc
-            limit ?
+            limit ? offset ?
             """,
-            (limit,),
+            (start, start, end, end, limit, max(0, offset)),
         ).fetchall()
         return [_decorate_longterm_run(dict(row)) for row in rows]
     finally:
@@ -536,14 +541,14 @@ def split_longterm_pool(pool: list[dict]) -> dict[str, list[dict]]:
 
 def _decorate_longterm_run(item: dict) -> dict:
     signal_count = int(item.get("signal_count") or 0)
-    item["status_label"] = "有入池标的" if signal_count else "无入池标的"
+    item["status_label"] = "有入池标的" if signal_count else "未写入候选（扫描状态见诊断）"
     item["profile_label"] = _longterm_profile_label(item.get("profile"))
     return item
 
 
 def _decorate_signal_run(item: dict) -> dict:
     signal_count = int(item.get("signal_count") or 0)
-    item["status_label"] = "有入池标的" if signal_count else "无入池标的"
+    item["status_label"] = "有入池标的" if signal_count else "未写入候选（扫描状态见诊断）"
     item["source_label"] = "历史回测" if item.get("source") == "backtest_ic_short" else "实盘记录"
     return item
 

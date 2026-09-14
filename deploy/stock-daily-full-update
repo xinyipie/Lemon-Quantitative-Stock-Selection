@@ -10,7 +10,7 @@ set -a
 set +a
 
 mkdir -p /opt/stock/logs
-command_json='["/opt/stock/.venv/bin/python", "daily_web_update.py", "--mode", "full", "--skip-daily-report"]'
+command_json='["/opt/stock/.venv/bin/python", "daily_web_update.py", "--mode", "daily", "--skip-daily-report"]'
 exec /opt/stock/.venv/bin/python -m web_app.services.update_worker \
   "$command_json" \
   "data/web_update_status.json" \

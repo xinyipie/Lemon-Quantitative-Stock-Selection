@@ -418,6 +418,8 @@ def run_update(args: argparse.Namespace) -> None:
         else:
             print(f"短线复盘已到 {effective_end}，跳过回测回填。")
 
+    if not args.skip_short_review:
+        # 日常任务更新既有结果，历史重新选股只由 full 模式执行。
         run_command(
             [
                 py,

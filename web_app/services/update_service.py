@@ -50,11 +50,11 @@ def read_update_status(
 ) -> dict:
     path = Path(status_path)
     if not path.exists():
-        return {"state": "idle", "running": False, "message": "尚未运行一键更新。"}
+        return _with_task_details(path, {"state": "idle", "running": False, "message": "尚未运行一键更新。"}, stale_after_seconds, now)
     try:
         status = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"state": "unknown", "running": False, "message": "更新状态文件读取失败。"}
+        return _with_task_details(path, {"state": "unknown", "running": False, "message": "更新状态文件读取失败。"}, stale_after_seconds, now)
     if status.get("state") == "running" and _is_stale_status(status, stale_after_seconds, now=now):
         status.update(
             {
@@ -66,7 +66,67 @@ def read_update_status(
         )
         _write_status(path, status)
     status["running"] = status.get("state") == "running"
-    return status
+    return _with_task_details(path, status, stale_after_seconds, now)
+
+
+def _read_status_json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def read_update_history(status_path: str | Path = DEFAULT_STATUS_PATH, mode: str | None = None, limit: int = 20) -> list[dict]:
+    """按新到旧读取已结束任务，忽略崩溃留下的不完整行。"""
+    path = Path(status_path)
+    rows = deque(maxlen=max(1, limit))
+    try:
+        with path.with_suffix(".history.jsonl").open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and (mode is None or row.get("mode") == mode):
+                    rows.append(row)
+    except OSError:
+        pass
+    return list(reversed(rows)) if limit > 0 else []
+
+
+def _archive_stale_mode(path: Path, mode_path: Path, stale_after_seconds: int | None, now: datetime | None) -> dict:
+    # 锁内重读，防止读取页面时把刚结束或刚启动的任务误归档。
+    with _STATUS_FILE_LOCK, FileLock(str(path.parent / ".stock-update.status.lock")):
+        record = _read_status_json(mode_path)
+        if record.get("state") == "running" and _is_stale_status(record, stale_after_seconds, now=now):
+            record.update(state="failed", running=False, finished_at=_now(),
+                          message="同步任务超时未更新，任务已标记失败，请检查日志后重试。")
+            record["run_id"] = record.get("run_id") or uuid4().hex
+            # 仅修改该模式，保留全局最新任务；终态写回使后续读取不再重复归档。
+            _atomic_write_status(mode_path, record)
+            with path.with_suffix(".history.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return record
+
+
+def _with_task_details(path: Path, status: dict, stale_after_seconds: int | None = None, now: datetime | None = None) -> dict:
+    modes = {}
+    for mode in MODE_LABELS:
+        mode_path = path.with_name(f"{path.stem}.{mode}.json")
+        record = _read_status_json(mode_path)
+        if record.get("state") == "running" and _is_stale_status(record, stale_after_seconds, now=now):
+            record = _archive_stale_mode(path, mode_path, stale_after_seconds, now)
+        if not record and status.get("mode") == mode:
+            record = dict(status)
+        if not record:
+            record = {"mode": mode, "state": "unknown" if path.exists() else "idle", "running": False}
+        record["status_label"] = {"finished": "成功", "failed": "失败", "running": "运行中", "idle": "未运行"}.get(record.get("state"), "未记录")
+        record["mode_label"] = MODE_LABELS[mode]
+        modes[mode] = record
+    from web_app.services.update_schedule import read_update_schedule
+    return {**status, "mode_statuses": modes, "history": read_update_history(path),
+            "schedule": read_update_schedule(path.parent / 'update_schedule.json')}
 
 
 def decorate_update_status_with_freshness(status: dict | None, freshness: dict | None) -> dict:
@@ -349,12 +409,28 @@ def _write_status(status_path: str | Path, status: dict) -> None:
 
 def _write_status_unlocked(status_path: str | Path, status: dict) -> None:
     path = Path(status_path)
+    # 首次升级保留旧版最后一次任务，避免下一模式覆盖唯一记录。
+    previous = _read_status_json(path)
+    previous_mode = previous.get("mode")
+    if previous_mode in VALID_MODES:
+        previous_path = path.with_name(f"{path.stem}.{previous_mode}.json")
+        if not previous_path.exists():
+            _atomic_write_status(previous_path, previous)
+    status = {key: value for key, value in status.items() if key not in {"mode_statuses", "history", "schedule"}}
+    same_run = previous.get("mode") == status.get("mode") and previous.get("state") == "running"
+    status.setdefault("run_id", previous.get("run_id") if same_run else None)
+    status["run_id"] = status.get("run_id") or uuid4().hex
+    if same_run:
+        status.setdefault("started_at", previous.get("started_at"))
     _atomic_write_status(path, status)
     mode = status.get("mode")
     if mode in VALID_MODES:
         _atomic_write_status(path.with_name(f"{path.stem}.{mode}.json"), status)
         if status.get("state") == "finished" and status.get("returncode") == 0:
             _atomic_write_status(path.with_name(f"{path.stem}.{mode}.success.json"), status)
+        if status.get("state") in {"finished", "failed"} and not (previous.get("run_id") == status["run_id"] and previous.get("state") == status["state"]):
+            with path.with_suffix(".history.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(status, ensure_ascii=False) + "\n")
 
 
 def _atomic_write_status(path: Path, status: dict) -> None:
@@ -400,16 +476,27 @@ def _now() -> str:
 
 def needs_full_update_retry(status_path: str | Path = DEFAULT_STATUS_PATH, now: datetime | None = None) -> bool:
     """仅全量任务当天的成功记录可以取消全量重试。"""
+    return _needs_mode_update_retry(status_path, 'full', now)
+
+
+def needs_daily_update_retry(status_path: str | Path = DEFAULT_STATUS_PATH, now: datetime | None = None) -> bool:
+    """日常更新与历史重算分别判断，雷达成功不抵消日常失败。"""
+    return _needs_mode_update_retry(status_path, 'daily', now)
+
+
+def _needs_mode_update_retry(status_path, mode, now):
     path = Path(status_path)
-    success_path = path.with_name(f"{path.stem}.full.success.json")
+    success_path = path.with_name(f"{path.stem}.{mode}.success.json")
     try:
         status = json.loads(success_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return True
+        status = _read_status_json(path.with_name(f"{path.stem}.{mode}.json"))
+        if not status:
+            status = _read_status_json(path)
     current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
     today = current.strftime("%Y-%m-%d")
     return not (
-        status.get("mode") == "full"
+        status.get("mode") == mode
         and status.get("state") == "finished"
         and status.get("returncode") == 0
         and str(status.get("started_at") or "")[:10] == today

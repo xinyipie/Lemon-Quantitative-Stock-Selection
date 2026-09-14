@@ -4,9 +4,9 @@ set -uo pipefail
 cd /opt/stock
 
 retry_needed="$('/opt/stock/.venv/bin/python' - <<'PY'
-from web_app.services.update_service import needs_full_update_retry
+from web_app.services.update_service import needs_daily_update_retry
 
-print("yes" if needs_full_update_retry() else "no")
+print("yes" if needs_daily_update_retry() else "no")
 PY
 )"
 
