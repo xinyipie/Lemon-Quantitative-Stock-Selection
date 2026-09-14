@@ -10,15 +10,16 @@
 </header>
 
 <nav class="page-section-nav" aria-label="长线池页面分区">
-  <a href="#current-pool">实时观察跟踪</a>
-  <a href="#lifecycle">生命周期</a>
-  <a href="#history-audit">历史策略验证</a>
+  <a href="#current-pool">当前候选</a>
+  <a href="#history-audit">历史表现</a>
 </nav>
 
-{% include "partials/update_status_panel.html" %}
+<details class="longterm-disclosure panel">
+  <summary><strong>扫描与更新详情</strong><span>任务状态、筛选漏斗和过滤原因</span></summary>
+  {% include "partials/update_status_panel.html" %}
 
 {% if scan_diagnostic %}
-<section class="panel attention-panel">
+<section class="attention-panel">
   <div class="panel-head"><div>
     <h2>质量扫描漏斗</h2>
     <p>扫描时间 {{ scan_diagnostic.scanned_at }} · 行情日期 {{ scan_diagnostic.trade_date|fmt_date }}。
@@ -49,6 +50,7 @@
   {% endif %}
 </section>
 {% endif %}
+</details>
 
 <section class="status-strip">
   <div class="status-cell"><span>Active合计</span><strong>{{ pool|length }}</strong></div>
@@ -104,8 +106,8 @@
 </section>
 {% endif %}
 
-<section class="panel"><h2>实时观察跟踪 · 进行中（{{ pool|length }} 条）</h2>
-<p>范围：当前生命周期池内的 active 记录，不受历史样本日期与状态筛选影响。已退出记录请查看生命周期事件；这里不提供完整退出档案。</p></section>
+<section class="panel compact-attention"><h2>实时观察跟踪 · 进行中（{{ pool|length }} 条）</h2>
+<p>这里是目前仍在观察的股票。Elite 是趋势已确认的强提醒，Watch 是质量达标但仍待趋势确认的观察股。</p></section>
 {% if pool %}
 <section class="pool-board full">
   <div class="pool-column elite">
@@ -150,33 +152,9 @@
 </section>
 {% endif %}
 
-<section class="panel">
-  <div class="panel-head"><h2>实时观察跟踪 · 全部进行中记录</h2></div>
-  {% if pool %}
-  <div class="table-shell" role="region" aria-label="实时观察跟踪 · 全部进行中记录" tabindex="0"><table class="dense-table">
-    <thead><tr><th>股票</th><th>行业</th><th>策略版本</th><th>入池日</th><th>最近出现</th><th>最新分</th><th>最高分</th><th>天数</th><th>最近原因</th></tr></thead>
-    <tbody>
-    {% for item in pool %}
-    <tr>
-      <td><a href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}"><strong>{{ item.name or item.ts_code }}</strong><div class="muted">{{ item.ts_code }}</div></a></td>
-      <td>{{ item.industry or '-' }}</td>
-      <td>{{ item.profile }}</td>
-      <td>{{ item.first_seen_date|fmt_date }}</td>
-      <td>{{ item.last_seen_date|fmt_date }}</td>
-      <td>{{ "%.1f"|format(item.latest_score or 0) }}</td>
-      <td>{{ "%.1f"|format(item.highest_score or 0) }}</td>
-      <td>{{ item.days_in_pool }}</td>
-      <td class="reason">{{ item.last_reason or '-' }}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
-  {% else %}
-  <div class="empty-state">当前没有 active 长线观察标的。最近运行日志在上方，可用于确认不是页面漏数。</div>
-  {% endif %}
-</section>
-
-<section class="panel">
+<details id="lifecycle" class="longterm-disclosure panel">
+  <summary><strong>运行与生命周期记录</strong><span>最近运行、入池、升级、降级和移出记录</span></summary>
+<section class="longterm-detail-section">
   <div class="panel-head">
     <div>
       <h2>运行日志</h2>
@@ -211,7 +189,7 @@
   </nav>
 </section>
 
-<section id="lifecycle" class="panel">
+<section class="longterm-detail-section">
   <div class="panel-head">
     <div>
       <h2>生命周期事件</h2>
@@ -237,8 +215,10 @@
     </tbody>
   </table></div>
 </section>
+</details>
 
-<section id="history-audit" class="panel">
+<details class="longterm-disclosure panel">
+  <summary><strong>半年度历史统计</strong><span>按阶段查看样本量、收益、胜率和跑赢比例</span></summary>
   <div class="panel-head">
     <div>
       <h2>历史策略验证 · 半年度总览</h2>
@@ -265,13 +245,13 @@
     {% endfor %}
     </tbody>
   </table></div>
-</section>
+</details>
 
-<section class="panel">
+<section id="history-audit" class="panel">
   <div class="panel-head">
     <div>
-      <h2>历史策略验证 · 长线收益结果</h2>
-      <p>范围：导入的历史策略验证样本，不含上方实时 active 观察记录。“待满80日”表示历史样本尚无80日收益，不代表仍在实时池。默认读取最新100条；指定入池日期时最多读取1000条，再按结果筛选与分页，统计仅覆盖已读取样本。</p>
+      <h2>历史表现</h2>
+      <p>用于判断历史候选在80个交易日后的整体表现；当前进行中的候选只在上方显示。</p>
     </div>
   </div>
   <div class="longterm-result-summary-grid">
@@ -288,21 +268,9 @@
   </div>
   {% endif %}
 
-  {% if current_audit_samples %}
-  <div class="longterm-current-head">
-    <div><strong>历史样本待满80日</strong><span>这些样本尚未走满80个交易日，收益会继续变化。</span></div>
-    <a href="{{ request.url.include_query_params(view='current', page=1) }}">查看历史待满80日</a>
-  </div>
-  <div class="longterm-current-grid">
-    {% for item in current_audit_samples %}
-    <a class="longterm-current-card {{ item.watch_risk_tone }}" href="{{ app_url_for(request, 'stock_detail', code=item.ts_code).path }}">
-      <div><strong>{{ item.display_name }}</strong><span>{{ item.display_code }} · {{ item.industry or '-' }}</span></div>
-      <b class="{{ item.stage_return_tone }}">{{ item.stage_return_text }}</b>
-      <small>{{ item.watch_risk_label }} · 评分 {{ "%.1f"|format(item.score or 0) }}</small>
-    </a>
-    {% endfor %}
-  </div>
-  {% endif %}
+  <details class="longterm-disclosure nested" {% if selected_view != 'completed' or date_error or (sample_filter_summary and sample_filter_summary.is_filtered) %}open{% endif %}>
+  <summary><strong>展开历史样本明细</strong><span>日期筛选、结果分类和逐只收益路径</span></summary>
+  <p class="muted">默认读取最新100条历史样本；设置入池日期后最多读取1000条。</p>
   <form class="filter-bar compact-filter" action="{{ app_path(request, '/longterm') }}" method="get" data-date-range-form>
     <label class="sr-only" for="longterm-start">开始入池日</label>
     <label class="sr-only" for="longterm-end">结束入池日</label>
@@ -364,6 +332,7 @@
       {% if page_info.page < page_info.total_pages %}<a class="ghost-button" href="{{ request.url.include_query_params(page=page_info.page + 1) }}">下一页</a>{% endif %}
     </div>
   </nav>
+  </details>
 </section>
 
 

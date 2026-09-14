@@ -421,6 +421,17 @@ class WebAppTest(unittest.TestCase):
         self.assertIn("生命周期事件", response.text)
         self.assertIn("历史长线池验证", response.text)
 
+    def test_longterm_page_keeps_diagnostics_collapsed_and_removes_duplicate_active_table(self):
+        response = self.client.get("/longterm")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('class="longterm-disclosure panel"', response.text)
+        self.assertIn("扫描与更新详情", response.text)
+        self.assertIn("运行与生命周期记录", response.text)
+        self.assertIn("展开历史样本明细", response.text)
+        self.assertNotIn("实时观察跟踪 · 全部进行中记录", response.text)
+        self.assertNotIn("历史样本待满80日</strong>", response.text)
+
     def test_longterm_page_accepts_sample_date_filters(self):
         response = self.client.get("/longterm?start=20260201&end=20260228")
         self.assertEqual(response.status_code, 200)
@@ -439,7 +450,6 @@ class WebAppTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('href="#current-pool"', response.text)
-        self.assertIn('href="#lifecycle"', response.text)
         self.assertIn('href="#history-audit"', response.text)
         self.assertIn('class="pagination"', response.text)
         self.assertIn("第 2 / 4 页", response.text)
