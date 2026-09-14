@@ -47,6 +47,7 @@ import config
 
 # ==================== 常量 ====================
 CACHE_DIR = os.path.join("data", "cache")
+DAILY_BASIC_FIELDS = 'ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,ps_ttm,dv_ratio,total_mv,circ_mv'
 
 # 申万一级行业指数（28个）+ 沪深300 + 上证指数
 INDEX_CODES = [
@@ -126,6 +127,13 @@ def _cache_has_rows(path: str, min_rows: int = 1) -> bool:
 
 def _index_cache_min_rows() -> int:
     return min(20, len(INDEX_CODES))
+
+
+def _daily_basic_cache_ready(path):
+    """旧版仅换手率缓存不能支撑质量观察，缺列必须重新批量拉取。"""
+    frame = _read_existing_cache(path)
+    required = set(DAILY_BASIC_FIELDS.split(',')) - {'trade_date'}
+    return not frame.empty and required.issubset(frame.columns)
 
 
 def _has_benchmark_buffer(path, date):
@@ -251,6 +259,16 @@ def _download_financial_batches(pro, ts_codes, existing, incremental_start, endp
                     logger.info(f'  财务 {endpoint} 已完成 {requests_done} 个分段批次')
                 time.sleep(0.5)
     return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+
+
+def _financial_api_codes(stock_basic):
+    """保留退市历史主键，但不把供应商历史别名当成可查询证券代码。"""
+    codes = stock_basic['ts_code'].astype('string')
+    status = stock_basic.get('list_status', pd.Series('', index=stock_basic.index))
+    legacy = codes.str.fullmatch(r'T\d{6}\.(?:SH|SZ|BJ)', na=False) & status.eq('D').fillna(False)
+    if legacy.any():
+        logger.warning(f'  财务接口跳过 {int(legacy.sum())} 个退市历史别名，保留原主数据与已有财务历史')
+    return codes.loc[~legacy].dropna().tolist()
 
 
 def _retry(fn, retries: int = 3, wait: float = 5.0):
@@ -548,12 +566,12 @@ def download_daily_one_date(pro, date: str, force: bool = False) -> bool:
 def download_daily_basic_one_date(pro, date: str, force: bool = False) -> bool:
     """下载单个交易日的换手率/量比"""
     path = _daily_path("daily_basic", date)
-    if not force and _cache_has_rows(path):
+    if not force and _daily_basic_cache_ready(path):
         return True
 
     df = _retry(lambda: pro.daily_basic(
         trade_date=date,
-        fields='ts_code,turnover_rate,volume_ratio'
+        fields=DAILY_BASIC_FIELDS
     ))
     if df is None:
         return False
@@ -758,7 +776,7 @@ def download_fina_indicator(pro, force: bool = False):
         return
 
     stock_basic = pd.read_parquet(stock_basic_path)
-    ts_codes = stock_basic['ts_code'].tolist()
+    ts_codes = _financial_api_codes(stock_basic)
 
     incremental_start = '' if force else _financial_increment_start(existing, 'ann_date')
     mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
@@ -786,7 +804,7 @@ def download_income(pro, force: bool = False):
         return
 
     stock_basic = pd.read_parquet(stock_basic_path)
-    ts_codes = stock_basic['ts_code'].tolist()
+    ts_codes = _financial_api_codes(stock_basic)
 
     incremental_start = '' if force else _financial_increment_start(existing, 'ann_date')
     mode = "全量刷新" if force or not incremental_start else f"增量公告≥{incremental_start}"
@@ -833,6 +851,9 @@ def download_daily_range(pro, trade_dates: List[str], force: bool = False,
 
             # daily_basic
             need_basic = force or not _cache_has_rows(_daily_path("daily_basic", date))
+            # 首次升级只补请求期与最新观察日，旧预热数据不冒用当前估值。
+            if not refresh_start or date >= refresh_start or date == max(trade_dates):
+                need_basic = need_basic or not _daily_basic_cache_ready(_daily_path('daily_basic', date))
             if need_basic:
                 if download_daily_basic_one_date(pro, date, force):
                     daily_basic_ok += 1
