@@ -227,3 +227,13 @@ def test_quality_financial_fetch_can_skip_income_and_keep_same_report_growth(mon
     monkeypatch.setattr(stock_main, 'pro', FinancialPro())
     data = stock_main.get_financial_data_batch(['600001'], '20260911', include_income=False)
     assert data['600001']['netprofit_yoy'] == 25
+
+
+def test_announced_filter_handles_arrow_missing_dates():
+    import pytest
+    pytest.importorskip('pyarrow')
+    with pd.option_context('mode.string_storage', 'pyarrow'):
+        frame = pd.DataFrame({'ann_date': pd.Series(
+            ['20260910', None, '20260915', 'invalid'], dtype='string[pyarrow]')})
+        result = stock_main._filter_announced_rows(frame, '20260911', '财务')
+    assert result.index.tolist() == [0]

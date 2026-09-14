@@ -2341,7 +2341,8 @@ def _filter_announced_rows(
 
     announced = df['ann_date'].astype('string').str.replace(r'\.0$', '', regex=True)
     valid_format = announced.str.fullmatch(r'\d{8}', na=False)
-    known_by_cutoff = valid_format & (announced <= str(trade_date))
+    # 显式排除空公告日期，避免混合布尔后端将缺失值转换为 bool。
+    known_by_cutoff = valid_format.astype(bool) & (announced <= str(trade_date)).fillna(False).astype(bool)
     return df.loc[known_by_cutoff].copy()
 
 
