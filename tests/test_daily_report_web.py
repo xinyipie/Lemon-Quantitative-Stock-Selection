@@ -82,12 +82,12 @@ class DailyReportWebTest(unittest.TestCase):
     def test_unknown_report_returns_404(self):
         self.assertEqual(self.client.get("/reports/19990101").status_code, 404)
 
-    def test_old_report_is_marked_as_historical_and_missing_evidence(self):
+    def test_old_report_is_marked_as_historical_without_exposing_evidence_state(self):
         response = self.client.get("/reports/20260722")
         self.assertIn("历史研究记录", response.text)
-        self.assertIn("未保存可展示的来源快照", response.text)
+        self.assertNotIn("未保存可展示的来源快照", response.text)
 
-    def test_evidence_can_be_expanded_and_unsafe_links_are_not_rendered(self):
+    def test_evidence_remains_internal_and_is_not_rendered(self):
         doc = _document("市场缩量整理等待方向进一步明确")
         doc['evidence_snapshot'] = {
             'hidden:id': {'label': '行情统计', 'text': '涨停45家',
@@ -99,10 +99,9 @@ class DailyReportWebTest(unittest.TestCase):
                        title=doc['title'], document=doc, body_text='依据测试', keywords=[],
                        input_hash='evidence', data_cutoff='', news_cutoff='')
         response = self.client.get('/reports/20260724')
-        self.assertIn('查看本段依据', response.text)
-        self.assertIn('href="https://example.com/news"', response.text)
-        self.assertIn('涨停45家', response.text)
-        self.assertIn('2026-07-22', response.text)
+        self.assertNotIn('查看本段依据', response.text)
+        self.assertNotIn('href="https://example.com/news"', response.text)
+        self.assertNotIn('涨停45家', response.text)
         self.assertNotIn('javascript:alert(2)', response.text)
 
 

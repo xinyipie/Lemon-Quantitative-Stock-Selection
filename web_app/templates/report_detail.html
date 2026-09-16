@@ -24,9 +24,6 @@
     {% if report_warning %}<p>{{ report_warning }}</p>{% endif %}
   </aside>
   {% endif %}
-  {% if not has_evidence_snapshot %}
-  <p class="report-meta">此历史版本未保存可展示的来源快照，不能逐段核验依据。</p>
-  {% endif %}
   <nav class="page-section-nav" aria-label="日报章节">
     {% for section in report.document.sections %}<a href="#{{ section.key }}">{{ section.heading }}</a>{% endfor %}
   </nav>
@@ -35,19 +32,6 @@
     <h2>{{ section.heading }}</h2>
     {% for paragraph in section.paragraphs %}
     <p>{{ paragraph.text }}</p>
-    {% if paragraph.display_evidence %}
-    <details class="report-evidence">
-      <summary>查看本段依据（{{ paragraph.display_evidence|length }}）</summary>
-      {% for evidence in paragraph.display_evidence %}
-      <div class="report-evidence-item">
-        <strong>{{ evidence.label }}</strong>
-        {% if evidence.published_at %}<small>来源时间：{{ evidence.published_at }}</small>{% endif %}
-        {% if evidence.text %}<p>{{ evidence.text }}</p>{% endif %}
-        {% if evidence.source_url %}<a href="{{ evidence.source_url }}" target="_blank" rel="noopener noreferrer">查看原始来源</a>{% endif %}
-      </div>
-      {% endfor %}
-    </details>
-    {% endif %}
     {% endfor %}
   </section>
   {% endfor %}
